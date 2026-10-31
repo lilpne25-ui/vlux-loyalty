@@ -6,7 +6,13 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "typecheck": "tsc -p .",
-    "test:unit": "node --import tsx --test tests/unit/*.test.ts"
+    "test:unit": "node --import tsx --test tests/unit/*.test.ts",
+    "db:setup": "node --env-file=.env --import tsx scripts/db-setup-local.ts",
+    "db:migrate": "node --env-file=.env --import tsx scripts/migrate.ts up",
+    "db:rollback": "node --env-file=.env --import tsx scripts/migrate.ts down",
+    "db:status": "node --env-file=.env --import tsx scripts/migrate.ts status",
+    "db:setup:test": "node --env-file=.env.test --import tsx scripts/db-setup-local.ts && node --env-file=.env.test --import tsx scripts/migrate.ts up",
+    "test:integration": "node --env-file=.env.test --import tsx --test --test-concurrency=1 tests/integration/*.test.ts"
   },
   "license": "UNLICENSED",
   "dependencies": {

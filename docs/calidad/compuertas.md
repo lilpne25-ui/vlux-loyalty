@@ -23,3 +23,14 @@ Cada átomo se cierra con la misma lista: compila, funciona lo intervenido, prue
 - **Errores:** ninguno.
 - **Riesgos pendientes:** la ventana de visita es una aproximación (no hay POS). Documentado para el negocio.
 - **Estado:** PASS
+
+---
+## Átomo 03 · Base de datos real
+- **Objetivo:** PostgreSQL como fuente de verdad en lugar de `localStorage`.
+- **Archivos modificados:** `db/migrations/0001_init.up.sql` y `.down.sql`, `db/README.md`, `scripts/migrate.ts`, `scripts/db-setup-local.ts`, `server/config.ts`, `server/db.ts`, `.env.example`, `tests/integration/schema.test.ts`.
+- **Implementación:** 14 tablas (ver `db/README.md`), UUID, llaves foráneas compuestas por negocio, `CHECK` de dominio, `created_at/updated_at` con trigger, RLS por negocio, rol de app con permisos mínimos, libro mayor y auditoría de solo inserción, índice único parcial de 1 recompensa disponible por tarjeta. Migrador con checksum y reversa.
+- **Pruebas ejecutadas:** `db:migrate → db:rollback → db:migrate` en local (OK). `npm run test:integration`: 6 PASS / 0 FAIL (persistencia y lectura desde otra sesión de BD, RLS sin negocio, RLS cruzado lectura/escritura, FK compuesta, saldo negativo, doble premio disponible, auditoría inmutable). `tsc` sin errores.
+- **Resultado:** un cliente y su tarjeta persisten en PostgreSQL y se recuperan desde una sesión independiente.
+- **Errores:** ninguno.
+- **Riesgos pendientes:** en Supabase el rol `vlux_app` debe crearse con su contraseña desde el panel (o con `db:setup` adaptado); RLS depende de que la API use siempre `withTenant`.
+- **Estado:** PASS
