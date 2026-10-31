@@ -1,3 +1,11 @@
 node_modules/
 dist/
 shots/
+.env
+.env.*
+!.env.example
+*.log
+# Material de terceros que nunca debe entrar al repositorio
+.claude/
+msa-lud*/
+CLAUDE.local.md

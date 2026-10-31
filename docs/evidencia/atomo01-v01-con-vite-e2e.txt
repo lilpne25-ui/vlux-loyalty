@@ -1,0 +1,23 @@
+PASS P1 cliente aparece en panel CDT-N7U9-NWER
+PASS P2a identificar por foto de QR 
+PASS P2b identificar por ID manual 
+PASS P2c visita registrada 
+PASS Duplicado bloqueado 
+PASS P3 cliente ve nuevo sello 1 de 8 sellos
+PASS P4 panel refleja operación 1 en vivo durante esta demo
+PASS Invitación a reseña tras 2a visita 
+PASS Métrica invitaciones en vivo = 1 
+PASS P5 recompensa habilitada (empleado) 
+PASS P5 celebración cliente 
+PASS P6 canje confirmado 
+PASS P6 botón de canje ya no aparece 
+PASS P6 código no reutilizable R-JSQZ7Y
+PASS P7 nuevo ciclo 
+PASS P8 cliente refleja regla nueva 
+PASS P9 sin scroll horizontal (cliente) 0
+PASS P9 sin scroll horizontal (empleado) 0
+PASS P9 sin scroll horizontal (dueno) 0
+PASS P9 sin scroll horizontal (negocio) 0
+PASS P10 persistencia tras recargar 
+PASS Wallet: vista previa sin afirmar instalación 
+ERRORS: []
