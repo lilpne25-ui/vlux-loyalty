@@ -2,6 +2,8 @@
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { secureHeaders } from 'hono/secure-headers';
+import { bodyLimit } from 'hono/body-limit';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { ZodError } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from './config';
@@ -26,8 +28,17 @@ function cookieOpts(maxAgeSeconds: number) {
 }
 
 function clientIp(c: Context) {
-  // Detrás de un proxy de confianza (Render, Fly, Vercel) la IP real llega en x-forwarded-for.
-  return (c.req.header('x-forwarded-for')?.split(',')[0] || c.req.header('x-real-ip') || 'local').trim();
+  // Solo se confía en x-forwarded-for si el despliegue está detrás de un proxy propio (TRUST_PROXY=1);
+  // si no, cualquiera podría falsificarlo para saltarse los límites de intentos.
+  if (config.trustProxy) {
+    const fwd = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
+    if (fwd) return fwd;
+  }
+  try {
+    return getConnInfo(c).remote.address || 'desconocida';
+  } catch {
+    return 'desconocida';
+  }
 }
 
 /** Protección CSRF: mutaciones solo con JSON y, si el navegador manda Origin, que sea el nuestro. */
@@ -103,11 +114,14 @@ export function buildApp() {
       return c.json({ error: { code: 'idempotency_conflict', message: 'Esa operación ya se registró.' } }, 409);
     }
     if (pgCode === '22P02') return c.json({ error: { code: 'validation', message: 'Identificador inválido.' } }, 422);
-    console.error('[error]', c.req.method, c.req.path, err);
+    // No registrar la ruta completa (puede traer el token /t/...) ni err.detail (puede traer datos personales).
+    const e = err as { code?: string; message?: string };
+    console.error('[error]', c.req.method, c.req.routePath, e.code ?? '', e.message ?? String(err));
     return c.json({ error: { code: 'internal', message: 'Ocurrió un error inesperado. Intenta de nuevo.' } }, 500);
   });
 
   const api = new Hono<Env>();
+  api.use('*', bodyLimit({ maxSize: 16 * 1024, onError: () => { throw new AppError(400, 'body_too_large', 'La solicitud es demasiado grande.'); } }));
   api.use('*', csrfGuard);
   api.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
 
@@ -195,7 +209,7 @@ export function buildApp() {
   owner.get('/customers', async (c) => c.json({ customers: await listCustomers(c.get('staff')) }));
   owner.get('/customers/:customerId/export', async (c) => c.json(await exportCustomer(c.get('staff'), uuidSchema.parse(c.req.param('customerId')))));
   owner.post('/customers/:customerId/anonymize', async (c) => c.json(await anonymizeCustomer(c.get('staff'), uuidSchema.parse(c.req.param('customerId')))));
-  owner.get('/activity', async (c) => c.json({ items: await activity(c.get('staff'), Number(c.req.query('limit') || 30)) }));
+  owner.get('/activity', async (c) => c.json({ items: await activity(c.get('staff'), Math.max(1, Math.min(100, Number(c.req.query('limit')) || 30))) }));
   owner.put('/program', async (c) => c.json(await updateProgram(c.get('staff'), await jsonBody(c))));
   owner.get('/staff', async (c) => c.json({ staff: await listStaff(c.get('staff')) }));
   owner.post('/staff', async (c) => c.json(await createEmployee(c.get('staff'), await jsonBody(c)), 201));

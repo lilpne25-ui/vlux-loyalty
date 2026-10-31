@@ -17,7 +17,8 @@
     "db:seed:demo": "node --env-file=.env --import tsx scripts/seed-demo.ts",
     "build": "vite build",
     "start": "node --env-file-if-exists=.env --import tsx server/index.ts",
-    "dev:api": "node --env-file=.env --watch --import tsx server/index.ts"
+    "dev:api": "node --env-file=.env --watch --import tsx server/index.ts",
+    "test:e2e": "node --env-file=.env tests/e2e/v02-tres-dispositivos.cjs"
   },
   "license": "UNLICENSED",
   "dependencies": {

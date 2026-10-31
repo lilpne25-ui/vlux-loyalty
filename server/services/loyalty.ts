@@ -135,6 +135,7 @@ export async function redeemReward(session: StaffSession, rewardId: string) {
       throw new AppError(409, 'already_redeemed', 'Esta recompensa ya fue canjeada. No puede usarse otra vez.', { redeemedAt: reward.redeemed_at.toISOString() });
     }
     if (reward.status !== 'available') throw new AppError(409, 'reward_void', 'Esta recompensa ya no es válida.');
+    if (card.stamp_balance < reward.stamps_cost) throw new AppError(409, 'insufficient_balance', 'La tarjeta no tiene sellos suficientes para este canje.');
     const balance = balanceAfterRedemption(card.stamp_balance, reward.stamps_cost);
     await tx.query("UPDATE rewards SET status = 'redeemed', redeemed_at = now(), redeemed_by = $2 WHERE id = $1", [rewardId, session.userId]);
     await tx.query('INSERT INTO stamp_events (business_id, card_id, delta, reason, reward_id, balance_after, staff_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7)',

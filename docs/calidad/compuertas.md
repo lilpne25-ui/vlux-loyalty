@@ -86,3 +86,23 @@ Cada átomo se cierra con la misma lista: compila, funciona lo intervenido, prue
 - **Resultado:** el dashboard refleja datos reales de su propio establecimiento.
 - **Riesgos pendientes:** la lista de clientes trae hasta 500 filas sin paginar.
 - **Estado:** PASS
+
+---
+## Átomo 09 · Seguridad y privacidad
+- **Objetivo:** cerrar los riesgos de V0.1 y revisar el backend antes del piloto.
+- **Archivos modificados:** `server/app.ts`, `server/config.ts`, `server/services/loyalty.ts`, `.env.example`, `tests/integration/auth.test.ts`, `docs/INFORME_SEGURIDAD.md`.
+- **Implementación:** límite de cuerpo 16 KB; IP de proxy solo con `TRUST_PROXY`; `limit` acotado; log de errores sin token ni datos personales; saldo insuficiente → 409. Revisión independiente de solo lectura: 0 críticos, hallazgos medios 1, 3 y 5 corregidos; el resto documentado.
+- **Pruebas ejecutadas:** 4 pruebas nuevas (cuerpo grande 400, registro 429, privacidad obligatoria 422, sin hashes en respuestas). Integración 36/36, unitarias 16/16. `npm audit` 0.
+- **Resultado:** PASS para piloto cerrado con datos sintéticos.
+- **Riesgos pendientes:** ver `docs/INFORME_SEGURIDAD.md` (aviso legal, rol de BD en producción, HTTPS, respaldos, revocación del enlace).
+- **Estado:** PASS
+
+---
+## Átomo 10 · Pruebas integrales y demo
+- **Objetivo:** demostrar el hito: tarjeta web real, sello desde otro dispositivo, dueño ve la operación.
+- **Archivos modificados:** `tests/e2e/v02-tres-dispositivos.cjs`, `docs/evidencia/*`.
+- **Implementación:** E2E con 3 contextos de navegador independientes (cliente, caja, dueño) sobre el servidor compilado y PostgreSQL; cámara simulada con el QR real; demos Café Demo Toluca (8 sellos) y Barbería Demo Metepec.
+- **Pruebas ejecutadas:** unitarias 16/16, integración 36/36 (`docs/evidencia/atomos-04-10-pruebas.txt`), E2E 28/28 (`docs/evidencia/atomo10-e2e-tres-dispositivos.txt`), regresión V0.1 22/22 (átomo 01).
+- **Resultado:** PASS en entorno local con Chromium.
+- **Riesgos pendientes:** sin prueba en iPhone/Android físicos; sin despliegue.
+- **Estado:** PASS (local). Prueba en dispositivos reales: BLOQUEADA hasta desplegar con HTTPS.

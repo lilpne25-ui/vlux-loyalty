@@ -11,6 +11,7 @@ export const config = {
   port: Number(process.env.PORT || 8787),
   isProduction: process.env.NODE_ENV === 'production',
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || 'http://localhost:8787').replace(/\/$/, ''),
+  trustProxy: process.env.TRUST_PROXY === '1',
   platformAdminToken: process.env.PLATFORM_ADMIN_TOKEN || '',
   privacyNoticeVersion: process.env.PRIVACY_NOTICE_VERSION || 'borrador-2026-10',
   staffSessionHours: 12,
