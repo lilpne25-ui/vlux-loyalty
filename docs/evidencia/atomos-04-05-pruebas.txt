@@ -1,0 +1,308 @@
+TAP version 13
+# Subtest: compra con 2 cafés en modo por artículo da 2 sellos y 1 sola visita
+ok 1 - compra con 2 cafés en modo por artículo da 2 sellos y 1 sola visita
+  ---
+  duration_ms: 1.032092
+  type: 'test'
+  ...
+# Subtest: dos compras separadas dentro de la ventana cuentan como una visita
+ok 2 - dos compras separadas dentro de la ventana cuentan como una visita
+  ---
+  duration_ms: 0.194529
+  type: 'test'
+  ...
+# Subtest: una compra fuera de la ventana es una visita nueva (recurrencia)
+ok 3 - una compra fuera de la ventana es una visita nueva (recurrencia)
+  ---
+  duration_ms: 0.0803
+  type: 'test'
+  ...
+# Subtest: modo por compra: 3 artículos siguen siendo 1 sello
+ok 4 - modo por compra: 3 artículos siguen siendo 1 sello
+  ---
+  duration_ms: 0.061478
+  type: 'test'
+  ...
+# Subtest: modo por artículo respeta el tope por compra
+ok 5 - modo por artículo respeta el tope por compra
+  ---
+  duration_ms: 0.062729
+  type: 'test'
+  ...
+# Subtest: cantidad de artículos inválida se rechaza
+ok 6 - cantidad de artículos inválida se rechaza
+  ---
+  duration_ms: 0.286676
+  type: 'test'
+  ...
+# Subtest: ventana de visita: límites
+ok 7 - ventana de visita: límites
+  ---
+  duration_ms: 0.074658
+  type: 'test'
+  ...
+# Subtest: desbloqueo solo al llegar a la meta y sin premio pendiente
+ok 8 - desbloqueo solo al llegar a la meta y sin premio pendiente
+  ---
+  duration_ms: 0.059676
+  type: 'test'
+  ...
+# Subtest: canje descuenta la meta y conserva el excedente
+ok 9 - canje descuenta la meta y conserva el excedente
+  ---
+  duration_ms: 0.210106
+  type: 'test'
+  ...
+# Subtest: ciclo completo: 8 visitas, desbloqueo, canje y excedente
+ok 10 - ciclo completo: 8 visitas, desbloqueo, canje y excedente
+  ---
+  duration_ms: 0.317165
+  type: 'test'
+  ...
+# Subtest: el premio se desbloquea con menos visitas si una compra da varios sellos
+ok 11 - el premio se desbloquea con menos visitas si una compra da varios sellos
+  ---
+  duration_ms: 0.115749
+  type: 'test'
+  ...
+# Subtest: canjear sin premio disponible no hace nada
+ok 12 - canjear sin premio disponible no hace nada
+  ---
+  duration_ms: 0.05817
+  type: 'test'
+  ...
+# Subtest: validación de reglas
+ok 13 - validación de reglas
+  ---
+  duration_ms: 0.161403
+  type: 'test'
+  ...
+# Subtest: scrypt: verifica la correcta y rechaza la incorrecta; sal distinta cada vez
+ok 14 - scrypt: verifica la correcta y rechaza la incorrecta; sal distinta cada vez
+  ---
+  duration_ms: 145.819958
+  type: 'test'
+  ...
+# Subtest: códigos opacos con el formato esperado y sin caracteres ambiguos
+ok 15 - códigos opacos con el formato esperado y sin caracteres ambiguos
+  ---
+  duration_ms: 3.203792
+  type: 'test'
+  ...
+# Subtest: lectura de QR y captura manual
+ok 16 - lectura de QR y captura manual
+  ---
+  duration_ms: 1.36581
+  type: 'test'
+  ...
+1..16
+# tests 16
+# suites 0
+# pass 16
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 250.885093
+TAP version 13
+# Subtest: login correcto crea sesión con cookie HttpOnly; incorrecto devuelve 401 genérico
+ok 1 - login correcto crea sesión con cookie HttpOnly; incorrecto devuelve 401 genérico
+  ---
+  duration_ms: 201.266603
+  type: 'test'
+  ...
+# Subtest: bloqueo temporal tras 5 contraseñas incorrectas
+ok 2 - bloqueo temporal tras 5 contraseñas incorrectas
+  ---
+  duration_ms: 244.418785
+  type: 'test'
+  ...
+# Subtest: sin sesión no hay acceso a caja ni panel
+ok 3 - sin sesión no hay acceso a caja ni panel
+  ---
+  duration_ms: 1.514125
+  type: 'test'
+  ...
+# Subtest: un empleado NO puede entrar al panel del dueño ni a su configuración
+ok 4 - un empleado NO puede entrar al panel del dueño ni a su configuración
+  ---
+  duration_ms: 153.314255
+  type: 'test'
+  ...
+# Subtest: un empleado no puede operar tarjetas de otro negocio
+ok 5 - un empleado no puede operar tarjetas de otro negocio
+  ---
+  duration_ms: 232.067317
+  type: 'test'
+  ...
+# Subtest: desactivar a un empleado revoca su sesión de inmediato
+ok 6 - desactivar a un empleado revoca su sesión de inmediato
+  ---
+  duration_ms: 185.094283
+  type: 'test'
+  ...
+# Subtest: logout invalida la sesión en el servidor
+ok 7 - logout invalida la sesión en el servidor
+  ---
+  duration_ms: 73.89354
+  type: 'test'
+  ...
+# Subtest: el cliente solo ve su tarjeta y no tiene acceso a caja
+ok 8 - el cliente solo ve su tarjeta y no tiene acceso a caja
+  ---
+  duration_ms: 49.200797
+  type: 'test'
+  ...
+# Subtest: el enlace personal abre la tarjeta en otro teléfono
+ok 9 - el enlace personal abre la tarjeta en otro teléfono
+  ---
+  duration_ms: 43.648545
+  type: 'test'
+  ...
+# Subtest: CSRF: mutaciones sin JSON u origen ajeno se rechazan
+ok 10 - CSRF: mutaciones sin JSON u origen ajeno se rechazan
+  ---
+  duration_ms: 70.467639
+  type: 'test'
+  ...
+# Subtest: alta de negocio de plataforma exige token
+ok 11 - alta de negocio de plataforma exige token
+  ---
+  duration_ms: 0.697054
+  type: 'test'
+  ...
+# Subtest: 2 cafés en una compra (modo por artículo) = 2 sellos, 1 compra, 1 visita
+ok 12 - 2 cafés en una compra (modo por artículo) = 2 sellos, 1 compra, 1 visita
+  ---
+  duration_ms: 237.33901
+  type: 'test'
+  ...
+# Subtest: segunda compra en la misma visita: suma sellos pero no visitas
+ok 13 - segunda compra en la misma visita: suma sellos pero no visitas
+  ---
+  duration_ms: 173.443542
+  type: 'test'
+  ...
+# Subtest: una visita en otro día cuenta como regreso (recurrencia)
+ok 14 - una visita en otro día cuenta como regreso (recurrencia)
+  ---
+  duration_ms: 177.074412
+  type: 'test'
+  ...
+# Subtest: idempotencia: la misma llave enviada 2 veces registra 1 sola compra
+ok 15 - idempotencia: la misma llave enviada 2 veces registra 1 sola compra
+  ---
+  duration_ms: 158.858522
+  type: 'test'
+  ...
+# Subtest: idempotencia con 10 solicitudes simultáneas idénticas: 1 compra
+ok 16 - idempotencia con 10 solicitudes simultáneas idénticas: 1 compra
+  ---
+  duration_ms: 207.451867
+  type: 'test'
+  ...
+# Subtest: doble toque con llaves distintas: el segundo pide confirmación (no suma)
+ok 17 - doble toque con llaves distintas: el segundo pide confirmación (no suma)
+  ---
+  duration_ms: 206.504971
+  type: 'test'
+  ...
+# Subtest: el cliente no puede agregarse sellos ni canjear
+ok 18 - el cliente no puede agregarse sellos ni canjear
+  ---
+  duration_ms: 167.749609
+  type: 'test'
+  ...
+# Subtest: 8 compras desbloquean la recompensa; el cliente la ve; se canjea una vez
+ok 19 - 8 compras desbloquean la recompensa; el cliente la ve; se canjea una vez
+  ---
+  duration_ms: 241.547032
+  type: 'test'
+  ...
+# Subtest: canje concurrente: 10 intentos simultáneos consumen la recompensa 1 sola vez
+ok 20 - canje concurrente: 10 intentos simultáneos consumen la recompensa 1 sola vez
+  ---
+  duration_ms: 196.457386
+  type: 'test'
+  ...
+# Subtest: compras y canje concurrentes en la misma tarjeta mantienen el saldo íntegro
+ok 21 - compras y canje concurrentes en la misma tarjeta mantienen el saldo íntegro
+  ---
+  duration_ms: 211.812662
+  type: 'test'
+  ...
+# Subtest: el excedente pasa al siguiente ciclo
+ok 22 - el excedente pasa al siguiente ciclo
+  ---
+  duration_ms: 162.327758
+  type: 'test'
+  ...
+# Subtest: QR de recompensa identifica la tarjeta; códigos inválidos se rechazan sin revelar datos
+ok 23 - QR de recompensa identifica la tarjeta; códigos inválidos se rechazan sin revelar datos
+  ---
+  duration_ms: 172.259935
+  type: 'test'
+  ...
+# Subtest: bajar la meta desbloquea premios en tarjetas que ya la alcanzan; los ganados conservan su costo
+ok 24 - bajar la meta desbloquea premios en tarjetas que ya la alcanzan; los ganados conservan su costo
+  ---
+  duration_ms: 192.61985
+  type: 'test'
+  ...
+# Subtest: invitación a reseña: desde la 2a visita, una vez, sin premio
+ok 25 - invitación a reseña: desde la 2a visita, una vez, sin premio
+  ---
+  duration_ms: 175.555089
+  type: 'test'
+  ...
+# Subtest: derechos ARCO: exportar y anonimizar al cliente revoca su acceso
+ok 26 - derechos ARCO: exportar y anonimizar al cliente revoca su acceso
+  ---
+  duration_ms: 155.934338
+  type: 'test'
+  ...
+# Subtest: cliente y tarjeta persisten y se recuperan desde una sesión independiente
+ok 27 - cliente y tarjeta persisten y se recuperan desde una sesión independiente
+  ---
+  duration_ms: 31.384344
+  type: 'test'
+  ...
+# Subtest: RLS: sin negocio fijado no se ve ninguna tarjeta
+ok 28 - RLS: sin negocio fijado no se ve ninguna tarjeta
+  ---
+  duration_ms: 4.724
+  type: 'test'
+  ...
+# Subtest: RLS: un negocio no ve ni puede escribir datos de otro
+ok 29 - RLS: un negocio no ve ni puede escribir datos de otro
+  ---
+  duration_ms: 9.366121
+  type: 'test'
+  ...
+# Subtest: una tarjeta no puede apuntar a un cliente de otro negocio (FK compuesta)
+ok 30 - una tarjeta no puede apuntar a un cliente de otro negocio (FK compuesta)
+  ---
+  duration_ms: 8.434822
+  type: 'test'
+  ...
+# Subtest: saldo negativo y dos recompensas disponibles se rechazan en BD
+ok 31 - saldo negativo y dos recompensas disponibles se rechazan en BD
+  ---
+  duration_ms: 7.55548
+  type: 'test'
+  ...
+# Subtest: la app no puede borrar ni editar auditoría
+ok 32 - la app no puede borrar ni editar auditoría
+  ---
+  duration_ms: 6.205202
+  type: 'test'
+  ...
+1..32
+# tests 32
+# suites 0
+# pass 32
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4719.722028

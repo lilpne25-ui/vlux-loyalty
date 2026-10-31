@@ -1,0 +1,235 @@
+// API HTTP (Hono). Capas: validación de origen → sesión → rol → servicio (reglas + BD con RLS).
+import { Hono, type Context, type Next } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import { secureHeaders } from 'hono/secure-headers';
+import { ZodError } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
+import { config } from './config';
+import { AppError, forbidden, unauthorized } from './errors';
+import { rateLimit } from './ratelimit';
+import { loginSchema, reviewEventSchema, slugSchema, uuidSchema } from './validation';
+import { getStaffSession, login, logout, type Role, type StaffSession } from './services/auth';
+import { createBusiness, getBusinessBySlug } from './services/businesses';
+import { registerCustomer, resolveCardToken } from './services/customers';
+import { customerCardView } from './services/cards';
+import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
+import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
+
+type Env = { Variables: { staff: StaffSession } };
+
+const STAFF_COOKIE = 'vlx_staff';
+const cardCookie = (slug: string) => `vlx_card_${slug}`;
+const CARD_COOKIE_DAYS = 400; // máximo que permiten los navegadores
+
+function cookieOpts(maxAgeSeconds: number) {
+  return { httpOnly: true, secure: config.isProduction, sameSite: 'Lax' as const, path: '/', maxAge: maxAgeSeconds };
+}
+
+function clientIp(c: Context) {
+  // Detrás de un proxy de confianza (Render, Fly, Vercel) la IP real llega en x-forwarded-for.
+  return (c.req.header('x-forwarded-for')?.split(',')[0] || c.req.header('x-real-ip') || 'local').trim();
+}
+
+/** Protección CSRF: mutaciones solo con JSON y, si el navegador manda Origin, que sea el nuestro. */
+async function csrfGuard(c: Context, next: Next) {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+    const ct = c.req.header('content-type') || '';
+    if (!ct.startsWith('application/json')) throw new AppError(400, 'bad_content_type', 'Solicitud inválida.');
+    const origin = c.req.header('origin');
+    if (origin) {
+      const host = c.req.header('host');
+      const allowed = [config.publicBaseUrl, host ? `http://${host}` : '', host ? `https://${host}` : ''];
+      if (!allowed.includes(origin)) throw new AppError(403, 'bad_origin', 'Origen no permitido.');
+    }
+  }
+  await next();
+}
+
+const requireStaff = (...roles: Role[]) => async (c: Context<Env>, next: Next) => {
+  const s = await getStaffSession(getCookie(c, STAFF_COOKIE));
+  if (!s) throw unauthorized();
+  if (roles.length && !roles.includes(s.role)) throw forbidden();
+  c.set('staff', s);
+  await next();
+};
+
+async function jsonBody(c: Context): Promise<unknown> {
+  try {
+    return await c.req.json();
+  } catch {
+    throw new AppError(400, 'bad_json', 'El cuerpo de la solicitud no es JSON válido.');
+  }
+}
+
+/** Resuelve la tarjeta del cliente desde su cookie para ese negocio. */
+async function customerCard(c: Context, slugRaw: string) {
+  const slug = slugSchema.parse(slugRaw);
+  const ref = await resolveCardToken(getCookie(c, cardCookie(slug)));
+  if (!ref || ref.slug !== slug) return null;
+  return ref;
+}
+
+export function buildApp() {
+  const app = new Hono<Env>();
+
+  app.use('*', secureHeaders({
+    contentSecurityPolicy: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      mediaSrc: ["'self'", 'blob:'],
+      connectSrc: ["'self'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+    referrerPolicy: 'no-referrer',
+    permissionsPolicy: { camera: ['self'], microphone: [], geolocation: [] },
+  }));
+
+  app.onError((err, c) => {
+    if (err instanceof AppError) {
+      if (err.status === 429 && err.details?.retryAfterSeconds) c.header('Retry-After', String(err.details.retryAfterSeconds));
+      return c.json({ error: { code: err.code, message: err.message, details: err.details } }, err.status);
+    }
+    if (err instanceof ZodError) {
+      const issue = err.issues[0];
+      return c.json({ error: { code: 'validation', message: issue?.message || 'Datos inválidos.', field: issue?.path.join('.') } }, 422);
+    }
+    const pgCode = (err as { code?: string }).code;
+    if (pgCode === '23505' && /idempotency/.test(String((err as { constraint?: string }).constraint))) {
+      return c.json({ error: { code: 'idempotency_conflict', message: 'Esa operación ya se registró.' } }, 409);
+    }
+    if (pgCode === '22P02') return c.json({ error: { code: 'validation', message: 'Identificador inválido.' } }, 422);
+    console.error('[error]', c.req.method, c.req.path, err);
+    return c.json({ error: { code: 'internal', message: 'Ocurrió un error inesperado. Intenta de nuevo.' } }, 500);
+  });
+
+  const api = new Hono<Env>();
+  api.use('*', csrfGuard);
+  api.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
+
+  api.get('/health', (c) => c.json({ ok: true }));
+
+  // ---------- Público ----------
+  api.get('/public/businesses/:slug', async (c) => {
+    const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
+    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, isDemo: b.isDemo }, program: { stampsRequired: b.program.stampsRequired, stampMode: b.program.stampMode, maxStampsPerPurchase: b.program.maxStampsPerPurchase, rewardDescription: b.program.rewardDescription }, privacyNoticeVersion: config.privacyNoticeVersion });
+  });
+
+  api.post('/public/businesses/:slug/register', async (c) => {
+    const slug = slugSchema.parse(c.req.param('slug'));
+    rateLimit(`register:${clientIp(c)}`, 20, 60 * 60_000);
+    const r = await registerCustomer(slug, await jsonBody(c));
+    setCookie(c, cardCookie(slug), r.token, cookieOpts(CARD_COOKIE_DAYS * 86400));
+    // El enlace personal permite abrir la tarjeta en otro teléfono. Se muestra una sola vez.
+    return c.json({ publicCode: r.publicCode, personalLink: `${config.publicBaseUrl}/t/${r.token}` }, 201);
+  });
+
+  // ---------- Cliente (cookie de su tarjeta) ----------
+  api.get('/me/:slug/card', async (c) => {
+    const ref = await customerCard(c, c.req.param('slug'));
+    if (!ref) return c.json({ card: null });
+    return c.json(await customerCardView(ref.businessId, ref.cardId));
+  });
+
+  api.post('/me/:slug/review-events', async (c) => {
+    const ref = await customerCard(c, c.req.param('slug'));
+    if (!ref) throw unauthorized();
+    const { kind } = reviewEventSchema.parse(await jsonBody(c));
+    await recordReviewEvent(ref.businessId, ref.cardId, kind);
+    return c.json({ ok: true });
+  });
+
+  api.post('/me/:slug/forget-device', async (c) => {
+    const slug = slugSchema.parse(c.req.param('slug'));
+    deleteCookie(c, cardCookie(slug), { path: '/' });
+    return c.json({ ok: true });
+  });
+
+  // ---------- Personal ----------
+  api.post('/staff/login', async (c) => {
+    const input = loginSchema.parse(await jsonBody(c));
+    rateLimit(`login-ip:${clientIp(c)}`, 20, 15 * 60_000);
+    const r = await login(input.email, input.password, input.businessSlug);
+    setCookie(c, STAFF_COOKIE, r.token, cookieOpts(config.staffSessionHours * 3600));
+    return c.json({ session: publicSession(r.session), businesses: r.businesses });
+  });
+
+  api.post('/staff/logout', async (c) => {
+    await logout(getCookie(c, STAFF_COOKIE));
+    deleteCookie(c, STAFF_COOKIE, { path: '/' });
+    return c.json({ ok: true });
+  });
+
+  api.get('/staff/me', async (c) => {
+    const s = await getStaffSession(getCookie(c, STAFF_COOKIE));
+    return c.json({ session: s ? publicSession(s) : null });
+  });
+
+  const staff = new Hono<Env>();
+  staff.use('*', requireStaff('OWNER', 'EMPLOYEE'));
+  staff.get('/business', async (c) => c.json(await getBusinessBySlug(c.get('staff').businessSlug)));
+  staff.post('/cards/lookup', async (c) => {
+    const s = c.get('staff');
+    rateLimit(`lookup:${s.sessionId}`, 120, 60_000);
+    const body = (await jsonBody(c)) as { code?: unknown };
+    return c.json(await lookupCard(s, String(body?.code ?? '')));
+  });
+  staff.get('/cards', async (c) => c.json({ cards: await searchCards(c.get('staff'), c.req.query('q') || '') }));
+  staff.get('/cards/:cardId', async (c) => c.json(await staffCardView(c.get('staff'), uuidSchema.parse(c.req.param('cardId')))));
+  staff.post('/cards/:cardId/purchases', async (c) => {
+    const s = c.get('staff');
+    rateLimit(`purchase:${s.sessionId}`, 60, 60_000);
+    return c.json(await registerPurchase(s, uuidSchema.parse(c.req.param('cardId')), await jsonBody(c)));
+  });
+  staff.post('/rewards/:rewardId/redeem', async (c) => c.json(await redeemReward(c.get('staff'), uuidSchema.parse(c.req.param('rewardId')))));
+  api.route('/staff', staff);
+
+  // ---------- Dueño ----------
+  const owner = new Hono<Env>();
+  owner.use('*', requireStaff('OWNER'));
+  owner.get('/dashboard', async (c) => c.json(await dashboard(c.get('staff'))));
+  owner.get('/customers', async (c) => c.json({ customers: await listCustomers(c.get('staff')) }));
+  owner.get('/customers/:customerId/export', async (c) => c.json(await exportCustomer(c.get('staff'), uuidSchema.parse(c.req.param('customerId')))));
+  owner.post('/customers/:customerId/anonymize', async (c) => c.json(await anonymizeCustomer(c.get('staff'), uuidSchema.parse(c.req.param('customerId')))));
+  owner.get('/activity', async (c) => c.json({ items: await activity(c.get('staff'), Number(c.req.query('limit') || 30)) }));
+  owner.put('/program', async (c) => c.json(await updateProgram(c.get('staff'), await jsonBody(c))));
+  owner.get('/staff', async (c) => c.json({ staff: await listStaff(c.get('staff')) }));
+  owner.post('/staff', async (c) => c.json(await createEmployee(c.get('staff'), await jsonBody(c)), 201));
+  owner.patch('/staff/:membershipId', async (c) => {
+    const body = (await jsonBody(c)) as { active?: unknown };
+    if (typeof body?.active !== 'boolean') throw new AppError(422, 'validation', 'Indica si el empleado queda activo.');
+    return c.json(await setStaffActive(c.get('staff'), uuidSchema.parse(c.req.param('membershipId')), body.active));
+  });
+  api.route('/owner', owner);
+
+  // ---------- Plataforma (equipo VLUX) ----------
+  api.post('/platform/businesses', async (c) => {
+    const expected = config.platformAdminToken;
+    const got = (c.req.header('authorization') || '').replace(/^Bearer /, '');
+    rateLimit(`platform:${clientIp(c)}`, 10, 60_000);
+    if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
+    return c.json(await createBusiness((await jsonBody(c)) as never), 201);
+  });
+
+  app.route('/api', api);
+
+  // Enlace personal del cliente: guarda el acceso en este teléfono y abre su tarjeta.
+  app.get('/t/:token', async (c) => {
+    const token = c.req.param('token');
+    rateLimit(`token:${clientIp(c)}`, 30, 60_000);
+    const ref = await resolveCardToken(token);
+    if (!ref) return c.redirect('/?enlace=invalido', 302);
+    setCookie(c, cardCookie(ref.slug), token, cookieOpts(CARD_COOKIE_DAYS * 86400));
+    return c.redirect(`/n/${ref.slug}`, 302);
+  });
+
+  return app;
+}
+
+function publicSession(s: StaffSession) {
+  return { userId: s.userId, email: s.email, displayName: s.displayName, role: s.role, business: { id: s.businessId, slug: s.businessSlug, name: s.businessName } };
+}

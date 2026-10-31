@@ -34,3 +34,25 @@ Cada átomo se cierra con la misma lista: compila, funciona lo intervenido, prue
 - **Errores:** ninguno.
 - **Riesgos pendientes:** en Supabase el rol `vlux_app` debe crearse con su contraseña desde el panel (o con `db:setup` adaptado); RLS depende de que la API use siempre `withTenant`.
 - **Estado:** PASS
+
+---
+## Átomo 04 · Autenticación y autorización
+- **Objetivo:** proteger las operaciones del negocio; roles validados en el servidor.
+- **Archivos modificados:** `server/app.ts`, `server/security.ts`, `server/errors.ts`, `server/ratelimit.ts`, `server/validation.ts`, `server/services/auth.ts`, `server/services/businesses.ts`, `server/services/customers.ts`, `tests/integration/helpers.ts`, `tests/integration/auth.test.ts`, `tests/unit/security.test.ts`.
+- **Implementación:** login de personal con scrypt y mensaje genérico (no revela si el correo existe), bloqueo de 15 min tras 5 fallos, sesión opaca de 12 h en cookie `HttpOnly; SameSite=Lax` (+`Secure` en producción) con hash en BD; la membresía se revalida en cada solicitud (desactivar = acceso cortado al instante). Roles `OWNER`/`EMPLOYEE` por middleware. Cliente sin contraseña: token de 256 bits en cookie `HttpOnly` por negocio y enlace personal `/t/<token>` para otro teléfono. CSRF: solo JSON + verificación de `Origin`. Alta de negocios solo con token de plataforma (comparación en tiempo constante). Validación de entradas con zod.
+- **Pruebas ejecutadas:** 11 pruebas de integración + 3 unitarias de seguridad, todas PASS (`docs/evidencia/atomos-04-05-pruebas.txt`). Incluye: empleado → 403 en todo `/api/owner/*`; empleado de B → 404 sobre tarjeta de A aun conociendo su UUID; sesión copiada tras logout → 401; cliente → 401 en caja.
+- **Resultado:** un empleado no puede acceder al panel del dueño ni modificar información de otro negocio.
+- **Errores:** ninguno.
+- **Riesgos pendientes:** no hay recuperación de contraseña ni de tarjeta por correo/WhatsApp (requiere proveedor de envío); límite de solicitudes en memoria (1 instancia).
+- **Estado:** PASS
+
+---
+## Átomo 05 · API de sellos y recompensas
+- **Objetivo:** operaciones seguras e íntegras desde el servidor.
+- **Archivos modificados:** `server/services/loyalty.ts`, `server/services/cards.ts`, `server/services/owner.ts`, `tests/integration/loyalty.test.ts`.
+- **Implementación:** identificación por QR/código (solo identifica), registro de compra que crea o reutiliza la visita, sellos según regla, libro mayor `stamp_events`, desbloqueo automático, canje autorizado. Cada operación bloquea la tarjeta (`FOR UPDATE`) dentro de una transacción con RLS. Llave de idempotencia única por negocio. Protección de doble toque: 2a compra en < 20 s con otra llave pide confirmación explícita. Índice único "1 recompensa disponible por tarjeta" como red de seguridad en BD.
+- **Pruebas ejecutadas:** 15 pruebas de integración PASS, entre ellas: 10 solicitudes simultáneas con la misma llave → 1 compra; 10 canjes simultáneos desde 2 dispositivos → 1 éxito y 9 `already_redeemed`; compras + canje concurrentes → saldo = libro mayor; 2 cafés = 2 sellos y 1 visita (con BD); misma visita no suma visitas; visita otro día = recurrente; el cliente no puede sellarse.
+- **Resultado:** el sistema mantiene la integridad de los saldos ante operaciones duplicadas y concurrentes.
+- **Errores:** ninguno.
+- **Riesgos pendientes:** la ventana de visita (120 min) es configurable pero no hay validación con caja real; no hay anulación de compras erróneas (propuesta para V0.3).
+- **Estado:** PASS
