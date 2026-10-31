@@ -9,12 +9,21 @@ import { Button, Modal, Field, inputCls, CopyButton, useToast } from './ui';
 type PairCode = { code: string; expiresAt: string; expiresInMinutes: number };
 const fmtCode = (c: string) => `${c.slice(0, 4)} ${c.slice(4)}`;
 
+// Reutiliza el código vigente (en memoria de la página, nunca en almacenamiento) para no gastar el
+// cupo de códigos cada vez que se abre la guía. "Otro" fuerza uno nuevo.
+const openCodes = new Map<string, PairCode>();
+const stillValid = (c?: PairCode) => !!c && new Date(c.expiresAt).getTime() - Date.now() > 60_000;
+
 function usePairCode(slug: string) {
   const [code, setCode] = useState<PairCode | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
+  const load = useCallback((fresh = false) => {
     setError(null);
-    api<PairCode>('POST', `/me/${slug}/pair-code`).then(setCode).catch((e: ApiError) => setError(e.message));
+    const cached = openCodes.get(slug);
+    if (!fresh && stillValid(cached)) { setCode(cached!); return; }
+    api<PairCode>('POST', `/me/${slug}/pair-code`)
+      .then((c) => { openCodes.set(slug, c); setCode(c); })
+      .catch((e: ApiError) => setError(e.message));
   }, [slug]);
   return { code, error, load };
 }
@@ -30,10 +39,10 @@ function PairCodeBox({ slug, autoload }: { slug: string; autoload: boolean }) {
         <div className="mt-2 flex items-center gap-2">
           <span className="font-mono text-[22px] tracking-[0.12em] whitespace-nowrap text-cafe-ink" data-testid="pair-code">{fmtCode(code.code)}</span>
           <CopyButton text={code.code} />
-          <button onClick={load} className="ml-auto shrink-0 whitespace-nowrap text-[12px] text-cafe-muted inline-flex items-center gap-1 hover:text-cafe-ink"><RefreshCw size={12} /> Otro</button>
+          <button onClick={() => load(true)} className="ml-auto shrink-0 whitespace-nowrap text-[12px] text-cafe-muted inline-flex items-center gap-1 hover:text-cafe-ink"><RefreshCw size={12} /> Otro</button>
         </div>
       ) : error ? (
-        <p className="mt-2 text-[12.5px] text-[#B42318]">{error} <button onClick={load} className="underline">Reintentar</button></p>
+        <p className="mt-2 text-[12.5px] text-[#B42318]">{error} <button onClick={() => load(true)} className="underline">Reintentar</button></p>
       ) : (
         <p className="mt-2 text-[12.5px] text-cafe-muted">Generando…</p>
       )}
@@ -183,7 +192,10 @@ export function PairScreen({ slug, businessName, onPaired, onNew }: { slug: stri
           {mode === 'code' ? <><Link2 size={13} /> Usar mi enlace personal</> : <><KeyRound size={13} /> Usar un código</>}
         </button>
       </form>
-      <button onClick={onNew} className="text-[13px] text-cafe-muted underline">¿Aún no tienes tarjeta? Crear una</button>
+      <div className="text-center">
+        <button onClick={onNew} className="text-[13px] text-cafe-muted underline">¿Aún no tienes tarjeta? Crear una</button>
+        <p className="mt-1 text-[11.5px] text-cafe-muted leading-snug">Si ya tienes una, mejor usa tu código: crear otra duplicaría tus sellos.</p>
+      </div>
     </div>
   );
 }

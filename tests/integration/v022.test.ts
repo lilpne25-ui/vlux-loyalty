@@ -112,3 +112,40 @@ test('íconos: PNG con el tamaño correcto, caché pública y rutas acotadas', a
   assert.equal((await new Device('x').get(`/api/pwa/${b.slug}/icon/../../etc.png`)).status, 404);
   assert.equal((await new Device('x').get(`/api/pwa/${b.slug}/icon/64.png`)).status, 404);
 });
+
+test('revisión MSA: ícono en caché de CDN y memoria; códigos aislados por negocio (RLS)', async () => {
+  const { app } = await import('./helpers');
+  const b = await newBusiness();
+  const r1 = await app.request(`/api/pwa/${b.slug}/icon/512.png`);
+  assert.match(r1.headers.get('cache-control') ?? '', /s-maxage=86400/);
+  const t0 = Date.now();
+  const r2 = await app.request(`/api/pwa/${b.slug}/icon/512.png`);
+  assert.equal(r2.status, 200);
+  assert.ok(Date.now() - t0 < 100, 'la segunda petición sale de memoria, sin volver a dibujar');
+  assert.deepEqual(Buffer.from(await r1.arrayBuffer()), Buffer.from(await r2.arrayBuffer()));
+
+  // Política tenant_isolation: con el contexto de otro negocio no se ve ningún código.
+  const { b: owner } = await customerWithCode();
+  const other = await newBusiness();
+  const c = await admin.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query('SET LOCAL ROLE vlux_app');
+    await c.query("SELECT set_config('app.business_id', $1, true)", [other.businessId]);
+    const seen = (await c.query('SELECT count(*)::int AS n FROM card_pair_codes WHERE business_id = $1', [owner.businessId])).rows[0].n;
+    assert.equal(seen, 0, 'otro negocio no ve los códigos');
+    await c.query("SELECT set_config('app.business_id', $1, true)", [owner.businessId]);
+    const mine = (await c.query('SELECT count(*)::int AS n FROM card_pair_codes')).rows[0].n;
+    assert.equal(mine, 1, 'el propio negocio sí ve su código');
+  } finally { await c.query('ROLLBACK'); c.release(); }
+});
+
+test('revisión MSA: un número ya usado puede volver a emitirse (índice único solo entre códigos abiertos)', async () => {
+  const { b, code } = await customerWithCode();
+  assert.equal((await new Device('app').post(`/api/me/${b.slug}/pair`, { code })).status, 200);
+  const before = (await admin.query('SELECT count(*)::int AS n FROM card_pair_codes WHERE business_id = $1', [b.businessId])).rows[0].n;
+  // Fuerza la reaparición del mismo hash: inserta uno abierto con el mismo hash que el ya usado.
+  await admin.query(`INSERT INTO card_pair_codes (code_hash, card_id, business_id, expires_at)
+    SELECT code_hash, card_id, business_id, now() + interval '15 minutes' FROM card_pair_codes WHERE business_id = $1`, [b.businessId]);
+  assert.equal((await admin.query('SELECT count(*)::int AS n FROM card_pair_codes WHERE business_id = $1', [b.businessId])).rows[0].n, before + 1);
+});

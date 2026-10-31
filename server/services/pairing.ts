@@ -17,13 +17,22 @@ const codeHash = (businessId: string, code: string) => sha256(`pair:${businessId
 
 /** Emite un código nuevo para la tarjeta (invalida los anteriores sin usar). */
 export async function issuePairCode(ref: { cardId: string; businessId: string }) {
-  const code = String(randomInt(0, 100_000_000)).padStart(8, '0');
   const expiresAt = new Date(Date.now() + PAIR_MINUTES * 60_000);
-  await withTenant(ref.businessId, async (tx) => {
-    await tx.query('UPDATE card_pair_codes SET expires_at = now() WHERE card_id = $1 AND used_at IS NULL AND expires_at > now()', [ref.cardId]);
-    await tx.query('INSERT INTO card_pair_codes (code_hash, card_id, business_id, expires_at) VALUES ($1, $2, $3, $4)', [codeHash(ref.businessId, code), ref.cardId, ref.businessId, expiresAt]);
-  });
-  return { code, expiresAt: expiresAt.toISOString(), expiresInMinutes: PAIR_MINUTES };
+  // El hash es único entre códigos sin usar del negocio: si el número choca (muy poco probable), se reintenta.
+  for (let attempt = 0; ; attempt++) {
+    const code = String(randomInt(0, 100_000_000)).padStart(8, '0');
+    try {
+      await withTenant(ref.businessId, async (tx) => {
+        // Limpieza: los códigos vencidos hace más de un día ya no sirven para nada (RLS limita al negocio).
+        await tx.query("DELETE FROM card_pair_codes WHERE expires_at < now() - interval '1 day'");
+        await tx.query('UPDATE card_pair_codes SET expires_at = now() WHERE card_id = $1 AND used_at IS NULL AND expires_at > now()', [ref.cardId]);
+        await tx.query('INSERT INTO card_pair_codes (code_hash, card_id, business_id, expires_at) VALUES ($1, $2, $3, $4)', [codeHash(ref.businessId, code), ref.cardId, ref.businessId, expiresAt]);
+      });
+      return { code, expiresAt: expiresAt.toISOString(), expiresInMinutes: PAIR_MINUTES };
+    } catch (e) {
+      if ((e as { code?: string }).code !== '23505' || attempt >= 4) throw e;
+    }
+  }
 }
 
 /** Canjea el código: crea un acceso nuevo para este dispositivo (no revoca el de Safari). */

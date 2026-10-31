@@ -26,6 +26,7 @@ type Env = { Variables: { staff: StaffSession } };
 const STAFF_COOKIE = 'vlx_staff';
 const cardCookie = (slug: string) => `vlx_card_${slug}`;
 const CARD_COOKIE_DAYS = 400; // máximo que permiten los navegadores
+const iconCache = new Map<string, Uint8Array<ArrayBuffer>>(); // íconos PWA ya dibujados (por instancia)
 
 function cookieOpts(maxAgeSeconds: number) {
   return { httpOnly: true, secure: config.isProduction, sameSite: 'Lax' as const, path: '/', maxAge: maxAgeSeconds };
@@ -209,7 +210,7 @@ export function buildApp() {
   // Manifiesto e íconos por negocio: solo datos públicos del negocio (nunca tokens ni datos del cliente).
   api.get('/pwa/:slug/manifest.webmanifest', async (c) => {
     const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
-    c.header('Cache-Control', 'public, max-age=300');
+    c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
     c.header('Content-Type', 'application/manifest+json; charset=utf-8');
     return c.body(JSON.stringify(buildManifest(b)));
   });
@@ -220,9 +221,18 @@ export function buildApp() {
     const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
     const maskable = m[1].startsWith('maskable');
     const size = maskable ? 512 : Number(m[1]);
-    c.header('Cache-Control', 'public, max-age=86400');
+    // Dibujar un ícono cuesta CPU: se guarda en memoria y la CDN lo cachea (s-maxage).
+    const key = `${b.slug}|${m[1]}|${b.name}|${b.primaryColor}|${b.accentColor}`;
+    let png = iconCache.get(key);
+    if (!png) {
+      await rateLimit(`icon:${clientIp(c)}`, 60, 60_000);
+      png = new Uint8Array(renderIcon({ size, maskable, name: b.name, primary: b.primaryColor, accent: b.accentColor }));
+      if (iconCache.size >= 200) iconCache.delete(iconCache.keys().next().value as string);
+      iconCache.set(key, png);
+    }
+    c.header('Cache-Control', 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800');
     c.header('Content-Type', 'image/png');
-    return c.body(new Uint8Array(renderIcon({ size, maskable, name: b.name, primary: b.primaryColor, accent: b.accentColor })));
+    return c.body(png);
   });
 
   // Enlace personal en el fragmento (#): el token nunca viaja en la URL, así no queda en logs del
