@@ -1,0 +1,88 @@
+/* Layout: barra VLUX fija arriba; cada vista ocupa el resto. Cliente = columna móvil cálida; empleado/dueño = SaaS claro. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --vlux-ink: #0E1013;
+  --vlux-silver: #B9C0C9;
+  --vlux-cyan: #67C7D3;
+  --warm-white: #FBF7F1;
+  --cream: #F5ECDF;
+  --brand: #2B1B14;
+  --accent: #C9A15B;
+  --dash-bg: #F5F6F8;
+  color-scheme: light;
+}
+html, body { height: 100%; }
+body { background: var(--dash-bg); color: #0E1013; font-family: Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 40; background: var(--vlux-ink); }
+#root { min-height: 100%; display: flex; flex-direction: column; }
+.app-root { flex: 1; }
+.gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.font-display { font-family: 'Young Serif', Georgia, serif; font-weight: 400; }
+.text-balance { text-wrap: balance; }
+h1, h2, h3 { text-wrap: balance; }
+:focus-visible { outline: 2px solid var(--vlux-cyan); outline-offset: 2px; }
+
+.topbar { background: linear-gradient(180deg, #111418, #0B0D10); border-bottom: 1px solid rgba(185,192,201,.14); }
+.seg { background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(185,192,201,.12); }
+
+.cafe-bg { background: radial-gradient(120% 60% at 50% 0%, #FFFFFF 0%, var(--warm-white) 45%, #F4EBDD 100%); }
+.dash-bg { background: var(--dash-bg); }
+.biz-bg { background: linear-gradient(180deg, #FFFFFF 0%, #F5F6F8 60%); }
+.panel { background: #fff; border: 1px solid #E4E7EC; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+
+.card-surface { isolation: isolate; }
+.card-sheen { background:
+  radial-gradient(90% 70% at 100% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
+  radial-gradient(60% 50% at 0% 100%, rgba(255,255,255,.07), transparent 70%),
+  repeating-linear-gradient(115deg, rgba(255,255,255,.018) 0 2px, transparent 2px 6px); }
+.card-divider { border-color: color-mix(in srgb, var(--cream) 16%, transparent); }
+.hero-glow { background: radial-gradient(70% 60% at 50% 30%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%); }
+.reward-panel { background: linear-gradient(135deg, #FFFDF8, #FBF1DE); border: 1px solid color-mix(in srgb, var(--accent) 45%, #fff); }
+.reward-chip { animation: chipPulse 2.4s ease-in-out infinite; }
+.wallet-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; height: 52px; border-radius: 14px; background: #0E1013; color: #fff; font-size: 14px; font-weight: 500; transition: transform .15s, background .15s; }
+.wallet-btn:hover { background: #1d2127; }
+.wallet-btn:active { transform: scale(.98); }
+.price-card { background: radial-gradient(80% 60% at 100% 0%, rgba(103,199,211,.14), transparent 60%), #0E1013; }
+.scan-frame { border: 2px solid rgba(103,199,211,.55); box-shadow: 0 0 0 9999px rgba(0,0,0,.15); }
+.scan-frame::after { content: ""; position: absolute; left: 8%; right: 8%; height: 2px; top: 20%; background: rgba(103,199,211,.8); animation: scan 2.2s ease-in-out infinite; }
+
+/* Movimiento */
+.screen-in, .view-in { animation: fadeUp .35s cubic-bezier(.2,.7,.2,1) both; }
+.anim-fade { animation: fade .2s ease both; }
+.anim-sheet { animation: sheet .28s cubic-bezier(.2,.8,.2,1) both; }
+.anim-toast { animation: toast .28s cubic-bezier(.2,.8,.2,1) both; }
+.stamp-new { animation: stampIn .55s cubic-bezier(.2,1.4,.4,1) both; }
+.stamp-ring { border: 2px solid var(--accent); animation: ring .9s ease-out both; }
+.steam path { animation: steam 3.6s ease-in-out infinite; }
+.steam path:nth-child(2) { animation-delay: .6s; }
+.steam path:nth-child(3) { animation-delay: 1.2s; }
+.celebrate-card { animation: sheet .45s cubic-bezier(.2,.8,.2,1) both; box-shadow: 0 40px 80px -20px rgba(0,0,0,.5); }
+.ring-draw { stroke-dasharray: 327; stroke-dashoffset: 327; animation: draw 1s .15s cubic-bezier(.6,0,.2,1) forwards; }
+.pop-in { animation: popIn .5s .8s cubic-bezier(.2,1.5,.4,1) both; }
+.fade-up { animation: fadeUp .45s cubic-bezier(.2,.7,.2,1) both; }
+.spark { position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px; border-radius: 9px; background: var(--accent); opacity: 0; animation: spark .9s ease-out both; }
+.kpi-num { animation: fade .4s ease both; }
+.bar-grow { transform-box: fill-box; transform-origin: bottom; animation: grow .6s cubic-bezier(.2,.8,.2,1) both; }
+.row-in { animation: fade .3s ease both; }
+
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+@keyframes sheet { from { opacity: 0; transform: translateY(24px) scale(.98) } to { opacity: 1; transform: none } }
+@keyframes toast { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+@keyframes stampIn { 0% { transform: scale(.2) rotate(-25deg); opacity: 0 } 60% { opacity: 1 } 100% { transform: none; opacity: 1 } }
+@keyframes ring { 0% { transform: scale(.6); opacity: .9 } 100% { transform: scale(1.9); opacity: 0 } }
+@keyframes steam { 0%, 100% { opacity: .15; transform: translateY(4px) } 50% { opacity: .55; transform: translateY(-4px) } }
+@keyframes draw { to { stroke-dashoffset: 0 } }
+@keyframes popIn { from { transform: scale(.3); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes spark { 0% { opacity: 0; transform: rotate(var(--a)) translateY(0) } 20% { opacity: 1 } 100% { opacity: 0; transform: rotate(var(--a)) translateY(-70px) } }
+@keyframes grow { from { transform: scaleY(0) } to { transform: none } }
+@keyframes chipPulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent) } 50% { box-shadow: 0 0 0 6px transparent } }
+@keyframes scan { 0%, 100% { top: 18% } 50% { top: 78% } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .ring-draw { stroke-dashoffset: 0; }
+}
