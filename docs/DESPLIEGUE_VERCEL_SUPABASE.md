@@ -1,4 +1,4 @@
-# Manual técnico · VLUX Loyalty V0.2.1 en Vercel + Supabase
+# Manual técnico · VLUX Loyalty V0.2.2 en Vercel + Supabase
 
 ## 1. Arquitectura
 ```
@@ -74,3 +74,20 @@ Cliente / Caja / Dueño (navegador, HTTPS)
 - Rotar `PLATFORM_ADMIN_TOKEN`: cambiar en Vercel y redeploy.
 - Dueño olvidó su contraseña: `POST /api/platform/password-reset` con el token de plataforma → enlace de un solo uso (60 min).
 - Logs: la app registra método, ruta plantilla (`/t/:token`, nunca el token), código y mensaje de error. Los enlaces personales usan `#token`, que el navegador no envía al servidor.
+
+
+## 7. V0.2.2: dos proyectos de Vercel y la PWA
+| Proyecto | Para quién | Protección | Variables de Preview |
+| :- | :- | :- | :- |
+| `vlux-loyalty` (prj_Lw00KhaMT0aYMXbzcP2L2q1UYrZl) | Equipo interno | Vercel Authentication en todo | `DATABASE_URL`, `DATABASE_SSL`, `PG_POOL_MAX`, `NODE_ENV`, `PRIVACY_NOTICE_VERSION`, `PLATFORM_ADMIN_TOKEN` |
+| `vlux-loyalty-demo` (prj_jGgwKOO4Dc1XReDAtoEVVwar0y0E) | Clientes y demos | Ninguna (solo datos sintéticos) | Las mismas **sin** `PLATFORM_ADMIN_TOKEN` |
+
+Ambos: sin conexión a Git en Vercel, `installCommand` `npm ci --include=dev`, `buildCommand` `npm run build:vercel`, Node 22.x, región iad1 y *Ignored Build Step* que cancela Production.
+
+**Desplegar una rama (Preview):** API/MCP `create_deployment` con `gitSource {type: github, org: lilpne25-ui, repo: vlux-loyalty, ref: <rama>}` y `target: "staging"`. Sin `target`, Vercel lo trata como Production y la regla lo cancela. En un proyecto nuevo, el **primer** despliegue Vercel lo marca como Production aunque se pida `staging` (también queda cancelado); el segundo ya sale como Preview.
+
+**Migración 0005:** aplicada en Supabase Preview el 2026-10-31 con `schema_migrations` (checksum `284504142fa9…`). Verificar: `SELECT relrowsecurity FROM pg_class WHERE relname='card_pair_codes'` → `true`, y advisors de seguridad sin alertas.
+
+**PWA en Vercel:** `/sw.js` se sirve con `Cache-Control: no-cache` (ruta en `scripts/build-vercel.mjs`). Manifiesto en `/api/pwa/<negocio>/manifest.webmanifest` (5 min de caché) e íconos en `/api/pwa/<negocio>/icon/{192,512,180,maskable-512}.png` (CDN 1 día).
+
+**Verificación rápida tras desplegar:** `DEMO=<url> INTERNO=<url> node tests/e2e/v022-demo-publica.cjs` desde una máquina con Chromium (15 comprobaciones, sin credenciales).

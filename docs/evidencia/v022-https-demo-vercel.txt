@@ -1,0 +1,32 @@
+V0.2.2 · Verificación HTTPS contra la demo pública en Vercel
+Fecha: 2026-10-31 23:42:40 UTC
+Ejecutado en: Vercel Sandbox (iad1, node22, Chromium de Playwright 1.63.0), sesión sbx_dt503jRPx2Hd6qt9XHeWyYZ8CH4K (detenida al terminar)
+Script: tests/e2e/v022-demo-publica.cjs (commit e7a88c2 + ajuste de H6)
+Demo:    https://vlux-loyalty-demo-kk0lzkh1v-vlux-s-projects.vercel.app  (dpl_58TgQSK3XpFteVjDgWWcuPKFxQpr, commit e7a88c2)
+Interno: https://vlux-loyalty-pd07bzoge-vlux-s-projects.vercel.app       (dpl_5MvnPzV3dB6wHu7rM1J6YUV3ZCrx, commit e7a88c2)
+Negocio: cafe-demo-toluca (datos sintéticos)
+
+PASS H1 demo abre sin login de Vercel · status 200
+PASS H2 proyecto interno sigue protegido · status 302
+PASS H3 API y base de datos responden por HTTPS
+PASS H4 HSTS y CSP presentes
+PASS H5 manifiesto válido y sin tokens
+PASS H6 ícono 512 PNG servido desde la caché de la CDN · x-vercel-cache HIT → HIT
+PASS H7 sw.js sin caché y con lista de exclusión
+PASS H8 respuestas de API privadas (no-store)
+PASS H9 service worker activo en HTTPS
+PASS H10 Chromium lee el manifiesto sin errores · …/api/pwa/cafe-demo-toluca/manifest.webmanifest
+PASS H11 Chromium no reporta errores de instalabilidad · []
+PASS H12 Cliente A crea su tarjeta y ve "Guarda tu tarjeta" · registro 201
+PASS H13 app instalada pide código y abre la misma tarjeta
+PASS H14 el código no se puede reutilizar · status 404
+PASS H15 caché del SW solo con index.html y /assets · 3 entradas
+Total HTTPS demo: 15 PASS, 0 FAIL
+
+Primera corrida (misma fecha, 23:40 UTC): 14 PASS, 1 FAIL. H6 buscaba "s-maxage" en la respuesta al navegador;
+Vercel consume s-maxage en su CDN y no lo reenvía. Se cambió la verificación a x-vercel-cache (HIT). No hubo cambio de código de la app.
+
+NO CUBIERTO AQUÍ (BLOQUEADO): Empleado B registra compra y canjea, Dueño C ve operación y canje, sobre HTTPS.
+Motivo: requiere la contraseña de las cuentas demo dentro del entorno de prueba; la política de esta sesión no permitió
+materializar esa credencial. Ese mismo escenario completo pasó 40/40 en el emulador local de Vercel en Chromium, WebKit y Firefox.
+Procedimiento reproducible: docs/ACCESO_VERCEL_V022.md, sección "Escenario A/B/C por HTTPS".

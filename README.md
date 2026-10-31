@@ -1,16 +1,17 @@
-# VLUX Loyalty · V0.2.1 (MVP + Vercel/Supabase)
+# VLUX Loyalty · V0.2.2 (tarjeta instalable en el teléfono)
 
 > Haz que tus clientes tengan una razón más para regresar.
 
 Tarjeta de recompensas web para pequeños negocios (cafeterías, barberías, salones…). El cliente no instala nada: escanea el QR del mostrador y obtiene su tarjeta en el navegador. El personal registra compras desde su teléfono y el dueño ve los resultados en su panel. Un solo despliegue atiende a muchos negocios, con los datos aislados entre ellos.
 
-**Estado:** V0.2.1 preparado para Vercel Functions + Supabase (Postgres administrado). Verificado en local y en el emulador de Vercel; el Preview privado depende de conectar el repo en Vercel (ver `docs/calidad/compuertas-v021.md`). **No hay despliegue en Production.** Apple Wallet y Google Wallet son la siguiente fase (ver `docs/PROPUESTA_V03_WALLET.md`).
+**Estado:** V0.2.2 en Vercel (solo Preview) + Supabase. El cliente puede guardar su tarjeta en la pantalla de inicio del iPhone o Android (PWA, sin tienda de apps). Demo pública para clientes sin cuenta de Vercel y entorno interno protegido (ver `docs/ACCESO_VERCEL_V022.md`). **No hay despliegue en Production.** La PWA **no es** Apple Wallet ni Google Wallet; esas siguen como fase futura (`docs/PROPUESTA_V03_WALLET.md`). Pruebas en teléfonos físicos: pendientes.
 
 ## Qué hace
 - Registro del cliente desde el QR del negocio (`/n/<negocio>`), sin contraseña; enlace personal para abrir su tarjeta en otro teléfono.
 - Caja (`/caja`): identificar tarjeta con cámara en vivo, foto o código; registrar compra; canjear recompensa.
 - Panel del dueño (`/panel`): clientes, visitas, compras, sellos, recurrentes, recompensas, canjes, reseñas; configuración del programa y de la marca; equipo; QR imprimible; exportar y eliminar datos de un cliente.
 - Reglas: 1 sello por compra o por artículo (con tope); varias compras dentro de la ventana cuentan como **una visita**.
+- Tarjeta instalable (V0.2.2): "Guarda tu tarjeta" con instalación nativa en Android y guía en iPhone; manifiesto e ícono por negocio; si la app instalada no tiene la tarjeta, se vincula con un código de un solo uso.
 - Seguridad: sesiones en cookies HttpOnly, roles en servidor, Row Level Security en PostgreSQL, idempotencia y bloqueo transaccional en sellos y canjes.
 
 ## Requisitos
@@ -42,6 +43,7 @@ npm test                      # unitarias + integración (API real contra Postgr
 npm run test:e2e              # 3 navegadores independientes contra el servidor en marcha (requiere Playwright/Chromium y ffmpeg)
 npm run build:vercel && npm run preview:vercel   # salida de Vercel emulada en :8788
 npm run test:e2e:v021         # recuperación de contraseña, nuevo enlace, anular compra
+node tests/e2e/v022-pwa.cjs           # V0.2.2: PWA + escenario A/B/C (BROWSER=chromium|webkit|firefox)
 ```
 Resultados guardados en `docs/evidencia/`.
 
@@ -64,6 +66,11 @@ docs/                      informes, manuales, evidencia
 - `docs/INFORME_TECNICO.md` · arquitectura y decisiones
 - `docs/INFORME_SEGURIDAD.md` · controles y pendientes (V0.2)
 - `docs/INFORME_SEGURIDAD_V021.md` · seguridad en Vercel + Supabase
+- `docs/INFORME_SEGURIDAD_V022.md` · seguridad de la PWA y revisión MSA
+- `docs/ACCESO_VERCEL_V022.md` · acceso de clientes sin cuenta de Vercel
+- `docs/PWA_INVESTIGACION_V022.md` · PWA vs Wallet, instalación por plataforma
+- `docs/DIFF_V021_V022.md` · qué cambió desde V0.2.1
+- `docs/calidad/atomos-v022.md` · átomos V0.2.2 y estado
 - `docs/DESPLIEGUE_VERCEL_SUPABASE.md` · manual técnico de despliegue
 - `docs/RESPALDOS.md` · respaldos y restauración
 - `docs/COSTOS_V021.md` · costos para 2/10/30/100 negocios

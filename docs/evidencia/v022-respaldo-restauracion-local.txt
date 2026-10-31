@@ -1,0 +1,16 @@
+V0.2.2 · Prueba de respaldo y restauración en entorno AISLADO (local, datos sintéticos)
+Fecha: 2026-10-31 23:43:47 UTC · script ops/backup-verify.sh · origen: base local vlux_loyalty · destino: base temporal nueva en el mismo servidor local (borrada al final)
+No se usó Supabase ni la base del Preview. Las URLs se reemplazaron por <url>.
+
+1) Respaldo lógico (pg_dump formato custom, solo esquema public)
+e2bdee9e0173dfa99bd2d2d2d9889a1ad47f1b7f5366c287353bcead3e4a734b  /tmp/respaldo-prueba/vlux-20261031T234313Z.dump
+2) Restauración en base AISLADA: vlux_restore_20261031234313
+3) Verificación de integridad (origen vs restaurada)
+   origen:      audit_events=105 businesses=12 cards=15 customers=15 migrations=5 purchases=26 rewards=5 staff_users=19 stamp_events=32 visits=6
+   restaurada:  audit_events=105 businesses=12 cards=15 customers=15 migrations=5 purchases=26 rewards=5 staff_users=19 stamp_events=32 visits=6
+   tarjetas con saldo distinto a su libro mayor: 0
+   tablas sin RLS tras restaurar: 0
+   tarjetas con más de un premio disponible: 0
+   permisos mínimos de vlux_app tras restaurar: t
+4) Registro del último respaldo verificado
+RESPALDO Y RESTAURACIÓN VERIFICADOS: /tmp/respaldo-prueba/vlux-20261031T234313Z.dump
