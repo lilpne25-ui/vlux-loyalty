@@ -1,0 +1,16 @@
+PASS 00 alta del negocio de prueba · 201
+PASS 01 el dueño genera un enlace de contraseña para su empleado
+PASS 02 el token del enlace se borra de la barra de direcciones · http://localhost:8788/restablecer
+PASS 03 el enlace de contraseña sirve una sola vez
+PASS 04 el empleado entra con su contraseña nueva
+PASS 05 el cliente ve 2 sellos
+PASS 06 el dueño anula una compra con motivo
+PASS 07 la tarjeta del cliente baja a 1 sello sin recargar
+PASS 08 el panel cuenta 1 compra válida (la anulada no cuenta) · 1
+PASS 09 enlace nuevo con token en el fragmento
+PASS 10 el teléfono nuevo abre la tarjeta con el enlace
+PASS 11 el token no queda en la URL del teléfono nuevo · http://localhost:8788/n/op-e2e-b45a0f
+PASS 12 el teléfono anterior ya no ve la tarjeta
+PASS 13 sin errores de consola ni de página
+
+Total: 14 PASS, 0 FAIL

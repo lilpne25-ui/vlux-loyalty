@@ -41,9 +41,7 @@ Para el equipo VLUX y el negocio piloto (ejemplo: Café Demo Toluca). Datos sint
 | 8 | Computadora | Canjes 1. Mostrar que 8 compras seguidas = 1 visita. |
 | 9 | Computadora | Abrir Barbería Demo Metepec: mismo producto, otros textos y reglas. |
 
-## 6. Operación y soporte
-- **Respaldo:** activar respaldos diarios del proveedor de BD. Manual: `pg_dump --format=custom "$DATABASE_ADMIN_URL" > vlux-AAAA-MM-DD.dump`.
-- **Recuperación:** `pg_restore --clean --if-exists -d "$DATABASE_ADMIN_URL" archivo.dump` sobre una base nueva, verificar y después apuntar la app.
-- **Cliente perdió su tarjeta:** hoy no hay recuperación automática; puede crear otra (pendiente V0.3: reenvío del enlace).
-- **Empleado se fue:** Panel → Equipo → Desactivar.
-- **Contraseña olvidada:** el equipo VLUX la restablece en BD (pendiente V0.3: flujo propio).
+## 6. Operación y soporte (V0.2.1)
+- **Respaldos y restauración:** ver `docs/RESPALDOS.md`.
+- **Despliegue y variables:** ver `docs/DESPLIEGUE_VERCEL_SUPABASE.md`.
+- **Soporte frecuente** (contraseñas, nuevo enlace de tarjeta, anular compra, bajas): ver la tabla en `docs/MANUAL_COMERCIAL_CAFETERIA.md` §4.

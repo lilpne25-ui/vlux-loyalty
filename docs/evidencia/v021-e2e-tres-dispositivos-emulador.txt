@@ -1,0 +1,31 @@
+PASS 01 alta del negocio · cafe-e2e-45e101
+PASS 01b alta de un segundo negocio (aislamiento)
+PASS 02 alta de empleado desde el panel del dueño
+PASS 05a QR del mostrador apunta a la URL pública de registro · http://localhost:8788/n/cafe-e2e-45e101
+PASS 03 registro de cliente · 247U-FPCN
+PASS 04 tarjeta web creada (0 de 8)
+PASS 05b QR de la tarjeta sin datos personales
+PASS 13a móvil sin scroll horizontal (cliente)
+PASS 02b empleado cambia su contraseña temporal al primer acceso
+PASS 14a empleado entra directo a caja (sin panel del dueño en el menú)
+PASS 07 empleado identifica la tarjeta con la cámara en vivo
+PASS 06 compra registrada y sello asignado
+PASS 08 sincronización: el cliente ve el sello sin recargar · 2296 ms
+PASS 08b el dueño ve la operación desde su computadora
+PASS 04b enlace personal abre la misma tarjeta en otro teléfono
+PASS 11a doble toque detectado y no suma sin confirmación
+PASS 09 recompensa desbloqueada en caja
+PASS 09b el cliente recibe la celebración en su teléfono
+PASS 10 canje confirmado; inicia ciclo nuevo
+PASS 11 canje duplicado rechazado · 409
+PASS 10b el cliente ve su nuevo ciclo
+PASS 12 estadísticas: compras y sellos no se confunden con visitas · {"customers":"1","visits":"1","purchases":"8","stamps":"8","unlocked":"1","redemptions":"1","recurring":"0"}
+PASS 13 otro negocio no ve clientes ajenos
+PASS 13b otro negocio no puede identificar la tarjeta · 404
+PASS 14b empleado no accede al panel del dueño (UI y API) · 403
+PASS 14c móvil sin scroll horizontal (caja)
+PASS 14d móvil sin scroll horizontal (panel del dueño) · 0
+PASS 14e la cookie de la tarjeta no es legible desde JavaScript (HttpOnly)
+PASS sin errores de consola ni de página
+
+Total: 29 PASS, 0 FAIL

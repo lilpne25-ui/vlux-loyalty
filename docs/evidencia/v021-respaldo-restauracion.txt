@@ -1,0 +1,13 @@
+# Respaldo + restauración aislada + verificación · base local con datos sintéticos · 2026-10-31T19:44:50Z
+1) Respaldo lógico (pg_dump formato custom, solo esquema public)
+a5b69795f46354104316da879a12e68d92d19758cf443bd4ac833fe5b6db66dd  /tmp/vlux-backups/vlux-20261031T194300Z.dump
+2) Restauración en base AISLADA: vlux_restore_20261031194300
+3) Verificación de integridad (origen vs restaurada)
+   origen:      audit_events=185 businesses=29 cards=13 customers=13 migrations=4 purchases=69 rewards=8 staff_users=45 stamp_events=76 visits=11
+   restaurada:  audit_events=185 businesses=29 cards=13 customers=13 migrations=4 purchases=69 rewards=8 staff_users=45 stamp_events=76 visits=11
+   tarjetas con saldo distinto a su libro mayor: 0
+   tablas sin RLS tras restaurar: 0
+   tarjetas con más de un premio disponible: 0
+   permisos mínimos de vlux_app tras restaurar: t
+4) Registro del último respaldo verificado
+RESPALDO Y RESTAURACIÓN VERIFICADOS: /tmp/vlux-backups/vlux-20261031T194300Z.dump

@@ -1,10 +1,10 @@
-# VLUX Loyalty · V0.2 (MVP)
+# VLUX Loyalty · V0.2.1 (MVP + Vercel/Supabase)
 
 > Haz que tus clientes tengan una razón más para regresar.
 
 Tarjeta de recompensas web para pequeños negocios (cafeterías, barberías, salones…). El cliente no instala nada: escanea el QR del mostrador y obtiene su tarjeta en el navegador. El personal registra compras desde su teléfono y el dueño ve los resultados en su panel. Un solo despliegue atiende a muchos negocios, con los datos aislados entre ellos.
 
-**Estado:** MVP funcional verificado en entorno local. **No está desplegado en producción.** Apple Wallet y Google Wallet son la siguiente fase (ver `docs/PROPUESTA_V03_WALLET.md`).
+**Estado:** V0.2.1 preparado para Vercel Functions + Supabase (Postgres administrado). Verificado en local y en el emulador de Vercel; el Preview privado depende de conectar el repo en Vercel (ver `docs/calidad/compuertas-v021.md`). **No hay despliegue en Production.** Apple Wallet y Google Wallet son la siguiente fase (ver `docs/PROPUESTA_V03_WALLET.md`).
 
 ## Qué hace
 - Registro del cliente desde el QR del negocio (`/n/<negocio>`), sin contraseña; enlace personal para abrir su tarjeta en otro teléfono.
@@ -40,6 +40,8 @@ cp .env .env.test             # y cambia el nombre de la base a vlux_loyalty_tes
 npm run db:setup:test         # crea y migra la base de pruebas
 npm test                      # unitarias + integración (API real contra PostgreSQL)
 npm run test:e2e              # 3 navegadores independientes contra el servidor en marcha (requiere Playwright/Chromium y ffmpeg)
+npm run build:vercel && npm run preview:vercel   # salida de Vercel emulada en :8788
+npm run test:e2e:v021         # recuperación de contraseña, nuevo enlace, anular compra
 ```
 Resultados guardados en `docs/evidencia/`.
 
@@ -55,16 +57,23 @@ legacy/v01/                V0.1 original (referencia; no se compila)
 docs/                      informes, manuales, evidencia
 ```
 
-## Despliegue (no realizado)
-Un proceso Node (`npm run build && npm start`) + PostgreSQL administrado. Ver `docs/INFORME_TECNICO.md`. Antes de producción: HTTPS, `NODE_ENV=production`, `TRUST_PROXY=1` si hay proxy, respaldos de BD y aviso de privacidad revisado por un abogado.
+## Despliegue (Vercel + Supabase)
+`npm run build:vercel` genera `.vercel/output` (Build Output API v3): estáticos + una Function Node 22 con Hono. Base: Supabase vía Transaction Pooler con el rol `vlux_app` (sin privilegios de dueño). Production está bloqueado a propósito. Paso a paso, variables y recuperación en `docs/DESPLIEGUE_VERCEL_SUPABASE.md`.
 
 ## Documentación
 - `docs/INFORME_TECNICO.md` · arquitectura y decisiones
-- `docs/INFORME_SEGURIDAD.md` · controles y pendientes
+- `docs/INFORME_SEGURIDAD.md` · controles y pendientes (V0.2)
+- `docs/INFORME_SEGURIDAD_V021.md` · seguridad en Vercel + Supabase
+- `docs/DESPLIEGUE_VERCEL_SUPABASE.md` · manual técnico de despliegue
+- `docs/RESPALDOS.md` · respaldos y restauración
+- `docs/COSTOS_V021.md` · costos para 2/10/30/100 negocios
+- `docs/MANUAL_COMERCIAL_CAFETERIA.md` · alta comercial de una cafetería
+- `docs/CHECKLIST_DISPOSITIVOS_FISICOS.md` · prueba manual en iPhone y Android
 - `docs/REPORTE_MIGRACION.md` · qué se reutilizó de V0.1
 - `docs/MANUAL_PILOTO.md` · uso para el negocio piloto
 - `docs/PREPARACION_COMERCIAL.md` · qué está listo y qué no
 - `docs/PROPUESTA_V03_WALLET.md` · Apple Wallet y Google Wallet
-- `docs/calidad/compuertas.md` · compuertas de calidad por átomo
+- `docs/calidad/compuertas.md` · compuertas de calidad por átomo (V0.2)
+- `docs/calidad/compuertas-v021.md` · átomos V0.2.1 y estado final
 
 © VLUX — eTransformation Partner. Código propietario.
