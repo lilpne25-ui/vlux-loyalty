@@ -6,7 +6,7 @@ import { DUMMY_PASSWORD_HASH, newToken, sha256, verifyPassword } from '../securi
 import { audit } from './audit';
 
 export type Role = 'OWNER' | 'EMPLOYEE';
-export interface StaffSession { sessionId: string; userId: string; email: string; displayName: string; businessId: string; businessSlug: string; businessName: string; role: Role; }
+export interface StaffSession { sessionId: string; userId: string; email: string; displayName: string; businessId: string; businessSlug: string; businessName: string; role: Role; mustChangePassword: boolean; }
 
 const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
@@ -14,11 +14,12 @@ const invalid = () => new AppError(401, 'invalid_credentials', 'Correo o contras
 
 export async function login(email: string, password: string, businessSlug?: string): Promise<{ token: string; session: StaffSession; businesses: { slug: string; name: string; role: Role }[] }> {
   const pool = getPool();
-  const user = (await pool.query('SELECT id, email, display_name, password_hash, failed_logins, locked_until, disabled_at FROM staff_users WHERE email = $1', [email])).rows[0];
+  const user = (await pool.query('SELECT id, email, display_name, password_hash, failed_logins, locked_until, disabled_at, must_change_password FROM staff_users WHERE email = $1', [email])).rows[0];
   const ok = await verifyPassword(password, user?.password_hash ?? DUMMY_PASSWORD_HASH);
   if (!user || user.disabled_at) throw invalid();
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
-    throw new AppError(429, 'account_locked', `Demasiados intentos fallidos. Intenta de nuevo en unos minutos.`);
+    // Mismo código y mensaje que el límite por IP: no revela si el correo existe.
+    throw new AppError(429, 'rate_limited', 'Demasiados intentos. Espera un momento y vuelve a intentar.');
   }
   if (!ok) {
     await pool.query(
@@ -51,7 +52,7 @@ export async function login(email: string, password: string, businessSlug?: stri
   await withTenant(m.business_id, (tx) => audit(tx, m.business_id, { type: 'staff', id: user.id }, 'staff.login', 'staff_user', user.id, { role: m.role }));
   return {
     token,
-    session: { sessionId, userId: user.id, email: user.email, displayName: user.display_name, businessId: m.business_id, businessSlug: m.slug, businessName: m.name, role: m.role },
+    session: { sessionId, userId: user.id, email: user.email, displayName: user.display_name, businessId: m.business_id, businessSlug: m.slug, businessName: m.name, role: m.role, mustChangePassword: !!user.must_change_password },
     businesses: memberships.map((x) => ({ slug: x.slug, name: x.name, role: x.role })),
   };
 }
@@ -60,7 +61,7 @@ export async function login(email: string, password: string, businessSlug?: stri
 export async function getStaffSession(token: string | undefined): Promise<StaffSession | null> {
   if (!token || token.length > 100) return null;
   const row = (await getPool().query(
-    `SELECT s.id, s.user_id, u.email, u.display_name, s.business_id, b.slug, b.name, m.role
+    `SELECT s.id, s.user_id, u.email, u.display_name, u.must_change_password, s.business_id, b.slug, b.name, m.role
        FROM staff_sessions s
        JOIN staff_users u ON u.id = s.user_id
        JOIN staff_memberships m ON m.id = s.membership_id
@@ -70,7 +71,7 @@ export async function getStaffSession(token: string | undefined): Promise<StaffS
     [sha256(token)],
   )).rows[0];
   if (!row) return null;
-  return { sessionId: row.id, userId: row.user_id, email: row.email, displayName: row.display_name, businessId: row.business_id, businessSlug: row.slug, businessName: row.name, role: row.role };
+  return { sessionId: row.id, userId: row.user_id, email: row.email, displayName: row.display_name, businessId: row.business_id, businessSlug: row.slug, businessName: row.name, role: row.role, mustChangePassword: !!row.must_change_password };
 }
 
 export async function logout(token: string | undefined) {

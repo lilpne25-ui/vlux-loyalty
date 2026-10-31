@@ -36,7 +36,7 @@ export function LoginView({ onLoggedIn }: { onLoggedIn: (s: StaffSessionInfo) =>
           {error && <p className="text-[13px] text-[#B42318]" role="alert">{error}</p>}
           <Button type="submit" size="lg" disabled={busy || !email || !password}><LogIn size={17} /> {busy ? 'Entrando…' : 'Entrar'}</Button>
         </div>
-        <p className="text-[12px] text-slate2">¿Olvidaste tu contraseña? Pide al dueño del negocio o a VLUX que la restablezca.</p>
+        <p className="text-[12px] text-slate2">¿Olvidaste tu contraseña? Pide al dueño del negocio un enlace para crear una nueva. Si eres el dueño, pídelo a VLUX.</p>
       </form>
     </div>
   );

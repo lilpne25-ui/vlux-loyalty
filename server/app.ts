@@ -12,6 +12,8 @@ import { rateLimit } from './ratelimit';
 import { loginSchema, reviewEventSchema, slugSchema, uuidSchema } from './validation';
 import { getStaffSession, login, logout, type Role, type StaffSession } from './services/auth';
 import { createBusiness, getBusinessBySlug } from './services/businesses';
+import { changePassword, ownerIssueEmployeeReset, platformIssueReset, reissueCardLink, resetPasswordWithToken, voidPurchase } from './services/operations';
+import { ensureSafeRole } from './db';
 import { registerCustomer, resolveCardToken } from './services/customers';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
@@ -28,8 +30,13 @@ function cookieOpts(maxAgeSeconds: number) {
 }
 
 function clientIp(c: Context) {
-  // Solo se confía en x-forwarded-for si el despliegue está detrás de un proxy propio (TRUST_PROXY=1);
-  // si no, cualquiera podría falsificarlo para saltarse los límites de intentos.
+  // En Vercel la IP real llega en x-vercel-forwarded-for: Vercel la sobrescribe en su borde,
+  // así que el cliente no puede falsificarla. Fuera de Vercel solo se confía en x-forwarded-for
+  // con TRUST_PROXY=1 (proxy propio que la sobrescribe); si no, se usa el socket.
+  if (config.onVercel) {
+    const v = c.req.header('x-vercel-forwarded-for')?.split(',')[0]?.trim();
+    if (v) return v;
+  }
   if (config.trustProxy) {
     const fwd = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
     if (fwd) return fwd;
@@ -41,6 +48,14 @@ function clientIp(c: Context) {
   }
 }
 
+/** URL pública para enlaces personales y QR: PUBLIC_BASE_URL si existe; en Vercel, el dominio que atendió la solicitud. */
+export function publicBaseUrl(c: Context) {
+  if (config.publicBaseUrlExplicit) return config.publicBaseUrl;
+  const host = c.req.header('host');
+  if (config.onVercel && host && /^[a-z0-9.-]+$/i.test(host)) return `https://${host}`;
+  return config.publicBaseUrl;
+}
+
 /** Protección CSRF: mutaciones solo con JSON y, si el navegador manda Origin, que sea el nuestro. */
 async function csrfGuard(c: Context, next: Next) {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
@@ -49,7 +64,7 @@ async function csrfGuard(c: Context, next: Next) {
     const origin = c.req.header('origin');
     if (origin) {
       const host = c.req.header('host');
-      const allowed = [config.publicBaseUrl, host ? `http://${host}` : '', host ? `https://${host}` : ''];
+      const allowed = [publicBaseUrl(c), host ? `http://${host}` : '', host ? `https://${host}` : ''];
       if (!allowed.includes(origin)) throw new AppError(403, 'bad_origin', 'Origen no permitido.');
     }
   }
@@ -123,9 +138,13 @@ export function buildApp() {
   const api = new Hono<Env>();
   api.use('*', bodyLimit({ maxSize: 16 * 1024, onError: () => { throw new AppError(400, 'body_too_large', 'La solicitud es demasiado grande.'); } }));
   api.use('*', csrfGuard);
-  api.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
+  api.use('*', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next(); });
 
-  api.get('/health', (c) => c.json({ ok: true }));
+  api.get('/health', async (c) => {
+    if (c.req.query('db') !== '1') return c.json({ ok: true });
+    await ensureSafeRole();
+    return c.json({ ok: true, db: true });
+  });
 
   // ---------- Público ----------
   api.get('/public/businesses/:slug', async (c) => {
@@ -135,11 +154,11 @@ export function buildApp() {
 
   api.post('/public/businesses/:slug/register', async (c) => {
     const slug = slugSchema.parse(c.req.param('slug'));
-    rateLimit(`register:${clientIp(c)}`, 20, 60 * 60_000);
+    await rateLimit(`register:${clientIp(c)}`, 20, 60 * 60_000);
     const r = await registerCustomer(slug, await jsonBody(c));
     setCookie(c, cardCookie(slug), r.token, cookieOpts(CARD_COOKIE_DAYS * 86400));
     // El enlace personal permite abrir la tarjeta en otro teléfono. Se muestra una sola vez.
-    return c.json({ publicCode: r.publicCode, personalLink: `${config.publicBaseUrl}/t/${r.token}` }, 201);
+    return c.json({ publicCode: r.publicCode, personalLink: `${publicBaseUrl(c)}/t#${r.token}` }, 201);
   });
 
   // ---------- Cliente (cookie de su tarjeta) ----------
@@ -152,6 +171,7 @@ export function buildApp() {
   api.post('/me/:slug/review-events', async (c) => {
     const ref = await customerCard(c, c.req.param('slug'));
     if (!ref) throw unauthorized();
+    await rateLimit(`review:${ref.cardId}`, 10, 60 * 60_000);
     const { kind } = reviewEventSchema.parse(await jsonBody(c));
     await recordReviewEvent(ref.businessId, ref.cardId, kind);
     return c.json({ ok: true });
@@ -163,13 +183,30 @@ export function buildApp() {
     return c.json({ ok: true });
   });
 
+  // Enlace personal en el fragmento (#): el token nunca viaja en la URL, así no queda en logs del
+  // servidor, de Vercel ni en encabezados Referer. La página /t lo lee y lo envía aquí.
+  api.post('/card-access', async (c) => {
+    await rateLimit(`token:${clientIp(c)}`, 30, 60_000);
+    const body = (await jsonBody(c)) as { token?: unknown };
+    const token = typeof body?.token === 'string' ? body.token : '';
+    const ref = await resolveCardToken(token);
+    if (!ref) throw new AppError(404, 'invalid_link', 'Este enlace ya no es válido. Pide uno nuevo en el negocio.');
+    setCookie(c, cardCookie(ref.slug), token, cookieOpts(CARD_COOKIE_DAYS * 86400));
+    return c.json({ slug: ref.slug });
+  });
+
   // ---------- Personal ----------
   api.post('/staff/login', async (c) => {
     const input = loginSchema.parse(await jsonBody(c));
-    rateLimit(`login-ip:${clientIp(c)}`, 20, 15 * 60_000);
+    await rateLimit(`login-ip:${clientIp(c)}`, 20, 15 * 60_000);
     const r = await login(input.email, input.password, input.businessSlug);
     setCookie(c, STAFF_COOKIE, r.token, cookieOpts(config.staffSessionHours * 3600));
     return c.json({ session: publicSession(r.session), businesses: r.businesses });
+  });
+
+  api.post('/staff/password-reset', async (c) => {
+    await rateLimit(`reset:${clientIp(c)}`, 10, 15 * 60_000);
+    return c.json(await resetPasswordWithToken(await jsonBody(c)));
   });
 
   api.post('/staff/logout', async (c) => {
@@ -188,7 +225,7 @@ export function buildApp() {
   staff.get('/business', async (c) => c.json(await getBusinessBySlug(c.get('staff').businessSlug)));
   staff.post('/cards/lookup', async (c) => {
     const s = c.get('staff');
-    rateLimit(`lookup:${s.sessionId}`, 120, 60_000);
+    await rateLimit(`lookup:${s.sessionId}`, 120, 60_000);
     const body = (await jsonBody(c)) as { code?: unknown };
     return c.json(await lookupCard(s, String(body?.code ?? '')));
   });
@@ -196,15 +233,34 @@ export function buildApp() {
   staff.get('/cards/:cardId', async (c) => c.json(await staffCardView(c.get('staff'), uuidSchema.parse(c.req.param('cardId')))));
   staff.post('/cards/:cardId/purchases', async (c) => {
     const s = c.get('staff');
-    rateLimit(`purchase:${s.sessionId}`, 60, 60_000);
+    await rateLimit(`purchase:${s.sessionId}`, 60, 60_000);
     return c.json(await registerPurchase(s, uuidSchema.parse(c.req.param('cardId')), await jsonBody(c)));
   });
-  staff.post('/rewards/:rewardId/redeem', async (c) => c.json(await redeemReward(c.get('staff'), uuidSchema.parse(c.req.param('rewardId')))));
+  staff.post('/rewards/:rewardId/redeem', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`redeem:${s.sessionId}`, 30, 60_000);
+    return c.json(await redeemReward(s, uuidSchema.parse(c.req.param('rewardId'))));
+  });
+  staff.post('/password', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`pwd:${s.userId}`, 5, 15 * 60_000);
+    return c.json(await changePassword(s, await jsonBody(c)));
+  });
+  staff.post('/cards/:cardId/link', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`relink:${s.sessionId}`, 10, 60 * 60_000);
+    const r = await reissueCardLink(s, uuidSchema.parse(c.req.param('cardId')));
+    return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}` });
+  });
   api.route('/staff', staff);
 
   // ---------- Dueño ----------
   const owner = new Hono<Env>();
   owner.use('*', requireStaff('OWNER'));
+  owner.use('*', async (c, next) => {
+    if (c.req.method !== 'GET') await rateLimit(`owner-write:${c.get('staff').userId}`, 120, 60_000);
+    await next();
+  });
   owner.get('/dashboard', async (c) => c.json(await dashboard(c.get('staff'))));
   owner.get('/customers', async (c) => c.json({ customers: await listCustomers(c.get('staff')) }));
   owner.get('/customers/:customerId/export', async (c) => c.json(await exportCustomer(c.get('staff'), uuidSchema.parse(c.req.param('customerId')))));
@@ -218,23 +274,46 @@ export function buildApp() {
     if (typeof body?.active !== 'boolean') throw new AppError(422, 'validation', 'Indica si el empleado queda activo.');
     return c.json(await setStaffActive(c.get('staff'), uuidSchema.parse(c.req.param('membershipId')), body.active));
   });
+  owner.post('/staff/:membershipId/reset-link', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`owner-reset:${s.userId}`, 10, 60 * 60_000);
+    const r = await ownerIssueEmployeeReset(s, uuidSchema.parse(c.req.param('membershipId')));
+    return c.json({ resetLink: `${publicBaseUrl(c)}/restablecer#${r.token}`, expiresInMinutes: r.expiresInMinutes });
+  });
+  owner.post('/purchases/:purchaseId/void', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`void:${s.userId}`, 30, 60 * 60_000);
+    return c.json(await voidPurchase(s, uuidSchema.parse(c.req.param('purchaseId')), await jsonBody(c)));
+  });
   api.route('/owner', owner);
 
   // ---------- Plataforma (equipo VLUX) ----------
   api.post('/platform/businesses', async (c) => {
     const expected = config.platformAdminToken;
     const got = (c.req.header('authorization') || '').replace(/^Bearer /, '');
-    rateLimit(`platform:${clientIp(c)}`, 10, 60_000);
+    await rateLimit(`platform:${clientIp(c)}`, 10, 60_000);
     if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
     return c.json(await createBusiness((await jsonBody(c)) as never), 201);
   });
 
+  api.post('/platform/password-reset', async (c) => {
+    const expected = config.platformAdminToken;
+    const got = (c.req.header('authorization') || '').replace(/^Bearer /, '');
+    await rateLimit(`platform:${clientIp(c)}`, 10, 60_000);
+    if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
+    const body = (await jsonBody(c)) as { email?: unknown };
+    const r = await platformIssueReset(String(body?.email ?? ''));
+    return c.json({ resetLink: `${publicBaseUrl(c)}/restablecer#${r.token}`, expiresInMinutes: r.expiresInMinutes });
+  });
+
   app.route('/api', api);
+  app.notFound((c) => c.json({ error: { code: 'not_found', message: 'Ruta no encontrada.' } }, 404));
 
   // Enlace personal del cliente: guarda el acceso en este teléfono y abre su tarjeta.
   app.get('/t/:token', async (c) => {
+    c.header('Cache-Control', 'no-store');
     const token = c.req.param('token');
-    rateLimit(`token:${clientIp(c)}`, 30, 60_000);
+    await rateLimit(`token:${clientIp(c)}`, 30, 60_000);
     const ref = await resolveCardToken(token);
     if (!ref) return c.redirect('/?enlace=invalido', 302);
     setCookie(c, cardCookie(ref.slug), token, cookieOpts(CARD_COOKIE_DAYS * 86400));
@@ -245,5 +324,5 @@ export function buildApp() {
 }
 
 function publicSession(s: StaffSession) {
-  return { userId: s.userId, email: s.email, displayName: s.displayName, role: s.role, business: { id: s.businessId, slug: s.businessSlug, name: s.businessName } };
+  return { userId: s.userId, email: s.email, displayName: s.displayName, role: s.role, mustChangePassword: s.mustChangePassword, business: { id: s.businessId, slug: s.businessSlug, name: s.businessName } };
 }

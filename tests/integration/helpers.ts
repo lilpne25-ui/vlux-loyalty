@@ -33,7 +33,7 @@ export class Device {
 export const PASSWORD = 'contraseña-de-prueba-123';
 
 export async function newBusiness(opts: Partial<{ stampsRequired: number; stampMode: 'per_purchase' | 'per_item'; maxStampsPerPurchase: number; vertical: string; reviewUrl: string | null }> = {}) {
-  resetRateLimits();
+  await resetRateLimits();
   const slug = 'p-' + randomUUID().slice(0, 8);
   const ownerEmail = `dueno-${slug}@ejemplo.test`;
   const r = await createBusiness({

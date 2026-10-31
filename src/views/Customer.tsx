@@ -314,7 +314,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
             <li key={o.kind + o.at + i} className="px-5 py-2.5 flex items-center justify-between gap-3 text-[13px]">
               <span className="inline-flex items-center gap-2 text-cafe-body min-w-0">
                 {o.kind === 'purchase' ? <VerticalIcon v={b.vertical} size={14} /> : o.kind === 'card_created' ? <Plus size={14} /> : o.kind === 'reward_redeemed' ? <Check size={14} /> : <Gift size={14} />}
-                <span className="truncate">{o.kind === 'purchase' ? `Compra · +${plural(o.stamps, 'sello', 'sellos')}` : o.kind === 'card_created' ? 'Tarjeta creada' : o.kind === 'reward_redeemed' ? 'Recompensa canjeada' : 'Recompensa desbloqueada'}</span>
+                <span className="truncate">{o.kind === 'purchase' ? `Compra · +${plural(o.stamps, 'sello', 'sellos')}` : o.kind === 'purchase_voided' ? `Compra anulada · ${o.stamps} ${Math.abs(o.stamps) === 1 ? 'sello' : 'sellos'}` : o.kind === 'card_created' ? 'Tarjeta creada' : o.kind === 'reward_redeemed' ? 'Recompensa canjeada' : 'Recompensa desbloqueada'}</span>
               </span>
               <span className="shrink-0 text-cafe-muted tabular-nums text-[12px] inline-flex items-center gap-1"><Clock size={12} /> {formatDateTime(o.at)}</span>
             </li>

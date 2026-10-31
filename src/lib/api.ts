@@ -34,7 +34,7 @@ export interface Program { stampsRequired: number; stampMode: 'per_purchase' | '
 export interface BusinessInfo { slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; reviewUrl?: string | null; isDemo: boolean }
 export type Vertical = 'cafeteria' | 'barberia' | 'salon' | 'restaurante' | 'otro';
 export interface RewardInfo { id?: string; code: string; description: string; stampsCost: number; unlockedAt: string }
-export interface HistoryItem { kind: 'card_created' | 'purchase' | 'reward_unlocked' | 'reward_redeemed'; at: string; stamps: number; items?: number; customerName?: string; publicCode?: string; staffName?: string | null }
+export interface HistoryItem { kind: 'card_created' | 'purchase' | 'purchase_voided' | 'reward_unlocked' | 'reward_redeemed'; at: string; stamps: number; items?: number; purchaseId?: string; voided?: boolean; customerName?: string; publicCode?: string; staffName?: string | null }
 export interface CustomerCardView {
   business: BusinessInfo;
   program: Program;
@@ -46,4 +46,4 @@ export interface StaffCard {
   id: string; publicCode: string; customerName: string; balance: number; cycle: number; status: string; createdAt: string;
   lastVisitAt: string | null; lastPurchaseAt: string | null; visits: number; purchases: number; redeemed: number; reward: (RewardInfo & { id: string }) | null;
 }
-export interface StaffSessionInfo { userId: string; email: string; displayName: string; role: 'OWNER' | 'EMPLOYEE'; business: { id: string; slug: string; name: string } }
+export interface StaffSessionInfo { userId: string; email: string; displayName: string; role: 'OWNER' | 'EMPLOYEE'; mustChangePassword?: boolean; business: { id: string; slug: string; name: string } }

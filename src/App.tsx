@@ -5,8 +5,11 @@
 //   /acceso       inicio de sesión del personal
 //   /caja         panel del empleado (empleado o dueño)
 //   /panel        panel del dueño (solo dueño)
+//   /cuenta       cambio de contraseña del personal
+//   /t#token      abre la tarjeta desde el enlace personal
+//   /restablecer#token  contraseña nueva con enlace de un solo uso
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScanLine, LayoutDashboard, LogOut } from 'lucide-react';
+import { ScanLine, LayoutDashboard, LogOut, KeyRound } from 'lucide-react';
 import { api, StaffSessionInfo } from './lib/api';
 import { navigate, useLocation } from './lib/router';
 import { ToastProvider, VluxMark, cx } from './components/ui';
@@ -16,6 +19,7 @@ import { EmployeeView } from './views/Employee';
 import { OwnerView } from './views/Owner';
 import { ForBusinessView } from './views/ForBusiness';
 import { LoginView } from './views/Login';
+import { CardLinkView, ChangePasswordPanel, ResetPasswordView } from './views/Account';
 
 export default function App() {
   return (
@@ -45,8 +49,11 @@ function Shell() {
     }
   }, []);
 
-  const isStaffRoute = path === '/acceso' || path.startsWith('/caja') || path.startsWith('/panel');
+  const isStaffRoute = path === '/acceso' || path.startsWith('/caja') || path.startsWith('/panel') || path === '/cuenta';
   useEffect(() => { if (isStaffRoute) loadSession(); }, [isStaffRoute, loadSession]);
+
+  if (path === '/t') return <CardLinkView />;
+  if (path === '/restablecer') return <ResetPasswordView />;
 
   const customerMatch = path.match(/^\/n\/([a-z0-9-]{3,40})\/?$/);
   if (customerMatch) return <CustomerApp slug={customerMatch[1]} />;
@@ -85,7 +92,9 @@ function Shell() {
       <TopBar session={session} path={path} onLogout={logout} />
       <main className="flex-1">
         <div className="view-in min-h-full">
-          {forbidden ? (
+          {session.mustChangePassword || path === '/cuenta' ? (
+            <ChangePasswordPanel forced={session.mustChangePassword} onDone={async () => { await loadSession(); navigate(session.role === 'OWNER' ? '/panel' : '/caja', { replace: true }); }} />
+          ) : forbidden ? (
             <div className="mx-auto max-w-[520px] gutter py-16 text-center">
               <h1 className="text-[20px] font-semibold text-ink">Solo el dueño puede ver este panel</h1>
               <p className="mt-2 text-[14px] text-slate2">Tu cuenta es de caja. Si necesitas acceso, pídeselo al dueño del negocio.</p>
@@ -118,7 +127,9 @@ function TopBar({ session, path, onLogout }: { session: StaffSessionInfo; path: 
               {icon} {label}
             </button>
           ))}
-          <span className="hidden sm:inline text-[11.5px] text-white/45 px-2 truncate max-w-[160px]" title={session.email}>{session.displayName}</span>
+          <button onClick={() => navigate('/cuenta')} title={`${session.email} · cambiar contraseña`} aria-label="Cambiar contraseña" className="h-8 px-2 rounded-lg text-[11.5px] inline-flex items-center gap-1.5 text-white/60 hover:text-white hover:bg-white/10">
+            <KeyRound size={13} /> <span className="hidden sm:inline truncate max-w-[140px]">{session.displayName}</span>
+          </button>
           <button onClick={onLogout} className="h-8 px-2.5 rounded-lg text-[12.5px] inline-flex items-center gap-1.5 text-white/70 hover:text-white hover:bg-white/10" aria-label="Cerrar sesión">
             <LogOut size={14} /> <span className="hidden sm:inline">Salir</span>
           </button>
