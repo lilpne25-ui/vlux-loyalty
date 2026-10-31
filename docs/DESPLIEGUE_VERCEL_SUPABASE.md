@@ -61,7 +61,9 @@ Cliente / Caja / Dueño (navegador, HTTPS)
 
 ## 5. Despliegue
 - Proyecto Vercel `vlux-loyalty` (equipo vlux-s-projects), Node 22, región `iad1` (misma región que Supabase us-east-1).
-- Build: `npm ci` → `npm run build:vercel`.
+- Build: `npm ci --include=dev` → `npm run build:vercel`. El `--include=dev` es obligatorio: `NODE_ENV=production` hace que npm omita Vite y esbuild.
+- Host del pooler del proyecto de Preview: `aws-0-us-east-1.pooler.supabase.com:6543`. Cópialo siempre desde *Connect* en Supabase; con un host equivocado el error es `tenant/user not found`.
+- **Mientras Vercel no tenga acceso al repo**, el Preview se crea por API con `target: staging` desde la rama `v0.2.1`. Sin un repo enlazado, Vercel trata cualquier deploy sin target como Production, y el bloqueo lo cancela. Esto solo funciona con el repo público.
 - **Production deshabilitado:** el *Ignored Build Step* cancela cualquier build con `VERCEL_ENV=production`. Para habilitarlo hace falta decisión explícita de Vlux, plan Pro y dominio.
 - **Protección:** Vercel Authentication en todos los despliegues (solo cuentas del equipo). Para pruebas automáticas se usa un enlace de omisión con caducidad.
 - Cada push a una rama distinta de `main` genera un Preview con su propia URL.
