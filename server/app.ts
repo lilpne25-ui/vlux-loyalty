@@ -15,6 +15,8 @@ import { createBusiness, getBusinessBySlug } from './services/businesses';
 import { changePassword, ownerIssueEmployeeReset, platformIssueReset, reissueCardLink, resetPasswordWithToken, voidPurchase } from './services/operations';
 import { ensureSafeRole } from './db';
 import { registerCustomer, resolveCardToken } from './services/customers';
+import { issuePairCode, redeemPairCode } from './services/pairing';
+import { buildManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
 import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
@@ -181,6 +183,46 @@ export function buildApp() {
     const slug = slugSchema.parse(c.req.param('slug'));
     deleteCookie(c, cardCookie(slug), { path: '/' });
     return c.json({ ok: true });
+  });
+
+  // ---------- PWA: vincular la app instalada (V0.2.2) ----------
+  // Código de un solo uso generado desde el navegador donde ya está la tarjeta.
+  api.post('/me/:slug/pair-code', async (c) => {
+    const ref = await customerCard(c, c.req.param('slug'));
+    if (!ref) throw unauthorized();
+    await rateLimit(`paircode:${ref.cardId}`, 10, 60 * 60_000);
+    return c.json(await issuePairCode(ref), 201);
+  });
+
+  // Canje del código desde la app instalada: crea un acceso nuevo y lo guarda en su cookie.
+  api.post('/me/:slug/pair', async (c) => {
+    const slug = slugSchema.parse(c.req.param('slug'));
+    await rateLimit(`pair:${clientIp(c)}`, 10, 10 * 60_000);
+    await rateLimit(`pair-biz:${slug}`, 300, 10 * 60_000);
+    const b = await getBusinessBySlug(slug);
+    const body = (await jsonBody(c)) as { code?: unknown };
+    const { token } = await redeemPairCode(b.id, typeof body?.code === 'string' ? body.code : '');
+    setCookie(c, cardCookie(slug), token, cookieOpts(CARD_COOKIE_DAYS * 86400));
+    return c.json({ ok: true });
+  });
+
+  // Manifiesto e íconos por negocio: solo datos públicos del negocio (nunca tokens ni datos del cliente).
+  api.get('/pwa/:slug/manifest.webmanifest', async (c) => {
+    const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
+    c.header('Cache-Control', 'public, max-age=300');
+    c.header('Content-Type', 'application/manifest+json; charset=utf-8');
+    return c.body(JSON.stringify(buildManifest(b)));
+  });
+
+  api.get('/pwa/:slug/icon/:file', async (c) => {
+    const m = c.req.param('file').match(/^(192|512|180|maskable-512)\.png$/);
+    if (!m) throw new AppError(404, 'not_found', 'Ruta no encontrada.');
+    const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
+    const maskable = m[1].startsWith('maskable');
+    const size = maskable ? 512 : Number(m[1]);
+    c.header('Cache-Control', 'public, max-age=86400');
+    c.header('Content-Type', 'image/png');
+    return c.body(new Uint8Array(renderIcon({ size, maskable, name: b.name, primary: b.primaryColor, accent: b.accentColor })));
   });
 
   // Enlace personal en el fragmento (#): el token nunca viaja en la URL, así no queda en logs del

@@ -1,6 +1,6 @@
 {
   "name": "vlux-loyalty",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "VLUX Loyalty: tarjetas de fidelidad web multiempresa",
   "scripts": {
     "dev:web": "vite",

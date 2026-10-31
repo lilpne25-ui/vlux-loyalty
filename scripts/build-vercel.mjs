@@ -58,6 +58,8 @@ const config = {
   routes: [
     // Archivos con hash: caché larga e inmutable.
     { src: '^/assets/(.*)$', headers: { 'cache-control': 'public, max-age=31536000, immutable' }, continue: true },
+    // Service worker: siempre revalidar para que las actualizaciones lleguen.
+    { src: '^/sw\\.js$', headers: { 'cache-control': 'no-cache, max-age=0', 'content-type': 'text/javascript; charset=utf-8' }, continue: true },
     // Todo lo demás: encabezados de seguridad.
     { src: '^/(?!api(?:/|$)|t/)(.*)$', headers: securityHeaders, continue: true },
     // API y enlaces personales SIEMPRE a la Function (antes del sistema de archivos y del fallback).

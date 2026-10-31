@@ -1,0 +1,43 @@
+# V0.2.2 · chromium · http://localhost:8788 · modo local (negocio creado para la prueba)
+PASS 00 alta del negocio de prueba · 201
+PASS 00b alta del empleado · 201
+PASS P01 la página del negocio enlaza su manifiesto · /api/pwa/pwa-e2e-9e2af8/manifest.webmanifest
+PASS P02 manifiesto válido (id, start_url dentro de scope, standalone, íconos 192/512/maskable) · {"name":"Café PWA E2E · Tarjeta","short":"Café PWA E2E"}
+PASS P03 íconos accesibles (PNG) incluido el de iPhone · /api/pwa/pwa-e2e-9e2af8/icon/180.png
+PASS P04 HTTPS o localhost (contexto seguro para service worker)
+PASS A1 registro de cliente y tarjeta creada · KGDQ-XJ42
+PASS P05 service worker registrado y activo con scope / · {"supported":true,"active":true,"scope":"http://localhost:8788/"}
+PASS P06 la página queda controlada por el service worker
+PASS P07 /sw.js se revalida siempre (no-cache) y tiene versión de build · no-cache, max-age=0
+PASS U1 sección "Guarda tu tarjeta" visible en el navegador
+PASS U2 iPhone: guía de Safari (Compartir → Agregar a pantalla de inicio) con código de 8 dígitos
+PASS P08 app instalada sin cookie: pide vincular (no muestra registro ni datos ajenos)
+PASS P09 vinculada con el código: la app abre la MISMA tarjeta
+PASS P10 en modo app no se ofrece "Agregar a mi teléfono"
+PASS P11 el código de vinculación no se puede reutilizar · 404
+PASS P12 persistencia: al reabrir la app sigue la tarjeta (cookie HttpOnly propia de la app)
+PASS S1 la cookie de la tarjeta no es legible desde JavaScript
+PASS B1 lectura de QR (foto) identifica la tarjeta del cliente
+PASS B2 compra registrada y sello otorgado por el servidor
+PASS A2 sincronización: la app instalada ve el sello sin recargar · 2807 ms
+PASS A3 el navegador original también se actualiza
+PASS C1 el dueño consulta la operación (compras +1)
+PASS B3 prevención de duplicados: el doble toque pide confirmación y no suma
+PASS A4 la recompensa aparece en la app instalada
+PASS B4 canje confirmado por el servidor
+PASS B5 canje duplicado rechazado · 409
+PASS S2 el cliente no puede sellarse desde su app (backend lo rechaza) · 401
+PASS A5 la app instalada muestra el ciclo nuevo
+PASS C2 el dueño consulta el canje; compras y visitas no se confunden · {"compras":4,"visitas":1,"canjes":1}
+PASS P13 la caché solo tiene index.html y /assets (sin /api, tokens ni datos del cliente) · /index.html,/assets/index-D5pYhkSr.css,/assets/index-SRyAOM7Z.js
+PASS P14 sin conexión: la app abre desde caché y muestra un aviso claro (no inventa sellos) · screen
+PASS P15 al reconectar vuelve a mostrar los datos del servidor
+PASS P16 al activar una versión nueva se eliminan las cachés anteriores · vlux-shell-d322d60639c3
+PASS U3 Android: el botón usa el diálogo nativo de instalación (evento simulado) y confirma
+PASS U4 Android sin diálogo nativo: muestra instrucciones del menú del navegador
+PASS S3 otro negocio no ve ni identifica la tarjeta · 404
+PASS P17 cada negocio tiene su propio manifiesto (id y nombre distintos) · Barbería PWA E2E · Tarjeta
+PASS S4 la cookie de una tarjeta no abre tarjetas de otro negocio
+PASS sin errores de consola ni de página
+
+Total chromium: 40 PASS, 0 FAIL

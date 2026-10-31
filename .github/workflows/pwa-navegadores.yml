@@ -1,0 +1,104 @@
+# V0.2.2 · PWA + escenario de 3 roles en Chromium, WebKit y Firefox (datos sintéticos).
+# - "local": levanta PostgreSQL y el emulador de la salida de Vercel dentro del runner.
+# - "despliegue" (manual): corre la misma prueba contra una URL desplegada. Si la URL está protegida
+#   por Vercel, usa el secreto VERCEL_AUTOMATION_BYPASS_SECRET (nunca en el código).
+# WebKit automatizado NO equivale a Safari en un iPhone físico.
+name: PWA en navegadores
+on:
+  push:
+    branches: ['v0.2.2', 'main']
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'URL desplegada (vacío = solo prueba local)'
+        required: false
+      slug:
+        description: 'Negocio demo existente en esa URL'
+        required: false
+        default: 'cafe-demo-toluca'
+permissions:
+  contents: read
+jobs:
+  local:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit, firefox]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: solo-ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save playwright@1.63.0 && npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Base y build
+        run: |
+          cat > .env.test <<'ENV'
+          DATABASE_URL=postgres://vlux_app:solo-ci-app@127.0.0.1:5432/vlux_loyalty_test
+          DATABASE_ADMIN_URL=postgres://postgres:solo-ci@127.0.0.1:5432/vlux_loyalty_test
+          APP_DB_PASSWORD=solo-ci-app
+          PLATFORM_ADMIN_TOKEN=solo-ci-token-0123456789abcdef0123456789
+          PUBLIC_BASE_URL=http://localhost:8788
+          PORT=8788
+          ENV
+          npm run db:setup:test
+          npm run build:vercel
+      - name: Emulador de Vercel
+        run: |
+          nohup node --env-file=.env.test scripts/preview-vercel-output.mjs > emulador.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8788/api/health && break; sleep 1; done
+      - name: E2E PWA (${{ matrix.browser }})
+        run: |
+          mkdir -p resultados
+          BASE=http://localhost:8788 BROWSER=${{ matrix.browser }} OUT=resultados \
+          PLATFORM_ADMIN_TOKEN=solo-ci-token-0123456789abcdef0123456789 \
+          node tests/e2e/v022-pwa.cjs | tee resultados/e2e-${{ matrix.browser }}.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwa-${{ matrix.browser }}
+          path: resultados/
+          retention-days: 14
+
+  despliegue:
+    if: github.event_name == 'workflow_dispatch' && inputs.base_url != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit, firefox]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save playwright@1.63.0 && npx playwright install --with-deps ${{ matrix.browser }}
+      - name: E2E contra ${{ inputs.base_url }}
+        env:
+          BASE: ${{ inputs.base_url }}
+          SLUG: ${{ inputs.slug }}
+          OWNER_EMAIL: ${{ secrets.DEMO_OWNER_EMAIL }}
+          EMP_EMAIL: ${{ secrets.DEMO_EMP_EMAIL }}
+          STAFF_PASSWORD: ${{ secrets.DEMO_STAFF_PASSWORD }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          BROWSER: ${{ matrix.browser }}
+          OUT: resultados
+        run: mkdir -p resultados && node tests/e2e/v022-pwa.cjs | tee resultados/e2e-despliegue-${{ matrix.browser }}.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: despliegue-${{ matrix.browser }}
+          path: resultados/
+          retention-days: 14

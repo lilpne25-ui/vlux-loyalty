@@ -99,3 +99,9 @@ h1, h2, h3 { text-wrap: balance; }
 .mark-bean { display: none; }
 [data-vertical="cafeteria"] .mark-bean { display: inline; }
 [data-vertical="cafeteria"] .mark-generic { display: none; }
+
+/* V0.2.2 · App instalada (PWA): respeta la muesca y la barra de estado del teléfono. */
+@media (display-mode: standalone) {
+  .safe-top { padding-top: env(safe-area-inset-top); }
+  body { overscroll-behavior-y: none; }
+}
