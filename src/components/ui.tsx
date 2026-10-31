@@ -187,7 +187,7 @@ export function PoweredByVlux({ dark }: { dark?: boolean }) {
   );
 }
 
-/** Monograma del negocio, construido con su nombre y colores (cada negocio tendría su logo real). */
+/** Monograma del negocio, construido con su nombre y colores. El grano de café solo aparece en cafeterías (data-vertical). */
 export function BusinessLogo({ name, size = 44, ring = true }: { name: string; size?: number; ring?: boolean }) {
   const initials = name
     .replace(/caf[eé]/i, '')
@@ -200,10 +200,11 @@ export function BusinessLogo({ name, size = 44, ring = true }: { name: string; s
     <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true" className="shrink-0">
       <circle cx="24" cy="24" r="23" fill="var(--brand)" />
       {ring && <circle cx="24" cy="24" r="19.5" fill="none" stroke="var(--accent)" strokeWidth="0.9" opacity=".9" />}
-      <g transform="translate(24 15.5) rotate(-28)">
+      <g transform="translate(24 15.5) rotate(-28)" className="mark-bean">
         <ellipse rx="3.4" ry="5" fill="var(--accent)" />
         <path d="M0 -4.6 C -1.6 -1.5, 1.6 1.5, 0 4.6" stroke="var(--brand)" strokeWidth="0.9" fill="none" />
       </g>
+      <path className="mark-generic" transform="translate(24 15.5)" d="M0 -5 L1.3 -1.3 L5 0 L1.3 1.3 L0 5 L-1.3 1.3 L-5 0 L-1.3 -1.3 Z" fill="var(--accent)" />
       <text x="24" y="34.5" textAnchor="middle" fontFamily="'Young Serif', Georgia, serif" fontSize="11" fill="var(--cream)" letterSpacing="0.5">{initials}</text>
     </svg>
   );

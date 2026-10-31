@@ -23,10 +23,11 @@ export function StampGrid({ total, filled, animateFrom, size = 'md', onBrand = t
           >
             {isFilled ? (
               <svg viewBox="0 0 24 24" className={size === 'sm' ? 'w-3 h-3' : 'w-4 h-4'} aria-hidden="true">
-                <g transform="translate(12 12) rotate(-30)">
+                <g transform="translate(12 12) rotate(-30)" className="mark-bean">
                   <ellipse rx="5" ry="7.2" fill="var(--brand)" opacity=".88" />
                   <path d="M0 -6.6 C -2.4 -2.2, 2.4 2.2, 0 6.6" stroke="var(--accent)" strokeWidth="1.3" fill="none" />
                 </g>
+                <path className="mark-generic" transform="translate(12 12)" d="M-5 0.5 L-1.6 4 L5.5 -3.5" stroke="var(--brand)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
               </svg>
             ) : (
               <span className={cx('text-[10px] tabular-nums', onBrand ? 'text-[color:var(--cream)] opacity-40' : 'text-[#98A2B3]')}>{i + 1}</span>

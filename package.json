@@ -13,7 +13,11 @@
     "db:status": "node --env-file=.env --import tsx scripts/migrate.ts status",
     "db:setup:test": "node --env-file=.env.test --import tsx scripts/db-setup-local.ts && node --env-file=.env.test --import tsx scripts/migrate.ts up",
     "test:integration": "node --env-file=.env.test --import tsx --test --test-concurrency=1 tests/integration/*.test.ts",
-    "test": "npm run test:unit && npm run test:integration"
+    "test": "npm run test:unit && npm run test:integration",
+    "db:seed:demo": "node --env-file=.env --import tsx scripts/seed-demo.ts",
+    "build": "vite build",
+    "start": "node --env-file-if-exists=.env --import tsx server/index.ts",
+    "dev:api": "node --env-file=.env --watch --import tsx server/index.ts"
   },
   "license": "UNLICENSED",
   "dependencies": {

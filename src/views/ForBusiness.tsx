@@ -1,28 +1,11 @@
 // "Para tu negocio": explicación comercial para dueños que prueban la demo.
-import React, { useState } from 'react';
-import { Gift, BarChart3, Star, QrCode, Coffee, CheckCircle2, ArrowRight } from 'lucide-react';
-import { State, Command, Result } from '../domain/model';
-import { Button, Field, inputCls, VluxMark, useToast, cx } from '../components/ui';
+import React from 'react';
+import { Gift, BarChart3, Star, QrCode, ScanLine, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Button, VluxMark } from '../components/ui';
 
-type Props = { state: State; run: (c: Command) => Result; goTo: (v: 'cliente' | 'empleado' | 'dueno') => void };
+type Props = { goTo: (path: string) => void };
 
-export function ForBusinessView({ state, run, goTo }: Props) {
-  const toast = useToast();
-  const [form, setForm] = useState({ businessName: '', category: 'Cafetería', contact: '', city: 'Toluca', message: '' });
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const set = (k: keyof typeof form, v: string) => {
-    setForm((f) => ({ ...f, [k]: v }));
-    setError(null);
-  };
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const r = run({ type: 'submitDemoRequest', request: form });
-    if (!r.ok) return setError(r.message!);
-    setSent(true);
-    toast('good', 'Solicitud guardada en este dispositivo.');
-  };
-
+export function ForBusinessView({ goTo }: Props) {
   return (
     <div className="biz-bg min-h-full">
       <div className="mx-auto w-full max-w-[1040px] gutter py-10 sm:py-14 flex flex-col gap-12">
@@ -32,8 +15,8 @@ export function ForBusinessView({ state, run, goTo }: Props) {
           <h1 className="mt-2 text-[32px] sm:text-[44px] leading-[1.05] font-semibold tracking-tight text-ink text-balance">Haz que tus clientes tengan una razón más para regresar.</h1>
           <p className="mt-4 text-[16px] text-[#475467] leading-relaxed max-w-[600px]">Tu tarjeta de sellos de siempre, ahora en el teléfono de tus clientes. Sin app que descargar y sin cartoncitos que se pierden.</p>
           <div className="mt-6 flex flex-wrap gap-2">
-            <Button onClick={() => document.getElementById('demo-form')?.scrollIntoView({ behavior: 'smooth' })}>Solicitar una demostración <ArrowRight size={16} /></Button>
-            <Button variant="secondary" onClick={() => goTo('cliente')}>Probar como cliente</Button>
+            <Button onClick={() => document.getElementById('demo-form')?.scrollIntoView({ behavior: 'smooth' })}>Probar la demostración <ArrowRight size={16} /></Button>
+            <Button variant="secondary" onClick={() => goTo('/acceso')}>Acceso para negocios</Button>
           </div>
         </header>
 
@@ -56,7 +39,7 @@ export function ForBusinessView({ state, run, goTo }: Props) {
           <ol className="mt-5 grid gap-4 sm:grid-cols-3">
             {[
               { icon: <QrCode size={18} />, t: 'El cliente escanea', d: 'Un QR impreso en caja abre su tarjeta. Solo pide su nombre.' },
-              { icon: <Coffee size={18} />, t: 'Caja agrega el sello', d: 'Tu barista escanea la tarjeta del cliente y registra la visita en segundos.' },
+              { icon: <ScanLine size={18} />, t: 'Caja agrega el sello', d: 'Tu equipo escanea la tarjeta del cliente con su teléfono y registra la compra en segundos.' },
               { icon: <Gift size={18} />, t: 'Se entrega el premio', d: 'Al completar los sellos, caja confirma el canje y empieza un ciclo nuevo.' },
             ].map((x, i) => (
               <li key={x.t} className="flex gap-4">
@@ -69,9 +52,7 @@ export function ForBusinessView({ state, run, goTo }: Props) {
             ))}
           </ol>
           <div className="mt-6 flex flex-wrap gap-2 text-[13px]">
-            <button className="underline underline-offset-4 text-ink" onClick={() => goTo('empleado')}>Ver el panel del empleado</button>
-            <span className="text-slate2">·</span>
-            <button className="underline underline-offset-4 text-ink" onClick={() => goTo('dueno')}>Ver el panel del dueño</button>
+            <span className="text-slate2">El QR del cliente solo identifica su tarjeta: cada sello lo autoriza una persona de tu equipo con su propia cuenta.</span>
           </div>
         </section>
 
@@ -81,7 +62,7 @@ export function ForBusinessView({ state, run, goTo }: Props) {
             <div className="text-[22px] font-semibold">VLUX Loyalty</div>
             <div className="flex items-baseline gap-2">
               <span className="text-white/60 text-[14px]">Desde</span>
-              <span className="text-[40px] font-semibold tracking-tight tabular-nums">$299</span>
+              <span className="text-[40px] font-semibold tracking-tight tabular-nums">$299</span><span className="sr-only">(precio de referencia)</span>
               <span className="text-white/60 text-[14px]">MXN mensuales</span>
             </div>
             <p className="text-[13.5px] text-white/70">Instalación y personalización disponibles.</p>
@@ -90,47 +71,18 @@ export function ForBusinessView({ state, run, goTo }: Props) {
                 <li key={t} className="flex gap-2"><CheckCircle2 size={16} className="shrink-0 mt-[2px] text-[#67C7D3]" /> {t}</li>
               ))}
             </ul>
-            <p className="text-[11.5px] text-white/45 leading-snug">Precio de referencia para pilotos en Toluca y Metepec. Pases en Apple Wallet y Google Wallet en preparación.</p>
+            <p className="text-[11.5px] text-white/45 leading-snug">Precio de referencia para pilotos en Toluca y Metepec, sujeto a confirmación. Pases en Apple Wallet y Google Wallet en preparación.</p>
           </div>
 
-          <div className="panel p-5 sm:p-6">
-            {sent ? (
-              <div className="flex flex-col items-start gap-3 py-4">
-                <div className="h-11 w-11 rounded-full bg-[#ECFDF3] text-[#067647] inline-flex items-center justify-center"><CheckCircle2 size={22} /></div>
-                <h3 className="text-[18px] font-semibold text-ink">Gracias, {form.businessName}.</h3>
-                <p className="text-[13.5px] text-[#475467] leading-relaxed">Tu solicitud quedó guardada en este dispositivo para la demostración. Todavía no se envía a ningún sistema externo, así que el equipo de VLUX la registra contigo en persona.</p>
-                <p className="text-[12.5px] text-slate2">Solicitudes guardadas en este dispositivo: {state.demoRequests.length}</p>
-                <Button variant="secondary" onClick={() => { setSent(false); setForm({ businessName: '', category: 'Cafetería', contact: '', city: 'Toluca', message: '' }); }}>Registrar otra</Button>
-              </div>
-            ) : (
-              <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-                <h3 className="text-[18px] font-semibold text-ink">Solicitar una demostración</h3>
-                <Field label="Nombre del negocio" htmlFor="dr-name">
-                  <input id="dr-name" className={inputCls} value={form.businessName} onChange={(e) => set('businessName', e.target.value)} placeholder="Ej. Barbería Centro" />
-                </Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Giro" htmlFor="dr-cat">
-                    <select id="dr-cat" className={inputCls} value={form.category} onChange={(e) => set('category', e.target.value)}>
-                      {['Cafetería', 'Restaurante', 'Barbería', 'Estética', 'Panadería', 'Otro'].map((c) => <option key={c}>{c}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Municipio" htmlFor="dr-city">
-                    <select id="dr-city" className={inputCls} value={form.city} onChange={(e) => set('city', e.target.value)}>
-                      {['Toluca', 'Metepec', 'Zinacantepec', 'Lerma', 'Otro'].map((c) => <option key={c}>{c}</option>)}
-                    </select>
-                  </Field>
-                </div>
-                <Field label="WhatsApp o correo" htmlFor="dr-contact">
-                  <input id="dr-contact" className={inputCls} value={form.contact} onChange={(e) => set('contact', e.target.value)} placeholder="722 000 0000" />
-                </Field>
-                <Field label={<span>Comentarios <span className="font-normal text-slate2">(opcional)</span></span>} htmlFor="dr-msg">
-                  <textarea id="dr-msg" rows={3} className={cx(inputCls, 'h-auto py-2.5 resize-y')} value={form.message} onChange={(e) => set('message', e.target.value)} placeholder="¿Cuántas sucursales tienes? ¿Qué premio te gustaría dar?" />
-                </Field>
-                {error && <p className="text-[13px] text-[#B42318]">{error}</p>}
-                <Button type="submit" size="lg">Solicitar una demostración</Button>
-                <p className="text-[11.5px] text-slate2">Demostración: los datos se guardan solo en este navegador y no se envían a ningún servicio.</p>
-              </form>
-            )}
+          <div className="panel p-5 sm:p-6 flex flex-col gap-4">
+            <h3 className="text-[18px] font-semibold text-ink">Pruébalo en tu teléfono</h3>
+            <p className="text-[13.5px] text-[#475467] leading-relaxed">Estos negocios son de demostración y usan datos sintéticos. Abre la tarjeta en un teléfono y la caja en otro: verás el sello llegar en segundos.</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button variant="secondary" onClick={() => goTo('/n/cafe-demo-toluca')}>Tarjeta · Café Demo Toluca</Button>
+              <Button variant="secondary" onClick={() => goTo('/n/barberia-demo-metepec')}>Tarjeta · Barbería Demo Metepec</Button>
+            </div>
+            <Button onClick={() => goTo('/acceso')}>Acceso para negocios <ArrowRight size={16} /></Button>
+            <p className="text-[11.5px] text-slate2">Para contratar o pedir una demostración guiada, contacta a tu asesor de VLUX.</p>
           </div>
         </section>
       </div>

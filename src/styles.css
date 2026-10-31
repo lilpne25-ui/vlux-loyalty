@@ -86,3 +86,16 @@ h1, h2, h3 { text-wrap: balance; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .ring-draw { stroke-dashoffset: 0; }
 }
+
+/* V0.2 */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; box-shadow: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+/* Marca de sello por giro: grano de café solo en cafeterías; marca genérica en el resto. */
+.mark-bean { display: none; }
+[data-vertical="cafeteria"] .mark-bean { display: inline; }
+[data-vertical="cafeteria"] .mark-generic { display: none; }

@@ -52,3 +52,70 @@ export async function decodeQrFromFile(file: File): Promise<string | null> {
     URL.revokeObjectURL(url);
   }
 }
+
+// ---------- Cámara en vivo ----------
+// Usa BarcodeDetector nativo cuando existe (Chrome/Android) y jsQR como respaldo (iOS Safari).
+// Requiere HTTPS (o localhost) y permiso de cámara.
+type Detector = { detect: (src: CanvasImageSource) => Promise<{ rawValue: string }[]> };
+
+export function cameraSupported() {
+  return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+}
+
+export async function startCameraScanner(video: HTMLVideoElement, onResult: (text: string) => void): Promise<() => void> {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio: false });
+  video.srcObject = stream;
+  video.setAttribute('playsinline', 'true');
+  video.muted = true;
+  await video.play();
+
+  const BD = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => Detector }).BarcodeDetector;
+  let detector: Detector | null = null;
+  if (BD) {
+    try {
+      detector = new BD({ formats: ['qr_code'] });
+    } catch {
+      detector = null;
+    }
+  }
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  let stopped = false;
+  let timer = 0;
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      if (video.readyState >= 2 && video.videoWidth) {
+        let text: string | null = null;
+        if (detector) {
+          const found = await detector.detect(video);
+          text = found[0]?.rawValue ?? null;
+        } else {
+          const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+          canvas.width = Math.round(video.videoWidth * scale);
+          canvas.height = Math.round(video.videoHeight * scale);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          text = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' })?.data ?? null;
+        }
+        if (text && !stopped) {
+          onResult(text);
+          return;
+        }
+      }
+    } catch (e) {
+      // Un cuadro ilegible no detiene el escaneo; se reintenta en el siguiente.
+      console.debug('qr frame', e);
+    }
+    timer = window.setTimeout(tick, 120);
+  };
+  tick();
+
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+    stream.getTracks().forEach((t) => t.stop());
+    video.srcObject = null;
+  };
+}

@@ -56,3 +56,33 @@ Cada átomo se cierra con la misma lista: compila, funciona lo intervenido, prue
 - **Errores:** ninguno.
 - **Riesgos pendientes:** la ventana de visita (120 min) es configurable pero no hay validación con caja real; no hay anulación de compras erróneas (propuesta para V0.3).
 - **Estado:** PASS
+
+---
+## Átomo 06 · Sincronización entre dispositivos
+- **Objetivo:** cliente, empleado y dueño comparten datos consistentes desde el backend.
+- **Archivos modificados:** `src/lib/api.ts`, `src/lib/usePolling.ts`, `src/lib/router.ts`, `src/App.tsx`, `src/views/Customer.tsx`, `src/views/Employee.tsx`, `src/views/Owner.tsx`, `tests/e2e/v02-tres-dispositivos.cjs`.
+- **Implementación:** consulta periódica (cliente 4 s, caja 5 s, panel 8 s) y al volver a la pestaña. Se eliminó el estado compartido en `localStorage`; solo queda memoria de interfaz (qué sello ya se animó).
+- **Pruebas ejecutadas:** E2E con 3 contextos de navegador independientes (cookies y almacenamiento separados) contra servidor y PostgreSQL reales: el sello registrado en el teléfono del empleado apareció en el teléfono del cliente en ~2.3 s sin recargar y en el panel del dueño. Un cuarto contexto abrió la misma tarjeta con el enlace personal.
+- **Resultado:** PASS. Nota honesta: son contextos aislados de Chromium en una máquina, no tres teléfonos físicos; la prueba en dispositivos reales queda en el manual del piloto.
+- **Riesgos pendientes:** el polling multiplica solicitudes por pestaña abierta; con ~100 clientes simultáneos por negocio sigue siendo bajo, revisar al escalar.
+- **Estado:** PASS
+
+---
+## Átomo 07 · QR operativo
+- **Objetivo:** registrar e identificar clientes por QR.
+- **Archivos modificados:** `src/lib/qr.ts` (cámara en vivo), `src/lib/format.ts`, `server/security.ts` (`parseScannedCode`), `src/views/Employee.tsx`, `src/views/Owner.tsx` (QR imprimible).
+- **Implementación:** QR del negocio → `/n/<slug>` (cartel imprimible en el panel). QR de tarjeta → `/caja?tarjeta=XXXX-XXXX` (identificador opaco, sin datos personales; abre la caja si se escanea con la cámara del teléfono). Cámara en vivo con `getUserMedia` + `BarcodeDetector` o jsQR; respaldo por foto; captura manual; códigos inválidos → 422, inexistentes → 404.
+- **Pruebas ejecutadas:** E2E "07 empleado identifica la tarjeta con la cámara en vivo" con video de cámara simulado que contiene el QR real generado por la tarjeta: PASS. Unitarias de `parseScannedCode`: PASS.
+- **Resultado:** PASS.
+- **Riesgos pendientes:** probar en iPhone (Safari) y Android reales; la cámara exige HTTPS en producción.
+- **Estado:** PASS
+
+---
+## Átomo 08 · Panel real del dueño
+- **Objetivo:** dashboard sobre operaciones persistidas de su propio negocio.
+- **Archivos modificados:** `src/views/Owner.tsx`, `server/services/owner.ts`, `src/views/ForBusiness.tsx`, `src/lib/vertical.ts`, `src/components/ui.tsx`, `src/components/LoyaltyCard.tsx`, `src/styles.css`.
+- **Implementación:** 8 indicadores reales (clientes, visitas, compras, sellos, recurrentes, recompensas desbloqueadas, canjes, invitaciones a reseña), gráfica visitas vs compras en hora de CDMX, recurrencia, premios por entregar. Se quitó el interruptor de datos de ejemplo y el "modo de prueba". Configuración: giro, modo de sellos, tope, ventana de visita, colores, recompensa. Equipo (alta/baja de empleados). QR del mostrador. Textos por giro (sin "café/bebida" fijo); el grano de café solo se dibuja en cafeterías. Etiquetas de KPI ya no se cortan en móvil.
+- **Pruebas ejecutadas:** E2E: panel muestra `{clientes 1, visitas 1, compras 8, sellos 8, desbloqueadas 1, canjes 1, recurrentes 0}` tras el recorrido; otro negocio ve 0 clientes; sin scroll horizontal a 390 px en cliente, caja y panel. Barbería demo sin menciones a café/bebida.
+- **Resultado:** el dashboard refleja datos reales de su propio establecimiento.
+- **Riesgos pendientes:** la lista de clientes trae hasta 500 filas sin paginar.
+- **Estado:** PASS
