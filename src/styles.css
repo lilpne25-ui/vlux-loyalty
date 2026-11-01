@@ -198,7 +198,7 @@ select.cc-input { appearance: none; background-image: linear-gradient(45deg, tra
 .card-metal::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.2px; background: var(--c-rim); pointer-events: none; z-index: 4;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
 /* Línea grabada a 6 px del borde (como el filete de una tarjeta metálica real) */
-.card-metal::after { content: ""; position: absolute; inset: 6px; border-radius: calc(22px - 6px); pointer-events: none; z-index: 1; box-shadow: 0 0 0 .75px var(--c-divider), 0 1px 0 rgba(255,255,255,.28); opacity: .8; }
+.card-metal::after { content: ""; position: absolute; inset: 6px; border-radius: calc(22px - 6px); pointer-events: none; z-index: 1; box-shadow: 0 0 0 .75px var(--c-divider), 0 1px 0 rgba(255,255,255,.2); opacity: .55; }
 /* Reflejo anisotrópico: luz cónica como en el metal cepillado + un matiz muy suave del negocio en la esquina */
 .card-metal-sheen { position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(85% 65% at 100% 0%, var(--c-tint, transparent), transparent 62%), var(--c-aniso, none); opacity: .9; }
@@ -217,17 +217,17 @@ select.cc-input { appearance: none; background-image: linear-gradient(45deg, tra
 .card-ink2 { color: var(--c-ink2, rgba(255,255,255,.6)); }
 .card-mark { font-size: 9.5px; letter-spacing: .3em; text-transform: uppercase; color: var(--c-ink2); text-shadow: var(--c-text-sh); font-weight: 600; }
 /* Placa del logotipo: bisel pulido + fondo claro u oscuro según el logo (lo decide el motor de logos) */
-.logo-plate { position: relative; flex-shrink: 0; padding: 2.5px; border-radius: 15px; background: var(--c-rim); box-shadow: 0 2px 5px rgba(0,0,0,.28), 0 1px 0 rgba(255,255,255,.3); }
-.logo-plate-in { position: relative; overflow: hidden; border-radius: 12.5px; background: var(--c-plate, #fff); box-shadow: 0 1.5px 3px rgba(0,0,0,.3) inset, 0 -1px 0 rgba(255,255,255,.5) inset; }
-.logo-plate[data-plate="dark"] .logo-plate-in { background: var(--c-plate-dark, #14171c); box-shadow: 0 1.5px 3px rgba(0,0,0,.6) inset, 0 -1px 0 rgba(255,255,255,.12) inset; }
+.logo-plate { position: relative; flex-shrink: 0; padding: 1.5px; border-radius: 11px; background: var(--c-rim); box-shadow: 0 1px 1.5px rgba(0,0,0,.22); }
+.logo-plate-in { position: relative; overflow: hidden; border-radius: 9.5px; background: var(--c-plate, #fff); box-shadow: 0 1px 2px rgba(0,0,0,.28) inset; }
+.logo-plate[data-plate="dark"] .logo-plate-in { background: var(--c-plate-dark, #14171c); box-shadow: 0 1px 2px rgba(0,0,0,.6) inset; }
 .logo-plate[data-plate="none"] { background: none; box-shadow: none; padding: 0; }
 .logo-plate[data-plate="none"] .logo-plate-in { background: none; box-shadow: none; }
 .logo-plate-in img { position: absolute; max-width: none; user-select: none; -webkit-user-drag: none; }
 /* Sellos: relieve (moneda acuñada) y hueco (grabado) */
-.stamp-coin { position: relative; background: var(--c-stamp); box-shadow: 0 1px 0 rgba(255,255,255,.65) inset, 0 -1.5px 2px rgba(0,0,0,.3) inset, 0 1px 0 rgba(255,255,255,.4), 0 2px 3px rgba(0,0,0,.38); }
-.stamp-coin::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; box-shadow: 0 0 0 .75px rgba(255,255,255,.4), 0 0 0 1.5px rgba(0,0,0,.12) inset; pointer-events: none; }
-.stamp-slot { border: 1.5px dashed var(--c-slot-line, rgba(255,255,255,.3)); background: var(--c-slot, rgba(0,0,0,.18)); box-shadow: 0 2px 3px rgba(0,0,0,.3) inset, 0 1px 0 rgba(255,255,255,.3); }
-.stamp-slot-light { border: 1.5px dashed #C9CED6; }
+.stamp-coin { position: relative; background: var(--c-stamp); box-shadow: 0 1px 0 rgba(255,255,255,.4) inset, 0 -1px 1.5px rgba(0,0,0,.28) inset, 0 1px 1.5px rgba(0,0,0,.3); }
+.stamp-coin::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; box-shadow: 0 0 0 .75px rgba(255,255,255,.22), 0 0 0 1.5px rgba(0,0,0,.1) inset; pointer-events: none; }
+.stamp-slot { border: 1px solid var(--c-slot-line, rgba(255,255,255,.3)); background: var(--c-slot, rgba(0,0,0,.18)); box-shadow: 0 2px 3px rgba(0,0,0,.3) inset, 0 1px 0 rgba(255,255,255,.3); }
+.stamp-slot-light { border: 1px solid #C9CED6; }
 .reward-chip { background: var(--c-detail); color: var(--c-stamp-ink); box-shadow: 0 1px 0 rgba(255,255,255,.4) inset, 0 1px 3px rgba(0,0,0,.3); }
 @keyframes cardIntro { 0% { transform: translateX(-40%); opacity: 0 } 40% { opacity: 1 } 100% { transform: none; opacity: 1 } }
 @keyframes rewardGlow { 0%, 100% { filter: none } 50% { filter: drop-shadow(0 0 12px color-mix(in srgb, var(--c-detail) 50%, transparent)) } }

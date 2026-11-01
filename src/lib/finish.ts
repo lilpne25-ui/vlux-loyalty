@@ -72,14 +72,14 @@ export function finishTheme(finish: CardFinish | undefined, primary: string, acc
     return { light: true, vars: {
       '--c-bg': `linear-gradient(158deg, ${css(hi)} 0%, ${css(mid)} 34%, ${css(oklchToRgb({ l: 0.89, c: 0.005, h: 250 }))} 52%, ${css(lo)} 100%)`,
       '--c-aniso': `conic-gradient(from 200deg at 135% 12%, rgba(255,255,255,.0), rgba(255,255,255,.55) 9%, rgba(120,128,138,.16) 18%, rgba(255,255,255,.4) 30%, rgba(90,98,108,.2) 46%, rgba(255,255,255,.35) 60%, rgba(110,118,128,.16) 78%, rgba(255,255,255,.0) 100%)`,
-      '--c-ink': '#2A2F36', '--c-ink2': 'rgba(42,47,54,.62)',
+      '--c-ink': '#2A2F36', '--c-ink2': 'rgba(42,47,54,.74)',
       '--c-text-sh': '0 1px 0 rgba(255,255,255,.75), 0 -1px 0 rgba(0,0,0,.14)',
       '--c-rim': 'linear-gradient(140deg, rgba(255,255,255,.95), rgba(255,255,255,.25) 28%, rgba(60,66,74,.35) 62%, rgba(255,255,255,.7))',
       '--c-edge': css(sh, 0.55), '--c-shadow': 'rgba(24,28,34,.5)',
       '--c-tint': css(t.glint, t.neutral ? 0 : 0.55), '--c-detail': css(t.detail), '--c-detail-lo': css(t.deep), '--c-detail-hi': css(t.glint),
       '--c-stamp': `radial-gradient(circle at 34% 28%, ${css(t.glint)}, ${css(t.detail)} 58%, ${css(t.deep)})`,
       '--c-stamp-ink': '#F7F9FB', '--c-slot': 'rgba(70,78,88,.1)', '--c-slot-line': 'rgba(42,47,54,.28)',
-      '--c-brush-op': '.3', '--c-brush-blend': 'multiply', '--c-grain-op': '.16', '--c-sheen-op': '.42',
+      '--c-brush-op': '.2', '--c-brush-blend': 'multiply', '--c-grain-op': '.16', '--c-sheen-op': '.42',
       '--c-divider': 'rgba(42,47,54,.2)', '--c-plate': 'linear-gradient(160deg, #FFFFFF, #E9ECEF)', '--c-plate-dark': 'linear-gradient(160deg, #2A2F36, #14171C)',
     } };
   }
@@ -89,14 +89,14 @@ export function finishTheme(finish: CardFinish | undefined, primary: string, acc
     return { light: false, vars: {
       '--c-bg': `linear-gradient(158deg, ${css(hi)} 0%, ${css(base)} 38%, ${css(oklchToRgb({ l: 0.17, c: 0.005, h: 255 }))} 62%, ${css(lo)} 100%)`,
       '--c-aniso': `conic-gradient(from 200deg at 135% 12%, rgba(255,255,255,0), rgba(255,255,255,.09) 9%, rgba(0,0,0,.14) 20%, rgba(255,255,255,.06) 32%, rgba(0,0,0,.18) 48%, rgba(255,255,255,.06) 62%, rgba(0,0,0,.1) 80%, rgba(255,255,255,0) 100%)`,
-      '--c-ink': '#E8EBEF', '--c-ink2': 'rgba(232,235,239,.6)',
+      '--c-ink': '#E8EBEF', '--c-ink2': 'rgba(232,235,239,.72)',
       '--c-text-sh': '0 -1px 0 rgba(0,0,0,.7), 0 1px 0 rgba(255,255,255,.07)',
       '--c-rim': 'linear-gradient(140deg, rgba(255,255,255,.5), rgba(255,255,255,.08) 28%, rgba(0,0,0,.5) 64%, rgba(255,255,255,.28))',
       '--c-edge': 'rgba(0,0,0,.7)', '--c-shadow': 'rgba(0,0,0,.65)',
       '--c-tint': css(det, t.neutral ? 0 : 0.2), '--c-detail': css(det), '--c-detail-lo': css(oklchToRgb({ l: 0.5, c: t.neutral ? 0.01 : t.chroma * 0.8, h: t.hue })), '--c-detail-hi': css(oklchToRgb({ l: 0.88, c: t.neutral ? 0.008 : t.chroma * 0.5, h: t.hue })),
       '--c-stamp': `radial-gradient(circle at 34% 28%, ${css(oklchToRgb({ l: 0.9, c: t.neutral ? 0.006 : t.chroma * 0.5, h: t.hue }))}, ${css(det)} 55%, ${css(oklchToRgb({ l: 0.5, c: t.neutral ? 0.01 : t.chroma * 0.8, h: t.hue }))})`,
       '--c-stamp-ink': '#0E1013', '--c-slot': 'rgba(0,0,0,.3)', '--c-slot-line': 'rgba(232,235,239,.26)',
-      '--c-brush-op': '.1', '--c-brush-blend': 'screen', '--c-grain-op': '.22', '--c-sheen-op': '.24',
+      '--c-brush-op': '.1', '--c-brush-blend': 'screen', '--c-grain-op': '.22', '--c-sheen-op': '.16',
       '--c-divider': 'rgba(232,235,239,.16)', '--c-plate': 'linear-gradient(160deg, #FFFFFF, #E4E7EB)', '--c-plate-dark': 'linear-gradient(160deg, #23272D, #0E1013)',
     } };
   }
@@ -114,14 +114,14 @@ export function finishTheme(finish: CardFinish | undefined, primary: string, acc
   return { light: lightBase, vars: {
     '--c-bg': `linear-gradient(158deg, ${css(top)} 0%, ${css(mid)} 40%, ${css(bot)} 100%)`,
     '--c-aniso': `conic-gradient(from 200deg at 135% 12%, rgba(255,255,255,0), rgba(255,255,255,.32) 9%, rgba(0,0,0,.14) 20%, rgba(255,255,255,.2) 32%, rgba(0,0,0,.18) 48%, rgba(255,255,255,.2) 62%, rgba(0,0,0,.12) 80%, rgba(255,255,255,0) 100%)`,
-    '--c-ink': lightBase ? '#1E140F' : '#F5ECDF', '--c-ink2': lightBase ? 'rgba(30,20,15,.65)' : 'rgba(245,236,223,.62)',
+    '--c-ink': lightBase ? '#1E140F' : '#F5ECDF', '--c-ink2': lightBase ? 'rgba(30,20,15,.74)' : 'rgba(245,236,223,.74)',
     '--c-text-sh': lightBase ? '0 1px 0 rgba(255,255,255,.4)' : '0 1px 0 rgba(0,0,0,.4), 0 -1px 0 rgba(255,255,255,.1)',
     '--c-rim': 'linear-gradient(140deg, rgba(255,255,255,.7), rgba(255,255,255,.12) 30%, rgba(0,0,0,.35) 64%, rgba(255,255,255,.4))',
     '--c-edge': css(bot, 0.9), '--c-shadow': 'rgba(0,0,0,.55)',
     '--c-tint': 'rgba(255,255,255,0)', '--c-detail': css(det), '--c-detail-lo': css(mix(det, [0, 0, 0], 0.4)), '--c-detail-hi': css(mix(det, [255, 255, 255], 0.55)),
     '--c-stamp': `radial-gradient(circle at 34% 28%, ${css(mix(det, [255, 255, 255], 0.55))}, ${css(det)} 55%, ${css(mix(det, [0, 0, 0], 0.4))})`,
     '--c-stamp-ink': css(mid), '--c-slot': 'rgba(0,0,0,.2)', '--c-slot-line': lightBase ? 'rgba(30,20,15,.3)' : 'rgba(245,236,223,.34)',
-    '--c-brush-op': '.18', '--c-brush-blend': 'overlay', '--c-grain-op': '.14', '--c-sheen-op': '.3',
+    '--c-brush-op': '.18', '--c-brush-blend': 'overlay', '--c-grain-op': '.14', '--c-sheen-op': '.2',
     '--c-divider': lightBase ? 'rgba(30,20,15,.2)' : 'rgba(245,236,223,.18)', '--c-plate': 'linear-gradient(160deg, #FFFFFF, #EEEAE4)', '--c-plate-dark': `linear-gradient(160deg, ${css(bot)}, #0E1013)`,
   } };
 }
