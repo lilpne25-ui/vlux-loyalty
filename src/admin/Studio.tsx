@@ -228,7 +228,7 @@ function Presentation3({ brand: b, onClose }: { brand: Brand; onClose: () => voi
     },
     {
       kicker: 'Cómo empezamos', title: 'Piloto con acompañamiento', body: 'Configuramos tu marca, imprimimos tu QR y capacitamos a tu equipo. Medimos juntos cuántos clientes regresan.',
-      art: <div className="flex flex-col items-center gap-4"><SlideCard b={b} /><img src="/brand/vlux-lockup-dark.jpg" alt="VLUX · AI Transformation Partner" width="800" height="620" className="w-[200px] h-auto rounded-2xl" /><div className="inline-flex items-center gap-2 text-[14px] opacity-90"><Sparkles size={16} /> Empezamos esta semana</div></div>,
+      art: <div className="flex flex-col items-center gap-4"><SlideCard b={b} /><span className="rounded-2xl bg-[#0E1013] p-3 inline-flex"><img src="/brand/vlux-logo-full.png" alt="VLUX" width="1060" height="300" className="w-[220px] h-auto" /></span><div className="inline-flex items-center gap-2 text-[14px] opacity-90"><Sparkles size={16} /> Empezamos esta semana</div></div>,
     },
   ], [b, stamped]);
 

@@ -166,31 +166,21 @@ export function Field({ label, hint, error, children, htmlFor }: { label: React.
 export const inputCls = 'h-11 w-full rounded-xl border border-line bg-white px-3.5 text-[15px] text-ink placeholder:text-[#98A2B3] outline-none transition focus:border-[#98A2B3] focus:ring-4 focus:ring-[#67C7D3]/20';
 
 // ---------- Marcas ----------
-/** Identidad oficial de VLUX. Usa los archivos originales de /brand (sin redibujar ni recolorear):
- *  - tone="dark": isotipo y wordmark oficiales sobre fondos oscuros (se funden con el fondo con mix-blend-mode: screen).
- *  - tone="light": isotipo oficial sobre fondos claros (multiply) y el nombre en texto.
- *  - tone="chip": isotipo oficial dentro de una pastilla negra (sirve sobre cualquier color). */
+/** Identidad oficial de VLUX (PNG originales de /brand, sin redibujar ni recolorear). tone="dark": isotipo + wordmark sobre fondo oscuro; "light"/"chip": isotipo dentro de pastilla negra + nombre. */
 export function VluxMark({ className = '', tone = 'light' }: { className?: string; tone?: 'dark' | 'light' | 'chip' }) {
-  if (tone === 'chip') {
-    return (
-      <span className={cx('inline-flex items-center gap-1.5 font-semibold tracking-[0.18em] text-[11px]', className)}>
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-black overflow-hidden"><img src="/brand/vlux-isotipo-dark.jpg" alt="" width="24" height="20" className="brand-screen h-[22px] w-auto" /></span>
-        <span>VLUX</span>
-      </span>
-    );
-  }
+  // Logos oficiales (PNG con fondo translúcido, diseñados para superficies oscuras): sobre claro van dentro de una pastilla negra.
   if (tone === 'dark') {
     return (
-      <span className={cx('inline-flex items-center gap-2', className)} role="img" aria-label="VLUX">
-        <img src="/brand/vlux-isotipo-dark.jpg" alt="" width="28" height="24" className="brand-screen h-6 w-auto" />
-        <img src="/brand/vlux-wordmark-dark.jpg" alt="" width="63" height="11" className="brand-screen h-[11px] w-auto" />
+      <span className={cx('inline-flex items-center gap-1', className)} role="img" aria-label="VLUX">
+        <img src="/brand/vlux-isotipo.png" alt="" width="29" height="30" className="h-[30px] w-auto" />
+        <img src="/brand/vlux-wordmark.png" alt="" width="94" height="30" className="h-[30px] w-auto" />
       </span>
     );
   }
   return (
     <span className={cx('inline-flex items-center gap-1.5 font-semibold tracking-[0.18em] text-[11px]', className)}>
-      <img src="/brand/vlux-isotipo-light.jpg" alt="" width="20" height="17" className="brand-multiply h-[17px] w-auto" />
-      VLUX
+      <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#0E1013] overflow-hidden"><img src="/brand/vlux-isotipo.png" alt="" width="24" height="25" className="h-[24px] w-auto" /></span>
+      <span>VLUX</span>
     </span>
   );
 }

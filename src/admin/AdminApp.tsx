@@ -71,7 +71,7 @@ function Frame({ children }: { children: React.ReactNode }) {
 export function Wordmark({ small }: { small?: boolean }) {
   return (
     <div className="flex items-center gap-2.5 select-none">
-      <img src="/brand/vlux-isotipo-dark.jpg" alt="" width="36" height="30" className="brand-screen h-[28px] w-auto" style={small ? { height: 22 } : undefined} />
+      <img src="/brand/vlux-isotipo.png" alt="" width="34" height="35" className="h-[30px] w-auto" style={small ? { height: 22 } : undefined} />
       <div className="leading-none">
         <div className={cx('font-medium tracking-[0.18em]', small ? 'text-[12px]' : 'text-[13px]')}>VLUX</div>
         <div className="mt-1 text-[10px] tracking-[0.14em] uppercase cc-faint">Control Center</div>
