@@ -2,6 +2,7 @@
 // guiada, accesos a las experiencias y solicitud de demostración. Todo con datos ficticios; sin negocios reales.
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, QrCode, Smartphone, Sparkles, Gift, BarChart3, Wand2, Users, Palette, LifeBuoy, ScanLine, Store, Settings2 } from 'lucide-react';
+import { VLUX_TAGLINE } from '../lib/brandText';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { brandVars } from '../components/Brand';
 import { cx } from '../components/ui';
@@ -65,7 +66,7 @@ function Hero() {
           </div>
         </div>
         <div className="lp-hero-art" aria-hidden="false">
-          <div className="lp-float" style={brandVars('#14171C', '#67C7D3', 'silver')} data-testid="hero-card">
+          <div className="lp-float" style={brandVars('#0B3D2E', '#E8B04B', 'silver')} data-testid="hero-card">
             <LoyaltyCardFace businessName="Tu negocio" customerName="Mariana López" cardId="VX-4F7K-92" total={8} filled={5} rewardReady={false} rewardLabel="Un beneficio de cortesía" footer={<span className="opacity-70">Ejemplo</span>} />
           </div>
           <div className="lp-halo" />
@@ -76,16 +77,16 @@ function Hero() {
 }
 
 const FINISH_COPY: Record<CardFinish, { name: string; text: string; colors: [string, string]; filled: number }> = {
-  signature: { name: 'Signature Color', text: 'Tu color de marca con brillo metálico. Es tu tarjeta, reconocible a primera vista.', colors: ['#5B1F2E', '#E6B8A2'], filled: 4 },
-  silver: { name: 'Metallic Silver', text: 'Metal plateado con un matiz de tu marca. Sobrio, elegante y atemporal.', colors: ['#1A2430', '#67C7D3'], filled: 6 },
-  black: { name: 'Premium Black', text: 'Negro profundo con tu acento. La opción para marcas que quieren verse exclusivas.', colors: ['#0A0A0B', '#D5B36A'], filled: 3 },
+  silver: { name: 'Signature Silver', text: 'Plata cepillada, como una tarjeta metálica física. Tu marca aparece en los detalles: reflejos, grabados y sellos.', colors: ['#0B3D2E', '#E8B04B'], filled: 5 },
+  black: { name: 'Black Titanium', text: 'Titanio negro satinado con reflejos grafito. La opción más sobria para marcas que quieren verse exclusivas.', colors: ['#14171C', '#67C7D3'], filled: 3 },
+  signature: { name: 'Signature Color', text: 'El color de tu marca con carácter metálico. Inconfundible a primera vista.', colors: ['#5B1F2E', '#E6B8A2'], filled: 4 },
 };
 
 function Finishes() {
   return (
     <section id="acabados" className="lp-section">
       <div className="lp-wrap">
-        <Reveal><p className="lp-eyebrow">Tarjetas</p><h2 className="lp-h2 font-display">Tres acabados. Tu marca en cada uno.</h2><p className="lp-sub">Mueve el cursor o el dedo sobre cada tarjeta: el brillo la sigue. Los colores y el logo son los de tu negocio.</p></Reveal>
+        <Reveal><p className="lp-eyebrow">Tarjetas</p><h2 className="lp-h2 font-display">Metal real. Tu marca en cada detalle.</h2><p className="lp-sub">Mueve el cursor o el dedo sobre cada tarjeta: la luz recorre el metal. Estos ejemplos usan un negocio ficticio.</p></Reveal>
         <div className="mt-10 grid md:grid-cols-3 gap-7">
           {FINISHES.map((f, i) => {
             const c = FINISH_COPY[f.id];
@@ -259,7 +260,7 @@ export function LandingView() {
       </main>
       <footer className="lp-footer">
         <div className="lp-wrap flex flex-col sm:flex-row items-center justify-between gap-5">
-          <div className="flex items-center gap-3 text-white/60 text-[13px]"><span>Powered by</span><img src="/brand/vlux-wordmark.png" alt="VLUX" width="125" height="40" className="h-[40px] w-auto" /></div>
+          <div className="flex items-center gap-3 text-white/60 text-[13px]"><span>Powered by</span><img src="/brand/vlux-wordmark.png" alt="VLUX" width="125" height="40" className="h-[40px] w-auto" /><span className="hidden sm:inline text-white/40 text-[11px] uppercase tracking-[0.22em]" data-testid="tagline">{VLUX_TAGLINE}</span></div>
           <p className="text-[12px] text-white/40 text-center sm:text-right max-w-[420px]">Las experiencias de esta página usan datos ficticios. VLUX Loyalty no es Apple Wallet ni Google Wallet.</p>
         </div>
       </footer>

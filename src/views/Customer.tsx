@@ -9,6 +9,7 @@ import { getSeen, setSeen, getFlag, setFlag } from '../lib/seen';
 import { rewardSentence, stampRule, welcomeHeadline } from '../lib/vertical';
 import { Button, Modal, QRCode, CopyButton, Field, inputCls, BusinessLogo, CupIllustration, PoweredByVlux, useToast, cx, Badge } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
+import { sanitizeFit } from '../lib/logoFit';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
 import { SaveCardPanel, PairScreen, OfflineNotice } from '../components/SaveCard';
 import { applyBusinessAppHead, isStandalone, useOnline } from '../lib/pwa';
@@ -267,7 +268,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
         </section>
       )}
 
-      <LoyaltyCardFace businessName={b.name} customerName={card.customerName} cardId={card.publicCode} total={goal} filled={shown} rewardReady={!!reward} animateFrom={animateFrom} logoUrl={b.logoUrl} footer={<span className="opacity-70">Ciclo {card.cycle}</span>} />
+      <LoyaltyCardFace businessName={b.name} customerName={card.customerName} cardId={card.publicCode} total={goal} filled={shown} rewardReady={!!reward} animateFrom={animateFrom} logoUrl={b.logoUrl} logoFit={sanitizeFit(b.logoFit)} footer={<span className="opacity-70">Ciclo {card.cycle}</span>} />
 
       <div className="flex flex-col gap-2 -mt-1">
         <p className="text-[15px] font-medium text-cafe-ink" data-testid="progress-message">{message}</p>

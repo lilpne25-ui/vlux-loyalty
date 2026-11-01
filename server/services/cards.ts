@@ -81,7 +81,7 @@ export async function customerCardView(businessId: string, cardId: string) {
     const rev = (await tx.query("SELECT kind FROM review_events WHERE card_id = $1 AND kind IN ('prompt_shown','dismissed')", [cardId])).rows.map((r) => r.kind);
     const showReview = !!business.reviewUrl && card.visits >= REVIEW_MIN_VISITS && !rev.includes('dismissed');
     return {
-      business: { slug: business.slug, name: business.name, city: business.city, vertical: business.vertical, primaryColor: business.primaryColor, accentColor: business.accentColor, cardFinish: business.cardFinish, reviewUrl: business.reviewUrl, isDemo: business.isDemo, logoUrl: business.logoUrl },
+      business: { slug: business.slug, name: business.name, city: business.city, vertical: business.vertical, primaryColor: business.primaryColor, accentColor: business.accentColor, cardFinish: business.cardFinish, reviewUrl: business.reviewUrl, isDemo: business.isDemo, logoUrl: business.logoUrl, logoFit: business.logoFit },
       program: business.program,
       card: { publicCode: card.publicCode, customerName: card.customerName, balance: card.balance, cycle: card.cycle, createdAt: card.createdAt, visits: card.visits, redeemed: card.redeemed, reward: card.reward },
       history: history.map(({ kind, at, stamps, items }) => ({ kind, at, stamps, items })),

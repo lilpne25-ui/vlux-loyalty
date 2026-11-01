@@ -97,8 +97,8 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   await shot(vlux, 'L3-estudio-nuevo-cliente');
 
   // Tarjeta metálica: capas, y el reflejo sigue al puntero.
-  const layers = await vlux.evaluate(() => ['.card-metal-brush', '.card-metal-sheen', '.card-metal-shine', '.card-medallion', '.stamp-coin'].map((s) => !!document.querySelector(`[data-testid=studio-card] ${s}`)));
-  ok('L7 la tarjeta tiene acabado metálico (cepillado, brillo, medallón, monedas)', layers.every(Boolean), layers.join(','));
+  const layers = await vlux.evaluate(() => ['.card-metal-brush', '.card-metal-sheen', '.card-metal-shine', '.card-metal-grain', '.stamp-coin'].map((s) => !!document.querySelector(`[data-testid=studio-card] ${s}`)));
+  ok('L7 la tarjeta tiene acabado metálico (cepillado, grano, brillo, monedas en relieve)', layers.every(Boolean), layers.join(','));
   const card = await vlux.locator('[data-testid=studio-card] [data-testid=loyalty-card]').boundingBox();
   const before = await vlux.evaluate(() => document.querySelector('[data-testid=studio-card] .card-stage').style.getPropertyValue('--mx'));
   await vlux.mouse.move(card.x + card.width * 0.85, card.y + card.height * 0.2, { steps: 4 });
@@ -130,7 +130,7 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   await shot(vlux, 'S3-acabado-plata');
   await vlux.click('[data-testid=finish-signature]');
   const back = await finishInfo();
-  ok('S4 «Color del negocio» devuelve el color original sin tocar el programa de sellos', back.brand === sig.brand && (await vlux.textContent('[data-testid=studio-card]')).includes('/'));
+  ok('S4 «Color del negocio» devuelve el color original sin tocar el programa de sellos', back.brand.toUpperCase() === primary.toUpperCase() && (await vlux.textContent('[data-testid=studio-card]')).includes('/'));
   await vlux.emulateMedia({ reducedMotion: 'reduce' });
   const anim = await vlux.evaluate(() => getComputedStyle(document.querySelector('[data-testid=studio-card] .card-metal-shine')).animationName);
   ok('S5 con «reducir movimiento» la tarjeta no anima el brillo', anim === 'none', anim);
@@ -222,7 +222,7 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   await cust.check('#reg-privacy');
   await cust.click('button:has-text("Crear mi tarjeta")');
   await cust.waitForSelector('[data-testid=card-code]');
-  ok('P2 la tarjeta del cliente es metálica y lleva el logo', await cust.evaluate(() => !!document.querySelector('.card-metal') && !!document.querySelector('.card-medallion img')));
+  ok('P2 la tarjeta del cliente es metálica y lleva el logo', await cust.evaluate(() => !!document.querySelector('.card-metal') && !!document.querySelector('.logo-plate img')));
   ok('P3 el cliente ve «Llévala en tu teléfono» con el botón Agregar', await cust.isVisible('[data-testid=add-to-phone]') && /Llévala en tu teléfono/.test(await cust.textContent('[data-testid=save-card]')));
   await cust.click('[data-testid=add-to-phone]');
   await cust.waitForSelector('[role=dialog]');

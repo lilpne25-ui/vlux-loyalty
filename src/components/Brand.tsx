@@ -1,6 +1,6 @@
 // Variables de color de la marca del negocio (antes calculadas en App.tsx de V0.1).
 import React from 'react';
-import { applyFinish, type CardFinish } from '../lib/finish';
+import { applyFinish, finishTheme, type CardFinish } from '../lib/finish';
 
 function luminance(hex: string) {
   const c = hex.replace('#', '');
@@ -15,12 +15,15 @@ export function brandVars(primary: string, accent: string, finish?: CardFinish):
   // La app usa los colores del negocio tal cual; el acabado solo cambia la tarjeta (--card-*).
   const f = applyFinish(finish, primary, accent);
   const light = luminance(primary) > 0.4;
+  const th = finishTheme(finish, primary, accent);
   return {
+    ...th.vars,
+    ['--card-light' as string]: th.light ? '1' : '0',
     ['--brand' as string]: primary,
     ['--accent' as string]: accent,
     ['--card-brand' as string]: f.primary,
     ['--card-accent' as string]: f.accent,
-    ['--card-cream' as string]: luminance(f.primary) > 0.4 ? '#1E140F' : '#F5ECDF',
+    ['--card-cream' as string]: th.vars['--c-ink'],
     ['--card-hi' as string]: `${f.hi}%`,
     ['--cream' as string]: light ? '#1E140F' : '#F5ECDF',
     ['--on-brand' as string]: light ? '#1E140F' : '#FBF7F1',

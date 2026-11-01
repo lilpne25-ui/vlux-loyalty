@@ -12,10 +12,13 @@ import { platformAudit, type AdminSession } from './platform-auth';
 import { GoogleWalletProvider } from '../wallet/google';
 import { AppleWalletProvider } from '../wallet/apple';
 import { logoBytesMatch } from '../image-check';
+import { sanitizeFit } from '../../src/lib/logoFit';
 import { emailSchema, rulesSchema, slugSchema, verticals } from '../validation';
 
 const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Usa colores en formato #RRGGBB.');
 const logoSchema = z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, 'El logotipo debe ser PNG, JPG o WebP.').max(90000, 'El logotipo es demasiado grande (máximo ~64 KB).').refine(logoBytesMatch, 'El archivo no es una imagen válida del tipo indicado.').nullable();
+// Ajuste del logotipo: se normaliza y se acota (nunca se confía en el cliente); null si no es válido.
+const fitSchema = z.unknown().transform((v) => (v == null ? null : sanitizeFit(v))).default(null);
 export const cardFinishes = ['signature', 'silver', 'black'] as const;
 const reviewUrl = z.string().trim().regex(/^https:\/\/\S+$/, 'El enlace de reseñas debe empezar con https://').max(500).nullable();
 export const planCodes = ['piloto', 'inicio', 'crecimiento'] as const;
@@ -30,9 +33,11 @@ export const wizardSchema = z.object({
   ownerName: z.string().trim().min(2).max(60),
   ownerEmail: emailSchema,
   logoDataUrl: logoSchema.default(null),
+  logoFit: fitSchema,
+  logoOriginalDataUrl: logoSchema.default(null),
   primaryColor: color,
   accentColor: color,
-  cardFinish: z.enum(cardFinishes).default('signature'),
+  cardFinish: z.enum(cardFinishes).default('silver'),
   rules: rulesSchema,
   reviewUrl: reviewUrl.default(null),
   plan: z.enum(planCodes),
@@ -47,9 +52,11 @@ export const businessEditSchema = z.object({
   city: z.string().trim().max(80),
   primaryColor: color,
   accentColor: color,
-  cardFinish: z.enum(cardFinishes).default('signature'),
+  cardFinish: z.enum(cardFinishes).default('silver'),
   reviewUrl,
   logoDataUrl: logoSchema,
+  logoFit: fitSchema,
+  logoOriginalDataUrl: logoSchema.default(null),
 });
 
 export const statusChangeSchema = z.object({
@@ -93,9 +100,9 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
       slug = `${base.slice(0, 36)}-${i}`;
     }
     const biz = (await tx.query(
-      `INSERT INTO businesses (slug, name, city, vertical, primary_color, accent_color, review_url, is_demo, logo_data_url, card_finish)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-      [slug, input.name, input.city, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl, input.isDemo, input.logoDataUrl, input.cardFinish],
+      `INSERT INTO businesses (slug, name, city, vertical, primary_color, accent_color, review_url, is_demo, logo_data_url, card_finish, logo_fit, logo_original_data_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+      [slug, input.name, input.city, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl, input.isDemo, input.logoDataUrl, input.cardFinish, input.logoFit ? JSON.stringify(input.logoFit) : null, input.logoDataUrl ? input.logoOriginalDataUrl : null],
     )).rows[0].id as string;
     await tx.query("SELECT set_config('app.business_id', $1, true)", [biz]);
     const r = input.rules;
@@ -199,7 +206,7 @@ function walletLabel(st: ReturnType<GoogleWalletProvider['status']>) {
 
 export async function businessDetail(id: string) {
   const b = (await getPool().query(
-    `SELECT b.id, b.slug, b.status, b.suspended_reason, b.logo_data_url, b.created_at, b.updated_at, b.is_demo,
+    `SELECT b.id, b.slug, b.status, b.suspended_reason, b.logo_data_url, b.logo_fit, b.logo_original_data_url, b.created_at, b.updated_at, b.is_demo,
             s.plan_code, s.commercial_status, s.start_date, s.pilot_end_date, s.renewal_date, s.price_cents, s.currency, s.notes, s.updated_at AS sub_updated
        FROM businesses b LEFT JOIN business_subscriptions s ON s.business_id = b.id WHERE b.id = $1`, [id],
   )).rows[0];
@@ -217,7 +224,7 @@ export async function businessDetail(id: string) {
   const d = (v: Date | string | null) => (v ? (v instanceof Date ? isoDate(v) : String(v).slice(0, 10)) : null);
   return {
     ...pub,
-    status: b.status, suspendedReason: b.suspended_reason, logoDataUrl: b.logo_data_url, createdAt: b.created_at,
+    status: b.status, suspendedReason: b.suspended_reason, logoDataUrl: b.logo_data_url, logoFit: b.logo_fit ?? null, logoOriginalDataUrl: b.logo_original_data_url ?? null, createdAt: b.created_at,
     subscription: b.plan_code ? {
       plan: b.plan_code, commercialStatus: b.commercial_status, startDate: d(b.start_date), pilotEndDate: d(b.pilot_end_date),
       renewalDate: d(b.renewal_date), priceCents: b.price_cents, currency: b.currency, notes: b.notes, updatedAt: b.sub_updated,
@@ -234,9 +241,9 @@ export async function updateBusiness(admin: AdminSession, id: string, raw: unkno
   const input = businessEditSchema.parse(raw);
   return withTenant(id, async (tx) => {
     const r = await tx.query(
-      `UPDATE businesses SET name = $2, vertical = $3, city = $4, primary_color = $5, accent_color = $6, review_url = $7, logo_data_url = $8, card_finish = $9
+      `UPDATE businesses SET name = $2, vertical = $3, city = $4, primary_color = $5, accent_color = $6, review_url = $7, logo_data_url = $8, card_finish = $9, logo_fit = $10, logo_original_data_url = $11
         WHERE id = $1 RETURNING id`,
-      [id, input.name, input.vertical, input.city, input.primaryColor, input.accentColor, input.reviewUrl, input.logoDataUrl, input.cardFinish],
+      [id, input.name, input.vertical, input.city, input.primaryColor, input.accentColor, input.reviewUrl, input.logoDataUrl, input.cardFinish, input.logoFit ? JSON.stringify(input.logoFit) : null, input.logoDataUrl ? input.logoOriginalDataUrl : null],
     );
     if (!r.rowCount) throw notFound('Negocio');
     await audit(tx, id, { type: 'platform', id: null }, 'business.updated', 'business', id);

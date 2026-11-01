@@ -8,6 +8,7 @@ import { usePolling } from '../lib/usePolling';
 import { VERTICAL_LABEL } from '../lib/vertical';
 import { Badge, Button, Field, inputCls, useToast, cx, Modal, QRCode, BusinessLogo, VluxMark, CopyButton } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
+import { sanitizeFit } from '../lib/logoFit';
 import { AccessCenter, Links } from '../components/AccessCenter';
 import { InstallAppButton, useStaffAppHead } from '../components/InstallApp';
 import { HistoryTable } from './Employee';
@@ -418,7 +419,7 @@ function Settings({ business: b, onSaved }: { business: FullBusiness; onSaved: (
       <aside className="flex flex-col gap-3 lg:sticky lg:top-[84px]" data-vertical={form.vertical}>
         <div className="text-[12px] uppercase tracking-[0.14em] text-slate2">Así lo verá el cliente</div>
         <div style={brandVars(form.primaryColor, form.accentColor, b.cardFinish)}>
-          <LoyaltyCardFace logoUrl={b.logoUrl} businessName={form.name || 'Tu negocio'} customerName="Cliente de ejemplo" cardId="XXXX-XXXX" total={Math.min(15, Math.max(3, Number(form.stampsRequired) || 8))} filled={3} compact />
+          <LoyaltyCardFace logoUrl={b.logoUrl} logoFit={sanitizeFit(b.logoFit)} businessName={form.name || 'Tu negocio'} customerName="Cliente de ejemplo" cardId="XXXX-XXXX" total={Math.min(15, Math.max(3, Number(form.stampsRequired) || 8))} filled={3} compact />
         </div>
         <p className="text-[12px] text-slate2">Vista previa sin guardar. Al guardar se aplica en todas las tarjetas.</p>
       </aside>

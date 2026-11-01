@@ -9,6 +9,9 @@ import { CopyButton, QRCode } from '../components/ui';
 import { CButton, CField, PLAN_LABEL, PageHeader, cx, money } from './kit';
 import { ColorField, LogoField } from './Businesses';
 import { LIMITS } from '../../shared/rules';
+import { LoyaltyCardFace } from '../components/LoyaltyCard';
+import { brandVars } from '../components/Brand';
+import { sanitizeFit, type LogoFit } from '../lib/logoFit';
 
 type Plan = { code: 'piloto' | 'inicio' | 'crecimiento'; name: string; priceCents: number; currency: string };
 type Created = { businessId: string; slug: string; registrationUrl: string; access?: { customerUrl: string; cashierUrl: string; ownerUrl: string }; ownerInvitation: { link: string; expiresAt: string } };
@@ -30,8 +33,8 @@ export function Wizard() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [f, setF] = useState({
-    name: '', vertical: 'cafeteria' as Vertical, city: '', ownerName: '', ownerEmail: '', logoDataUrl: null as string | null,
-    primaryColor: PRESETS.cafeteria.primary, accentColor: PRESETS.cafeteria.accent, cardFinish: 'signature' as 'signature' | 'silver' | 'black',
+    name: '', vertical: 'cafeteria' as Vertical, city: '', ownerName: '', ownerEmail: '', logoDataUrl: null as string | null, logoFit: null as LogoFit | null, logoOriginalDataUrl: null as string | null,
+    primaryColor: PRESETS.cafeteria.primary, accentColor: PRESETS.cafeteria.accent, cardFinish: 'silver' as 'signature' | 'silver' | 'black',
     stampsRequired: 8, stampMode: 'per_purchase' as 'per_purchase' | 'per_item', maxStampsPerPurchase: 3, visitWindowMinutes: 120,
     rewardDescription: PRESETS.cafeteria.reward, reviewUrl: '',
     plan: 'piloto' as Plan['code'], price: '', pilotDays: 30, isDemo: false,
@@ -48,9 +51,10 @@ export function Wizard() {
         ...x,
         name: typeof v.name === 'string' ? v.name.slice(0, 60) : x.name,
         logoDataUrl: typeof v.logoDataUrl === 'string' && v.logoDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoDataUrl) ? v.logoDataUrl : x.logoDataUrl,
+        logoFit: sanitizeFit(v.logoFit) ?? x.logoFit,
         primaryColor: hex.test(v.primaryColor) ? v.primaryColor : x.primaryColor,
         accentColor: hex.test(v.accentColor) ? v.accentColor : x.accentColor,
-        cardFinish: v.cardFinish === 'silver' || v.cardFinish === 'black' ? v.cardFinish : 'signature',
+        cardFinish: v.cardFinish === 'signature' || v.cardFinish === 'black' ? v.cardFinish : 'silver',
         rewardDescription: typeof v.rewardDescription === 'string' ? v.rewardDescription.slice(0, 80) : x.rewardDescription,
         stampsRequired: Number.isInteger(v.stampsRequired) && v.stampsRequired >= 3 && v.stampsRequired <= 15 ? v.stampsRequired : x.stampsRequired,
       }));
@@ -82,7 +86,7 @@ export function Wizard() {
     try {
       const r = await api<Created>('POST', '/admin/businesses', {
         name: f.name.trim(), vertical: f.vertical, city: f.city.trim(), ownerName: f.ownerName.trim(), ownerEmail: f.ownerEmail.trim(),
-        logoDataUrl: f.logoDataUrl, primaryColor: f.primaryColor, accentColor: f.accentColor, cardFinish: f.cardFinish,
+        logoDataUrl: f.logoDataUrl, logoFit: f.logoFit, logoOriginalDataUrl: f.logoOriginalDataUrl, primaryColor: f.primaryColor, accentColor: f.accentColor, cardFinish: f.cardFinish,
         rules: { stampsRequired: f.stampsRequired, stampMode: f.stampMode, maxStampsPerPurchase: f.stampMode === 'per_item' ? f.maxStampsPerPurchase : 1, visitWindowMinutes: f.visitWindowMinutes, rewardDescription: f.rewardDescription.trim() },
         reviewUrl: f.reviewUrl.trim() || null, plan: f.plan, priceCents, pilotDays: f.pilotDays, isDemo: f.isDemo,
       });
@@ -120,8 +124,8 @@ export function Wizard() {
               <CField label="Correo del dueño" htmlFor="wz-email" hint="Recibirá una invitación por enlace (sin contraseña técnica)."><input id="wz-email" type="email" className="cc-input" value={f.ownerEmail} onChange={(e) => setF({ ...f, ownerEmail: e.target.value })} /></CField>
               <ColorField id="wz-primary" label="Color principal" value={f.primaryColor} onChange={(v) => setF({ ...f, primaryColor: v })} />
               <ColorField id="wz-accent" label="Color de acento" value={f.accentColor} onChange={(v) => setF({ ...f, accentColor: v })} />
-              <CField label="Acabado de la tarjeta" htmlFor="wz-finish"><select id="wz-finish" className="cc-input" value={f.cardFinish} onChange={(e) => setF({ ...f, cardFinish: e.target.value as 'signature' | 'silver' | 'black' })}><option value="signature">Color del negocio</option><option value="silver">Plata metálica</option><option value="black">Negro premium</option></select></CField>
-              <LogoField className="sm:col-span-2" value={f.logoDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v })} />
+              <CField label="Acabado de la tarjeta" htmlFor="wz-finish"><select id="wz-finish" className="cc-input" value={f.cardFinish} onChange={(e) => setF({ ...f, cardFinish: e.target.value as 'signature' | 'silver' | 'black' })}><option value="silver">Signature Silver</option><option value="black">Black Titanium</option><option value="signature">Signature Color</option></select></CField>
+              <LogoField className="sm:col-span-2" value={f.logoDataUrl} fit={f.logoFit} original={f.logoOriginalDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v.logo, logoFit: v.fit, logoOriginalDataUrl: v.original })} />
               <label className="sm:col-span-2 flex items-center gap-2.5 text-[13px] cc-muted cursor-pointer">
                 <input type="checkbox" className="accent-[#67C7D3]" checked={f.isDemo} onChange={(e) => setF({ ...f, isDemo: e.target.checked })} /> Es un negocio de demostración (no cuenta en métricas comerciales)
               </label>
@@ -183,20 +187,9 @@ export function Wizard() {
 
         <aside className="hidden lg:block">
           <div className="cc-label mb-2">Vista previa de la tarjeta</div>
-          <div className="rounded-2xl p-5 shadow-2xl" style={{ background: f.primaryColor, color: '#fff' }}>
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg overflow-hidden flex items-center justify-center text-[15px] font-medium" style={{ background: f.accentColor, color: f.primaryColor }}>
-                {f.logoDataUrl ? <img src={f.logoDataUrl} alt="" className="h-full w-full object-contain bg-white" /> : (f.name.trim()[0] ?? 'V')}
-              </div>
-              <div className="min-w-0"><div className="text-[14px] font-medium truncate">{f.name || 'Tu negocio'}</div><div className="text-[11px] opacity-70">{f.city || 'Ciudad'}</div></div>
-            </div>
-            <div className="mt-5 grid grid-cols-5 gap-2">
-              {Array.from({ length: Math.min(Math.max(f.stampsRequired, LIMITS.stampsRequired.min), LIMITS.stampsRequired.max) }).map((_, i) => (
-                <span key={i} className={cx('aspect-square rounded-full border', i < 2 ? '' : 'opacity-40')} style={{ borderColor: f.accentColor, background: i < 2 ? f.accentColor : 'transparent' }} />
-              ))}
-            </div>
-            <div className="mt-4 text-[11.5px] opacity-80">Premio: {f.rewardDescription || '—'}</div>
-          </div>
+          <div style={brandVars(f.primaryColor, f.accentColor, f.cardFinish)} data-testid="wizard-card"><LoyaltyCardFace compact businessName={f.name.trim() || 'Tu negocio'} customerName="Mariana López" cardId="VX-4F7K-92" total={Math.min(Math.max(f.stampsRequired, LIMITS.stampsRequired.min), LIMITS.stampsRequired.max)} filled={2} logoUrl={f.logoDataUrl} logoFit={f.logoFit} footer={<span className="opacity-70">{f.city || 'Ejemplo'}</span>} interactive={false} /></div>
+          <p className="mt-2 text-[11.5px] cc-muted">Premio: {f.rewardDescription || '—'}</p>
+          
         </aside>
       </div>
     </>

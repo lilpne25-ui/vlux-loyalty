@@ -405,11 +405,11 @@ test('el dueño no puede reemplazar la invitación de co-dueño emitida por VLUX
 });
 
 // V0.4.1 · Acabado de la tarjeta: configuración guardada y validada en el servidor.
-test('acabado de tarjeta: por omisión signature, se guarda y rechaza valores inválidos', async () => {
+test('acabado de tarjeta: por omisión silver (V0.4.3), se guarda y rechaza valores inválidos', async () => {
   const r0 = await A.post('/api/admin/businesses', wizard());
   assert.equal(r0.status, 201, JSON.stringify(r0.json));
   const d0 = (await A.get(`/api/admin/businesses/${r0.json.businessId}`)).json;
-  assert.equal(d0.cardFinish, 'signature');
+  assert.equal(d0.cardFinish, 'silver');
 
   const r1 = await A.post('/api/admin/businesses', wizard({ cardFinish: 'silver', name: 'Barbería Plata Metepec' }));
   assert.equal(r1.status, 201, JSON.stringify(r1.json));

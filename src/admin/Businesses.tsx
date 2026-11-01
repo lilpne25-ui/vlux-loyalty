@@ -1,5 +1,5 @@
 // Directorio de negocios y ficha de cada negocio (acceso, suscripción, configuración, estado, bitácora).
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Ban, ExternalLink, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Search, UserPlus, XCircle } from 'lucide-react';
 import { api, ApiError, type Vertical } from '../lib/api';
 import { navigate } from '../lib/router';
@@ -9,6 +9,9 @@ import { VERTICAL_LABEL } from '../lib/vertical';
 import { CopyButton, QRCode, useToast } from '../components/ui';
 import { CButton, CField, CModal, COMMERCIAL, ErrorLine, PLAN_LABEL, PageHeader, Pill, Skeleton, actionLabel, cx, money, num, shortDate } from './kit';
 import { prepareLogo } from './logo';
+import { analyzeLogo, removeLogoBackground } from './logoEngine';
+import { LogoControls } from './LogoControls';
+import { defaultFit, sanitizeFit, type LogoAnalysis, type LogoFit } from '../lib/logoFit';
 
 type Row = {
   id: string; slug: string; name: string; vertical: Vertical; city: string; status: 'active' | 'suspended'; isDemo: boolean; createdAt: string;
@@ -84,7 +87,7 @@ type Invitation = { id: string; email: string; displayName: string; role: 'OWNER
 type Detail = {
   id: string; slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; cardFinish?: 'signature' | 'silver' | 'black'; reviewUrl: string | null; isDemo: boolean;
   program: { stampsRequired: number; stampMode: string; maxStampsPerPurchase: number; visitWindowMinutes: number; rewardDescription: string; version: number };
-  status: 'active' | 'suspended'; suspendedReason: string | null; logoDataUrl: string | null; createdAt: string; registrationUrl: string;
+  status: 'active' | 'suspended'; suspendedReason: string | null; logoDataUrl: string | null; logoFit?: unknown | null; logoOriginalDataUrl?: string | null; createdAt: string; registrationUrl: string;
   subscription: { plan: string; commercialStatus: string; startDate: string; pilotEndDate: string | null; renewalDate: string | null; priceCents: number; currency: string; notes: string; updatedAt: string } | null;
   staff: { membershipId: string; role: 'OWNER' | 'EMPLOYEE'; active: boolean; email: string; displayName: string; createdAt: string; lastLogin: string | null }[];
   invitations: Invitation[];
@@ -371,7 +374,7 @@ function StatusModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; o
 
 function EditModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const [f, setF] = useState({ name: d.name, vertical: d.vertical, city: d.city, primaryColor: d.primaryColor, accentColor: d.accentColor, cardFinish: (d.cardFinish ?? 'signature') as 'signature' | 'silver' | 'black', reviewUrl: d.reviewUrl ?? '', logoDataUrl: d.logoDataUrl });
+  const [f, setF] = useState({ name: d.name, vertical: d.vertical, city: d.city, primaryColor: d.primaryColor, accentColor: d.accentColor, cardFinish: (d.cardFinish ?? 'signature') as 'signature' | 'silver' | 'black', reviewUrl: d.reviewUrl ?? '', logoDataUrl: d.logoDataUrl, logoFit: sanitizeFit(d.logoFit), logoOriginalDataUrl: d.logoOriginalDataUrl ?? null });
   const [err, setErr] = useState<string | null>(null);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -391,8 +394,8 @@ function EditModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; onC
         <CField label="Enlace de reseñas (https://)" htmlFor="ed-review"><input id="ed-review" className="cc-input" value={f.reviewUrl} onChange={(e) => setF({ ...f, reviewUrl: e.target.value })} /></CField>
         <ColorField id="ed-primary" label="Color principal" value={f.primaryColor} onChange={(v) => setF({ ...f, primaryColor: v })} />
         <ColorField id="ed-accent" label="Color de acento" value={f.accentColor} onChange={(v) => setF({ ...f, accentColor: v })} />
-        <CField label="Acabado de la tarjeta" htmlFor="ed-finish"><select id="ed-finish" className="cc-input" value={f.cardFinish} onChange={(e) => setF({ ...f, cardFinish: e.target.value as 'signature' | 'silver' | 'black' })}><option value="signature">Color del negocio</option><option value="silver">Plata metálica</option><option value="black">Negro premium</option></select></CField>
-        <LogoField className="sm:col-span-2" value={f.logoDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v })} />
+        <CField label="Acabado de la tarjeta" htmlFor="ed-finish"><select id="ed-finish" className="cc-input" value={f.cardFinish} onChange={(e) => setF({ ...f, cardFinish: e.target.value as 'signature' | 'silver' | 'black' })}><option value="silver">Signature Silver</option><option value="black">Black Titanium</option><option value="signature">Signature Color</option></select></CField>
+        <LogoField className="sm:col-span-2" value={f.logoDataUrl} fit={f.logoFit} original={f.logoOriginalDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v.logo, logoFit: v.fit, logoOriginalDataUrl: v.original })} />
         {err && <p className="sm:col-span-2 text-[12.5px] text-[#FDA29B]" role="alert">{err}</p>}
         <div className="sm:col-span-2 flex justify-end gap-2"><CButton type="button" variant="ghost" onClick={onClose}>Cancelar</CButton><CButton type="submit" variant="primary">Guardar</CButton></div>
       </form>
@@ -411,17 +414,44 @@ export function ColorField({ id, label, value, onChange }: { id: string; label: 
   );
 }
 
-export function LogoField({ value, onChange, className }: { value: string | null; onChange: (v: string | null) => void; className?: string }) {
+export interface LogoState { logo: string | null; fit: LogoFit | null; original: string | null }
+
+/** Carga del logotipo con el Intelligent Logo Engine: analiza, autoajusta y permite corregir a mano (sin tocar el original). */
+export function LogoField({ value, fit, original, onChange, className }: { value: string | null; fit: LogoFit | null; original: string | null; onChange: (s: LogoState) => void; className?: string }) {
   const [err, setErr] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<LogoAnalysis | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!value) { setAnalysis(null); return; }
+    analyzeLogo(value).then((r) => { if (live) setAnalysis(r.analysis); }).catch(() => { if (live) setAnalysis(null); });
+    return () => { live = false; };
+  }, [value]);
+  const take = async (logo: string, orig: string | null) => { const r = await analyzeLogo(logo); setAnalysis(r.analysis); onChange({ logo, fit: r.fit, original: orig }); };
   return (
-    <CField label="Logotipo (opcional)" htmlFor="logo-file" hint="PNG, JPG o WebP. Se reduce a 256 px en tu navegador." error={err} className={className}>
-      <div className="flex items-center gap-3">
-        <div className="h-14 w-14 rounded-xl border border-[color:var(--cc-line-strong)] overflow-hidden flex items-center justify-center bg-white/[.02]">
-          {value ? <img src={value} alt="Vista previa del logotipo" className="h-full w-full object-contain bg-white" /> : <span className="text-[11px] cc-faint">Sin logo</span>}
+    <CField label="Logotipo (opcional)" htmlFor="logo-file" hint="PNG, JPG o WebP. Se reduce a 256 px en tu navegador y se ajusta solo." error={err} className={className}>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <div className="h-14 w-14 rounded-xl border border-[color:var(--cc-line-strong)] overflow-hidden flex items-center justify-center bg-white/[.02]">
+            {value ? <img src={value} alt="Vista previa del logotipo" className="h-full w-full object-contain bg-white" /> : <span className="text-[11px] cc-faint">Sin logo</span>}
+          </div>
+          <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" className="text-[12.5px] cc-muted file:mr-3 file:cc-btn file:h-8 file:px-3 file:rounded-lg file:border file:border-[color:var(--cc-line-strong)] file:bg-transparent file:text-white"
+            onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; setErr(null); try { await take(await prepareLogo(file), null); } catch (x) { setErr((x as Error).message); } }} />
+          {value && <CButton type="button" small variant="ghost" onClick={() => { setAnalysis(null); onChange({ logo: null, fit: null, original: null }); }}>Quitar</CButton>}
         </div>
-        <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" className="text-[12.5px] cc-muted file:mr-3 file:cc-btn file:h-8 file:px-3 file:rounded-lg file:border file:border-[color:var(--cc-line-strong)] file:bg-transparent file:text-white"
-          onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; setErr(null); try { onChange(await prepareLogo(file)); } catch (x) { setErr((x as Error).message); } }} />
-        {value && <CButton type="button" small variant="ghost" onClick={() => onChange(null)}>Quitar</CButton>}
+        {value && fit && (
+          <LogoControls fit={fit} analysis={analysis} canRemoveBg={!!analysis?.bg && !original} bgRemoved={!!original}
+            onChange={(f) => onChange({ logo: value, fit: f, original })}
+            onReset={() => analysis && onChange({ logo: value, fit: defaultFit(analysis), original })}
+            onRemoveBg={async () => {
+              if (!analysis) return;
+              try {
+                const out = await removeLogoBackground(value, analysis);
+                if (!out) { setErr('No fue posible quitar el fondo con confianza. Se conserva tu logo original.'); return; }
+                setErr(null); await take(out, value);
+              } catch (x) { setErr((x as Error).message); }
+            }}
+            onRestoreBg={async () => { if (original) await take(original, null); }} />
+        )}
       </div>
     </CField>
   );

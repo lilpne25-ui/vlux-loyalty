@@ -56,6 +56,8 @@ export interface PublicBusiness {
   isDemo: boolean;
   /** URL versionada del logotipo (o null). El logotipo se sirve aparte para no inflar el JSON que se consulta cada pocos segundos. */
   logoUrl: string | null;
+  /** Ajuste del logotipo (autoajuste + cambios manuales); null = autoajuste en el cliente. */
+  logoFit: unknown | null;
   program: { stampsRequired: number; stampMode: string; maxStampsPerPurchase: number; visitWindowMinutes: number; rewardDescription: string; ruleId: string; version: number };
 }
 
@@ -69,7 +71,7 @@ export async function getBusinessById(id: string): Promise<PublicBusiness> {
   return withTenant(id, async (tx) => {
     const row = (await tx.query(
       `SELECT b.id, b.slug, b.name, b.city, b.vertical, b.primary_color, b.accent_color, b.card_finish, b.review_url, b.is_demo,
-              b.logo_hash AS logo_v,
+              b.logo_hash AS logo_v, b.logo_fit,
               r.id AS rule_id, r.version, r.stamps_required, r.stamp_mode, r.max_stamps_per_purchase, r.visit_window_minutes, r.reward_description
          FROM businesses b JOIN reward_rules r ON r.business_id = b.id AND r.active
         WHERE b.id = $1`,
@@ -79,6 +81,7 @@ export async function getBusinessById(id: string): Promise<PublicBusiness> {
     return {
       id: row.id, slug: row.slug, name: row.name, city: row.city, vertical: row.vertical,
       primaryColor: row.primary_color, accentColor: row.accent_color, cardFinish: row.card_finish, reviewUrl: row.review_url, isDemo: row.is_demo,
+      logoFit: row.logo_fit ?? null,
       logoUrl: row.logo_v ? `/api/public/businesses/${row.slug}/logo?v=${row.logo_v}` : null,
       program: {
         ruleId: row.rule_id, version: row.version, stampsRequired: row.stamps_required, stampMode: row.stamp_mode,

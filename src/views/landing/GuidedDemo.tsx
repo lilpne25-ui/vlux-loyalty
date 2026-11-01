@@ -1,12 +1,30 @@
 // Demostración guiada: una historia en cinco pasos (marca → cliente → compra → premio → dueño), con datos ficticios
 // que viven solo en este navegador. Cada acción cambia la tarjeta y los números del panel del dueño.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Check, QrCode, Store, Gift, BarChart3, Sparkles, ArrowRight, RotateCcw } from 'lucide-react';
 import { LoyaltyCardFace } from '../../components/LoyaltyCard';
 import { QRCode, cx } from '../../components/ui';
 import { brandVars } from '../../components/Brand';
 import { FINISHES, type CardFinish } from '../../lib/finish';
 import { navigate } from '../../lib/router';
+import { analyzeLogo } from '../../admin/logoEngine';
+import { prepareLogo } from '../../admin/logo';
+import { describeAnalysis } from '../../admin/LogoControls';
+import { paletteFromImage } from '../../lib/palette';
+import type { LogoAnalysis, LogoFit } from '../../lib/logoFit';
+
+// Logotipos FICTICIOS de ejemplo (formas y colores inventados; no son marcas reales). Se rasterizan en el navegador.
+const SAMPLES = [
+  { id: 'horizontal', label: 'Cafetería (horizontal)', name: 'Café Aurora', w: 320, h: 90, svg: '<rect x="8" y="22" width="46" height="46" rx="23" fill="#1F6F4A"/><path d="M22 52c4-14 12-18 24-18-2 14-10 20-24 18z" fill="#F3E3B8"/><text x="66" y="58" font-family="Georgia,serif" font-size="38" fill="#1F6F4A">Aurora</text>', primary: '#1F6F4A', accent: '#E8B04B' },
+  { id: 'cuadrado', label: 'Barbería (cuadrado)', name: 'Barbería Norte', w: 160, h: 160, svg: '<circle cx="80" cy="80" r="64" fill="#1D3F8F"/><path d="M52 112 80 40l28 72" stroke="#fff" stroke-width="12" fill="none" stroke-linejoin="round"/><rect x="62" y="86" width="36" height="9" fill="#fff"/>', primary: '#1D3F8F', accent: '#8FB2FF' },
+  { id: 'vertical', label: 'Panadería (vertical)', name: 'Panadería Sol', w: 100, h: 220, svg: '<circle cx="50" cy="44" r="34" fill="#C77B1A"/><path d="M50 18v52M30 44h40" stroke="#FFF4DA" stroke-width="7"/><text x="50" y="140" text-anchor="middle" font-family="Georgia,serif" font-size="30" fill="#7A4A10">SOL</text><rect x="22" y="160" width="56" height="8" fill="#C77B1A"/>', primary: '#C77B1A', accent: '#7A4A10' },
+] as const;
+async function svgToPng(svg: string, w: number, h: number): Promise<string> {
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${svg}</svg>`);
+  const img = await new Promise<HTMLImageElement>((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => bad(new Error('ejemplo')); i.src = url; });
+  const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2; c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/png');
+}
 
 const TOTAL = 5;
 const STEPS = [
@@ -22,6 +40,24 @@ export function GuidedDemo() {
   const [name, setName] = useState('Tu negocio');
   const [finish, setFinish] = useState<CardFinish>('silver');
   const [hasCard, setHasCard] = useState(false);
+  const [logo, setLogo] = useState<string | null>(null);
+  const [fit, setFit] = useState<LogoFit | null>(null);
+  const [analysis, setAnalysis] = useState<LogoAnalysis | null>(null);
+  const [colors, setColors] = useState({ primary: '#14171C', accent: '#67C7D3' });
+  const [swatches, setSwatches] = useState<string[]>([]);
+  const [logoErr, setLogoErr] = useState<string | null>(null);
+  const [compare, setCompare] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const take = async (png: string, hint?: { primary: string; accent: string }) => {
+    setLogoErr(null);
+    try {
+      const [a, pal] = await Promise.all([analyzeLogo(png), paletteFromImage(png).catch(() => null)]);
+      setLogo(png); setFit(a.fit); setAnalysis(a.analysis);
+      const p = pal ?? hint; if (p) setColors({ primary: p.primary, accent: p.accent });
+      setSwatches(pal?.swatches ?? []);
+    } catch (e) { setLogoErr((e as Error).message); }
+  };
+  const clearLogo = () => { setLogo(null); setFit(null); setAnalysis(null); setSwatches([]); setColors({ primary: '#14171C', accent: '#67C7D3' }); };
   const [filled, setFilled] = useState(0);
   const [visits, setVisits] = useState(0);
   const [rewards, setRewards] = useState(0);
@@ -32,10 +68,18 @@ export function GuidedDemo() {
   const redeem = () => { if (!ready) return; setRewards((n) => n + 1); setFilled(0); };
   const S = STEPS[step];
 
-  const card = (
-    <div style={brandVars('#14171C', '#67C7D3', finish)} className="w-full max-w-[400px] mx-auto">
+  const card = compare && step === 0 ? (
+    <div className="w-full max-w-[400px] mx-auto flex flex-col gap-4" data-testid="gd-compare">
+      {FINISHES.map((f) => (
+        <div key={f.id} style={brandVars(colors.primary, colors.accent, f.id)}>
+          <LoyaltyCardFace compact interactive={false} businessName={shown} customerName="Cliente de ejemplo" cardId="VX-DEMO-01" total={TOTAL} filled={2} logoUrl={logo} logoFit={fit} rewardLabel="Un beneficio de cortesía" footer={<span className="opacity-70">{f.label}</span>} />
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div style={brandVars(colors.primary, colors.accent, finish)} className="w-full max-w-[400px] mx-auto" data-testid="gd-card">
       {hasCard || step === 0 ? (
-        <LoyaltyCardFace businessName={shown} customerName="Cliente de ejemplo" cardId="VX-DEMO-01" total={TOTAL} filled={hasCard ? filled : 2} rewardReady={hasCard && ready} rewardLabel="Un beneficio de cortesía" footer={<span className="opacity-70">Demostración</span>} />
+        <LoyaltyCardFace businessName={shown} customerName="Cliente de ejemplo" cardId="VX-DEMO-01" total={TOTAL} filled={hasCard ? filled : 2} rewardReady={hasCard && ready} logoUrl={logo} logoFit={fit} rewardLabel="Un beneficio de cortesía" footer={<span className="opacity-70">Demostración</span>} />
       ) : (
         <div className="lp-ghost-card" aria-hidden="true">Aún no hay tarjeta</div>
       )}
@@ -65,11 +109,24 @@ export function GuidedDemo() {
               <label className="text-[13px] text-white/70" htmlFor="gd-name">Nombre de tu negocio
                 <input id="gd-name" data-testid="gd-name" className="lp-input mt-1.5" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
               </label>
+              <div className="flex flex-col gap-2" data-testid="gd-logo">
+                <div className="text-[13px] text-white/70">Tu logo</div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="lp-chip" data-testid="gd-upload" onClick={() => fileRef.current?.click()}>Subir mi logo</button>
+                  {SAMPLES.map((x) => <button key={x.id} type="button" className="lp-chip" data-testid={`gd-sample-${x.id}`} onClick={async () => { setName(x.name); await take(await svgToPng(x.svg, x.w, x.h), { primary: x.primary, accent: x.accent }); }}>{x.label}</button>)}
+                  {logo && <button type="button" className="lp-chip" data-testid="gd-clear-logo" onClick={clearLogo}>Quitar</button>}
+                </div>
+                <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" data-testid="gd-file" aria-label="Subir logo" onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; try { await take(await prepareLogo(f)); } catch (x) { setLogoErr((x as Error).message); } }} />
+                {logoErr && <p className="text-[12.5px] text-[#FDA29B]" role="alert">{logoErr}</p>}
+                {analysis && <p className="text-[12px] text-white/60" data-testid="gd-analysis">Autoajuste: {describeAnalysis(analysis)}. Tu logo no se sube a ningún servidor.</p>}
+                {swatches.length > 0 && <div className="flex items-center gap-1.5" data-testid="gd-swatches" aria-label="Colores detectados">{swatches.slice(0, 5).map((c) => <span key={c} title={c} className="h-5 w-5 rounded-full border border-white/20" style={{ background: c }} />)}<span className="text-[12px] text-white/50 ml-1">colores detectados</span></div>}
+              </div>
               <div role="radiogroup" aria-label="Acabado de la tarjeta" className="grid grid-cols-3 gap-2">
                 {FINISHES.map((f) => (
                   <button key={f.id} type="button" role="radio" aria-checked={finish === f.id} data-testid={`gd-finish-${f.id}`} onClick={() => setFinish(f.id)} className={cx('lp-chip', finish === f.id && 'on')}>{f.label}</button>
                 ))}
               </div>
+              <button type="button" className="lp-link" data-testid="gd-compare-toggle" aria-pressed={compare} onClick={() => setCompare((v) => !v)}>{compare ? 'Ver una sola tarjeta' : 'Comparar los tres acabados con tu logo'}</button>
               <button type="button" className="lp-link" onClick={() => navigate('/personalizar')}>¿Tienes logo? Pruébalo en el estudio de marca <ArrowRight size={14} /></button>
             </div>
           )}

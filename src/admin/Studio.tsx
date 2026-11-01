@@ -13,8 +13,11 @@ import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { QRCode, BusinessLogo } from '../components/ui';
 import { brandVars } from '../components/Brand';
 import { FINISHES, type CardFinish } from '../lib/finish';
+import { analyzeLogo, removeLogoBackground } from './logoEngine';
+import { LogoControls, FinishCompare, BeforeAfter } from './LogoControls';
+import { defaultFit, type LogoAnalysis, type LogoFit } from '../lib/logoFit';
 
-type Brand = { name: string; city: string; logo: string | null; primary: string; accent: string; reward: string; stamps: number; filled: number; finish?: CardFinish };
+type Brand = { name: string; city: string; logo: string | null; primary: string; accent: string; reward: string; stamps: number; filled: number; finish?: CardFinish; fit?: LogoFit | null; logoOrig?: string | null; analysis?: LogoAnalysis | null };
 
 const PRESETS: { id: string; label: string; icon: React.ReactNode; brand: Brand }[] = [
   { id: 'vlux', label: 'VLUX Demo', icon: <Sparkles size={14} />, brand: { name: 'VLUX Demo', city: '', logo: null, primary: '#14171C', accent: '#67C7D3', reward: 'Un beneficio de cortesía', stamps: 6, filled: 4, finish: 'silver' } },
@@ -36,9 +39,20 @@ function PhoneFrame({ children, label }: { children: React.ReactNode; label: str
   );
 }
 
+/** Pantalla del teléfono con la tarjeta metálica ya creada (la que ve el cliente después de registrarse). */
+function CardPhonePreview({ b }: { b: Brand }) {
+  return (
+    <div className="h-full flex flex-col gap-3 p-3 pt-9 bg-[#0E1013]" style={brandVars(b.primary, b.accent, b.finish ?? 'silver')} data-testid="phone-card">
+      <div className="text-[11px] text-white/60 text-center">Mi tarjeta</div>
+      <LoyaltyCardFace compact interactive={false} businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={b.filled} logoUrl={b.logo} logoFit={b.fit} footer={<span className="opacity-70">Ejemplo</span>} />
+      <div className="text-[10.5px] text-white/50 text-center mt-1">Enseña tu QR en caja para sumar sellos.</div>
+    </div>
+  );
+}
+
 function PortalPreview({ b }: { b: Brand }) {
   return (
-    <div className="cafe-bg h-full flex flex-col gap-3 p-4 pt-9" style={brandVars(b.primary, b.accent, b.finish)}>
+    <div className="cafe-bg h-full flex flex-col gap-3 p-4 pt-9" style={brandVars(b.primary, b.accent, b.finish ?? 'silver')}>
       <div className="flex items-center gap-2"><BusinessLogo name={shown(b)} size={28} src={b.logo} /><div className="font-display text-[12.5px] text-cafe-ink leading-tight line-clamp-2">{shown(b)}</div></div>
       <div className="rounded-2xl p-4 relative overflow-hidden flex-1 min-h-[96px] flex items-end" style={{ background: 'var(--brand)' }}>
         <div className="absolute inset-0 hero-glow" />
@@ -56,7 +70,7 @@ function HomeScreenPreview({ b }: { b: Brand }) {
     <div className="h-full p-4 pt-8 flex flex-col gap-4" style={{ background: 'linear-gradient(160deg,#2d3b57,#111827 60%,#1f2937)' }}>
       <div className="grid grid-cols-4 gap-x-3 gap-y-4">
         {apps.map((a) => (<div key={a} className="flex flex-col items-center gap-1"><span className="h-9 w-9 rounded-[10px] bg-white/15" /><span className="text-[7.5px] text-white/70">{a}</span></div>))}
-        <div className="flex flex-col items-center gap-1 studio-appin" style={brandVars(b.primary, b.accent, b.finish)}>
+        <div className="flex flex-col items-center gap-1 studio-appin" style={brandVars(b.primary, b.accent, b.finish ?? 'silver')}>
           <span className="h-9 w-9 rounded-[10px] overflow-hidden flex items-center justify-center" style={{ background: 'var(--brand)', boxShadow: '0 4px 10px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.18) inset' }}>
             {b.logo ? <img src={b.logo} alt="" className="h-full w-full object-contain p-1 bg-white" /> : <span className="font-display text-[15px]" style={{ color: 'var(--accent)' }}>{shown(b).replace(/caf[eé]|barber[ií]a/i, '').trim().slice(0, 1).toUpperCase() || shown(b).slice(0, 1).toUpperCase()}</span>}
           </span>
@@ -90,13 +104,14 @@ export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
       const logo = await prepareLogo(file);
       const p: Palette = await paletteFromImage(logo);
       setSwatches(p.swatches);
-      setB((x) => ({ ...x, logo, primary: p.primary, accent: p.accent }));
+      const { analysis, fit } = await analyzeLogo(logo);
+      setB((x) => ({ ...x, logo, logoOrig: null, fit, analysis, primary: p.primary, accent: p.accent, finish: x.finish ?? 'silver' }));
       setMsg('Logo cargado. Detectamos sus colores y ya se aplican a la tarjeta.');
     } catch (e) { setErr((e as Error).message); }
   };
 
   const useInWizard = () => {
-    try { sessionStorage.setItem('vlux:studio', JSON.stringify({ name: b.name, logoDataUrl: b.logo, primaryColor: b.primary, accentColor: b.accent, cardFinish: b.finish ?? 'signature', rewardDescription: b.reward, stampsRequired: b.stamps })); } catch { /* sin almacenamiento */ }
+    try { sessionStorage.setItem('vlux:studio', JSON.stringify({ name: b.name, logoDataUrl: b.logoOrig ?? b.logo, logoFit: b.fit, primaryColor: b.primary, accentColor: b.accent, cardFinish: b.finish ?? 'silver', rewardDescription: b.reward, stampsRequired: b.stamps })); } catch { /* sin almacenamiento */ }
     navigate('/vlux-admin/negocios/nuevo');
   };
 
@@ -126,10 +141,25 @@ export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
             {b.logo ? <img src={b.logo} alt="Logo cargado" className="h-16 w-16 object-contain rounded-lg bg-white p-1 studio-pop" /> : <Upload size={22} className="cc-muted" />}
             <div className="text-[13px]">{b.logo ? 'Logo listo' : 'Arrastra el logo aquí'}</div>
             <CButton type="button" small onClick={() => fileRef.current?.click()}>{b.logo ? 'Cambiar logo' : 'Elegir archivo'}</CButton>
-            {b.logo && <CButton type="button" small variant="ghost" onClick={() => { set('logo', null); setSwatches([]); }}>Quitar</CButton>}
+            {b.logo && <CButton type="button" small variant="ghost" onClick={() => { setB((x) => ({ ...x, logo: null, fit: null, analysis: null, logoOrig: null })); setSwatches([]); }}>Quitar</CButton>}
           </div>
           {msg && <p className="text-[12.5px] text-[#6CE9A6] inline-flex items-start gap-1.5" role="status"><Wand2 size={14} className="mt-0.5 shrink-0" /> {msg}</p>}
           {err && <p className="text-[12.5px] text-[#FDA29B]" role="alert">{err}</p>}
+          {b.logo && b.fit && (
+            <LogoControls fit={b.fit} analysis={b.analysis ?? null} canRemoveBg={!!b.analysis?.bg && !b.logoOrig} bgRemoved={!!b.logoOrig}
+              onChange={(f) => set('fit', f)}
+              onReset={() => b.analysis && set('fit', defaultFit(b.analysis))}
+              onRemoveBg={async () => {
+                if (!b.logo || !b.analysis) return;
+                try {
+                  const out = await removeLogoBackground(b.logo, b.analysis);
+                  if (!out) { setMsg(null); setErr('No fue posible quitar el fondo con confianza. Se conserva tu logo original; puedes ajustar la base manualmente.'); return; }
+                  const { analysis, fit } = await analyzeLogo(out);
+                  setErr(null); setB((x) => ({ ...x, logoOrig: x.logo, logo: out, analysis, fit }));
+                } catch (e) { setErr((e as Error).message); }
+              }}
+              onRestoreBg={async () => { if (!b.logoOrig) return; const { analysis, fit } = await analyzeLogo(b.logoOrig); setB((x) => ({ ...x, logo: x.logoOrig!, logoOrig: null, analysis, fit })); }} />
+          )}
 
           {swatches.length > 0 && (
             <div>
@@ -143,8 +173,8 @@ export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
           </div>
           <div role="radiogroup" aria-label="Acabado de la tarjeta" data-testid="studio-finish" className="grid grid-cols-3 gap-2">
             {FINISHES.map((f) => (
-              <button key={f.id} type="button" role="radio" aria-checked={(b.finish ?? 'signature') === f.id} data-testid={`finish-${f.id}`} title={f.hint}
-                className={cx('studio-chip text-[12px] px-2 py-2 rounded-xl border', (b.finish ?? 'signature') === f.id ? 'border-[var(--cc-cyan)] bg-white/10' : 'border-white/10')}
+              <button key={f.id} type="button" role="radio" aria-checked={(b.finish ?? 'silver') === f.id} data-testid={`finish-${f.id}`} title={f.hint}
+                className={cx('studio-chip text-[12px] px-2 py-2 rounded-xl border', (b.finish ?? 'silver') === f.id ? 'border-[var(--cc-cyan)] bg-white/10' : 'border-white/10')}
                 onClick={() => set('finish', f.id)}>{f.label}</button>
             ))}
           </div>
@@ -156,9 +186,9 @@ export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
         </section>
 
         <section className="flex flex-col gap-8 min-w-0" aria-label="Vista previa">
-          <div className="cc-panel studio-stage p-6 sm:p-8 flex items-center justify-center" style={brandVars(b.primary, b.accent, b.finish)} data-testid="studio-card">
+          <div className="cc-panel studio-stage p-6 sm:p-8 flex items-center justify-center" style={brandVars(b.primary, b.accent, b.finish ?? 'silver')} data-testid="studio-card">
             <div className="w-full max-w-[420px]">
-              <LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={b.filled} rewardReady={b.filled >= b.stamps} logoUrl={b.logo} footer={<span className="opacity-70">Ejemplo</span>} />
+              <LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={b.filled} rewardReady={b.filled >= b.stamps} logoUrl={b.logo} logoFit={b.fit} footer={<span className="opacity-70">Ejemplo</span>} />
               <div className="mt-4 flex items-center justify-center gap-3">
                 {b.filled >= b.stamps
                   ? <CButton variant="primary" onClick={() => set('filled', 0)} data-testid="studio-redeem"><Check size={15} /> Canjear: {b.reward.toLowerCase()}</CButton>
@@ -166,8 +196,17 @@ export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
               </div>
             </div>
           </div>
+          <section aria-label="Comparar acabados" className="flex flex-col gap-3">
+            <h2 className="text-[15px] font-medium">Compara los tres acabados con tu logo</h2>
+            <FinishCompare b={b} current={b.finish ?? 'silver'} onPick={(f) => set('finish', f)} />
+          </section>
+          <section aria-label="Antes y después" className="flex flex-col gap-3">
+            <h2 className="text-[15px] font-medium">Antes y después</h2>
+            <BeforeAfter b={b} />
+          </section>
           <div className="flex flex-wrap justify-center gap-8">
             <PhoneFrame label="Portal del cliente"><PortalPreview b={b} /></PhoneFrame>
+            <PhoneFrame label="Su tarjeta en el teléfono"><CardPhonePreview b={b} /></PhoneFrame>
             <PhoneFrame label="En su pantalla de inicio"><HomeScreenPreview b={b} /></PhoneFrame>
             <figure className="flex flex-col items-center gap-2.5 m-0 self-center">
               <div className="rounded-2xl bg-white p-3 studio-pop"><QRCode value={SAMPLE_URL} size={150} label="QR de ejemplo" /></div>
@@ -184,8 +223,8 @@ export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
 // ---------- Presentación comercial a pantalla completa ----------
 function SlideCard({ b, big }: { b: Brand; big?: boolean }) {
   return (
-    <div style={brandVars(b.primary, b.accent, b.finish)} className={cx('w-full', big ? 'max-w-[460px]' : 'max-w-[360px]')}>
-      <LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={b.filled} rewardReady={b.filled >= b.stamps} logoUrl={b.logo} footer={<span className="opacity-70">Ejemplo</span>} />
+    <div style={brandVars(b.primary, b.accent, b.finish ?? 'silver')} className={cx('w-full', big ? 'max-w-[460px]' : 'max-w-[360px]')}>
+      <LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={b.filled} rewardReady={b.filled >= b.stamps} logoUrl={b.logo} logoFit={b.fit} footer={<span className="opacity-70">Ejemplo</span>} />
     </div>
   );
 }
@@ -199,6 +238,15 @@ function Presentation3({ brand: b, onClose }: { brand: Brand; onClose: () => voi
       art: <SlideCard b={b} big />,
     },
     {
+      kicker: 'Tu marca', title: 'Sube tu logo y se ajusta solo', body: 'Detectamos la forma, la transparencia y los colores de tu logo, y lo acomodamos sin deformarlo ni recortarlo.',
+      art: <div className="w-full max-w-[760px]"><BeforeAfter b={{ ...b, finish: b.finish ?? 'silver' }} /></div>,
+    },
+    {
+      kicker: 'Tu acabado', title: 'Plata, titanio negro o el color de tu marca', body: 'El mismo logo en tres metales. El color de tu negocio aparece en los detalles, no tiñe todo el metal.',
+      art: <div className="w-full max-w-[900px]"><FinishCompare b={b} current={b.finish ?? 'silver'} onPick={() => undefined} /></div>,
+      note: 'Los reflejos del metal viven en la tarjeta web. En Apple Wallet y Google Wallet la tarjeta será una versión simplificada: los efectos 3D y el brillo no se reproducen igual.',
+    },
+    {
       kicker: 'Para tus clientes', title: 'Un ícono en su teléfono', body: 'Escanean tu QR, crean su tarjeta en menos de un minuto y la agregan a su pantalla de inicio. Sin descargar nada de la tienda.',
       art: <div className="flex flex-wrap items-center justify-center gap-6"><PhoneFrame label="Portal"><PortalPreview b={b} /></PhoneFrame><PhoneFrame label="Pantalla de inicio"><HomeScreenPreview b={b} /></PhoneFrame></div>,
       note: 'En iPhone se agrega desde Safari (Compartir → Agregar a pantalla de inicio). Es una app web, no Apple Wallet.',
@@ -208,8 +256,8 @@ function Presentation3({ brand: b, onClose }: { brand: Brand; onClose: () => voi
       art: (
         <div className="flex flex-wrap items-center justify-center gap-8">
           <div className="studio-scan"><ScanLine size={34} /><span>Escaneando tarjeta…</span></div>
-          <button className="studio-stampbtn" onClick={() => setStamped(true)} style={brandVars(b.primary, b.accent, b.finish)}>{stamped ? <><Check size={18} /> +1 sello registrado</> : 'Registrar compra'}</button>
-          <div style={brandVars(b.primary, b.accent, b.finish)} className="w-[300px] max-w-full"><LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={Math.min(b.stamps, b.filled + (stamped ? 1 : 0))} animateFrom={stamped ? b.filled : null} logoUrl={b.logo} compact footer={<span className="opacity-70">En vivo</span>} /></div>
+          <button className="studio-stampbtn" onClick={() => setStamped(true)} style={brandVars(b.primary, b.accent, b.finish ?? 'silver')}>{stamped ? <><Check size={18} /> +1 sello registrado</> : 'Registrar compra'}</button>
+          <div style={brandVars(b.primary, b.accent, b.finish ?? 'silver')} className="w-[300px] max-w-full"><LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={Math.min(b.stamps, b.filled + (stamped ? 1 : 0))} animateFrom={stamped ? b.filled : null} logoUrl={b.logo} logoFit={b.fit} compact footer={<span className="opacity-70">En vivo</span>} /></div>
         </div>
       ),
     },
