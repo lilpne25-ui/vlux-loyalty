@@ -403,3 +403,25 @@ test('el dueño no puede reemplazar la invitación de co-dueño emitida por VLUX
   const r = await new Device('e2').post('/api/invitations/accept', { token: tok1, password: PASSWORD });
   assert.equal(r.status, 409);
 });
+
+// V0.4.1 · Acabado de la tarjeta: configuración guardada y validada en el servidor.
+test('acabado de tarjeta: por omisión signature, se guarda y rechaza valores inválidos', async () => {
+  const r0 = await A.post('/api/admin/businesses', wizard());
+  assert.equal(r0.status, 201, JSON.stringify(r0.json));
+  const d0 = (await A.get(`/api/admin/businesses/${r0.json.businessId}`)).json;
+  assert.equal(d0.cardFinish, 'signature');
+
+  const r1 = await A.post('/api/admin/businesses', wizard({ cardFinish: 'silver', name: 'Barbería Plata Metepec' }));
+  assert.equal(r1.status, 201, JSON.stringify(r1.json));
+  assert.equal((await A.get(`/api/admin/businesses/${r1.json.businessId}`)).json.cardFinish, 'silver');
+
+  const bad = await A.post('/api/admin/businesses', wizard({ cardFinish: 'neon', name: 'Neón Prueba Toluca' }));
+  assert.equal(bad.status, 422);
+
+  const d1 = (await A.get(`/api/admin/businesses/${r1.json.businessId}`)).json;
+  const ed = await A.req('PATCH', `/api/admin/businesses/${r1.json.businessId}`, {
+    name: d1.name, vertical: d1.vertical, city: d1.city, primaryColor: d1.primaryColor, accentColor: d1.accentColor, reviewUrl: d1.reviewUrl, logoDataUrl: null, cardFinish: 'black',
+  });
+  assert.equal(ed.status, 200, JSON.stringify(ed.json));
+  assert.equal((await A.get(`/api/admin/businesses/${r1.json.businessId}`)).json.cardFinish, 'black');
+});

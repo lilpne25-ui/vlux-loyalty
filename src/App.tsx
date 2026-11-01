@@ -34,7 +34,7 @@ export default function App() {
   );
 }
 
-type SessionState = { loading: boolean; session: StaffSessionInfo | null; colors: { primary: string; accent: string; vertical: string } | null };
+type SessionState = { loading: boolean; session: StaffSessionInfo | null; colors: { primary: string; accent: string; vertical: string; finish?: 'signature' | 'silver' | 'black' } | null };
 
 function Shell() {
   const { path, search } = useLocation();
@@ -46,7 +46,7 @@ function Shell() {
       let colors = null;
       if (r.session) {
         const b = await api('GET', '/staff/business');
-        colors = { primary: b.primaryColor, accent: b.accentColor, vertical: b.vertical };
+        colors = { primary: b.primaryColor, accent: b.accentColor, vertical: b.vertical, finish: b.cardFinish };
       }
       setS({ loading: false, session: r.session, colors });
     } catch {
@@ -95,7 +95,7 @@ function Shell() {
   const code = search.get('tarjeta') || search.get('premio');
 
   return (
-    <div className="app-root flex flex-col min-h-full" data-vertical={s.colors?.vertical} style={s.colors ? brandVars(s.colors.primary, s.colors.accent) : undefined}>
+    <div className="app-root flex flex-col min-h-full" data-vertical={s.colors?.vertical} style={s.colors ? brandVars(s.colors.primary, s.colors.accent, s.colors.finish) : undefined}>
       <TopBar session={session} path={path} onLogout={logout} onSwitched={async (role) => { await loadSession(); navigate(role === 'OWNER' ? '/panel' : '/caja', { replace: true }); }} />
       <main className="flex-1">
         <div className="view-in min-h-full">
@@ -134,7 +134,7 @@ function TopBar({ session, path, onLogout, onSwitched }: { session: StaffSession
     <header className="topbar sticky z-30 text-white" style={{ top: 'env(safe-area-inset-top, 0px)' }}>
       <div className="mx-auto max-w-[1180px] gutter py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2.5">
         <div className="flex items-center gap-2.5 mr-auto min-w-0">
-          <VluxMark className="text-white" />
+          <VluxMark tone="dark" />
           <span className="h-3.5 w-px bg-white/20" />
           {businesses.length > 1 ? (
             <div className="relative min-w-0">

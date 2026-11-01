@@ -82,7 +82,7 @@ function StatusPills({ row }: { row: { status: string; commercialStatus: string 
 // ---------- Ficha ----------
 type Invitation = { id: string; email: string; displayName: string; role: 'OWNER' | 'EMPLOYEE'; status: 'pendiente' | 'aceptada' | 'revocada' | 'vencida'; expiresAt: string; createdAt: string };
 type Detail = {
-  id: string; slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; reviewUrl: string | null; isDemo: boolean;
+  id: string; slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; cardFinish?: 'signature' | 'silver' | 'black'; reviewUrl: string | null; isDemo: boolean;
   program: { stampsRequired: number; stampMode: string; maxStampsPerPurchase: number; visitWindowMinutes: number; rewardDescription: string; version: number };
   status: 'active' | 'suspended'; suspendedReason: string | null; logoDataUrl: string | null; createdAt: string; registrationUrl: string;
   subscription: { plan: string; commercialStatus: string; startDate: string; pilotEndDate: string | null; renewalDate: string | null; priceCents: number; currency: string; notes: string; updatedAt: string } | null;
@@ -371,7 +371,7 @@ function StatusModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; o
 
 function EditModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const [f, setF] = useState({ name: d.name, vertical: d.vertical, city: d.city, primaryColor: d.primaryColor, accentColor: d.accentColor, reviewUrl: d.reviewUrl ?? '', logoDataUrl: d.logoDataUrl });
+  const [f, setF] = useState({ name: d.name, vertical: d.vertical, city: d.city, primaryColor: d.primaryColor, accentColor: d.accentColor, cardFinish: (d.cardFinish ?? 'signature') as 'signature' | 'silver' | 'black', reviewUrl: d.reviewUrl ?? '', logoDataUrl: d.logoDataUrl });
   const [err, setErr] = useState<string | null>(null);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -391,6 +391,7 @@ function EditModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; onC
         <CField label="Enlace de reseñas (https://)" htmlFor="ed-review"><input id="ed-review" className="cc-input" value={f.reviewUrl} onChange={(e) => setF({ ...f, reviewUrl: e.target.value })} /></CField>
         <ColorField id="ed-primary" label="Color principal" value={f.primaryColor} onChange={(v) => setF({ ...f, primaryColor: v })} />
         <ColorField id="ed-accent" label="Color de acento" value={f.accentColor} onChange={(v) => setF({ ...f, accentColor: v })} />
+        <CField label="Acabado de la tarjeta" htmlFor="ed-finish"><select id="ed-finish" className="cc-input" value={f.cardFinish} onChange={(e) => setF({ ...f, cardFinish: e.target.value as 'signature' | 'silver' | 'black' })}><option value="signature">Color del negocio</option><option value="silver">Plata metálica</option><option value="black">Negro premium</option></select></CField>
         <LogoField className="sm:col-span-2" value={f.logoDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v })} />
         {err && <p className="sm:col-span-2 text-[12.5px] text-[#FDA29B]" role="alert">{err}</p>}
         <div className="sm:col-span-2 flex justify-end gap-2"><CButton type="button" variant="ghost" onClick={onClose}>Cancelar</CButton><CButton type="submit" variant="primary">Guardar</CButton></div>

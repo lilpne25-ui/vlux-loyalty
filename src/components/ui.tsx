@@ -166,13 +166,30 @@ export function Field({ label, hint, error, children, htmlFor }: { label: React.
 export const inputCls = 'h-11 w-full rounded-xl border border-line bg-white px-3.5 text-[15px] text-ink placeholder:text-[#98A2B3] outline-none transition focus:border-[#98A2B3] focus:ring-4 focus:ring-[#67C7D3]/20';
 
 // ---------- Marcas ----------
-export function VluxMark({ className = '' }: { className?: string }) {
+/** Identidad oficial de VLUX. Usa los archivos originales de /brand (sin redibujar ni recolorear):
+ *  - tone="dark": isotipo y wordmark oficiales sobre fondos oscuros (se funden con el fondo con mix-blend-mode: screen).
+ *  - tone="light": isotipo oficial sobre fondos claros (multiply) y el nombre en texto.
+ *  - tone="chip": isotipo oficial dentro de una pastilla negra (sirve sobre cualquier color). */
+export function VluxMark({ className = '', tone = 'light' }: { className?: string; tone?: 'dark' | 'light' | 'chip' }) {
+  if (tone === 'chip') {
+    return (
+      <span className={cx('inline-flex items-center gap-1.5 font-semibold tracking-[0.18em] text-[11px]', className)}>
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-black overflow-hidden"><img src="/brand/vlux-isotipo-dark.jpg" alt="" width="24" height="20" className="brand-screen h-[22px] w-auto" /></span>
+        <span>VLUX</span>
+      </span>
+    );
+  }
+  if (tone === 'dark') {
+    return (
+      <span className={cx('inline-flex items-center gap-2', className)} role="img" aria-label="VLUX">
+        <img src="/brand/vlux-isotipo-dark.jpg" alt="" width="28" height="24" className="brand-screen h-6 w-auto" />
+        <img src="/brand/vlux-wordmark-dark.jpg" alt="" width="63" height="11" className="brand-screen h-[11px] w-auto" />
+      </span>
+    );
+  }
   return (
     <span className={cx('inline-flex items-center gap-1.5 font-semibold tracking-[0.18em] text-[11px]', className)}>
-      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3 4h4.2L12 15.6 16.8 4H21l-7.4 16h-3.2z" fill="currentColor" />
-        <path d="M16.8 4H21l-1.6 3.5h-4.1z" fill="#67C7D3" />
-      </svg>
+      <img src="/brand/vlux-isotipo-light.jpg" alt="" width="20" height="17" className="brand-multiply h-[17px] w-auto" />
       VLUX
     </span>
   );

@@ -417,7 +417,7 @@ function Settings({ business: b, onSaved }: { business: FullBusiness; onSaved: (
       </section>
       <aside className="flex flex-col gap-3 lg:sticky lg:top-[84px]" data-vertical={form.vertical}>
         <div className="text-[12px] uppercase tracking-[0.14em] text-slate2">Así lo verá el cliente</div>
-        <div style={brandVars(form.primaryColor, form.accentColor)}>
+        <div style={brandVars(form.primaryColor, form.accentColor, b.cardFinish)}>
           <LoyaltyCardFace logoUrl={b.logoUrl} businessName={form.name || 'Tu negocio'} customerName="Cliente de ejemplo" cardId="XXXX-XXXX" total={Math.min(15, Math.max(3, Number(form.stampsRequired) || 8))} filled={3} compact />
         </div>
         <p className="text-[12px] text-slate2">Vista previa sin guardar. Al guardar se aplica en todas las tarjetas.</p>
@@ -568,14 +568,14 @@ function CounterQr({ business: b }: { business: FullBusiness }) {
   const url = businessQrValue(b.slug);
   return (
     <section className="flex flex-col items-center gap-4">
-      <div className="print-area w-full max-w-[420px] rounded-[28px] p-8 text-center text-[color:var(--cream)] shadow-xl" data-vertical={b.vertical} style={{ ...brandVars(b.primaryColor, b.accentColor), background: 'var(--brand)' }}>
+      <div className="print-area w-full max-w-[420px] rounded-[28px] p-8 text-center text-[color:var(--cream)] shadow-xl" data-vertical={b.vertical} style={{ ...brandVars(b.primaryColor, b.accentColor, b.cardFinish), background: 'var(--brand)' }}>
         <div className="flex justify-center"><BusinessLogo name={b.name} size={56} src={b.logoUrl} /></div>
         <div className="mt-3 font-display text-[24px] leading-tight">{b.name}</div>
         <div className="mt-1 text-[14px] opacity-80">Escanea y obtén tu tarjeta de recompensas</div>
         <div className="mt-5 mx-auto w-[240px] max-w-full rounded-2xl bg-white p-3"><QRCode value={url} size={216} label={`QR de registro de ${b.name}`} /></div>
         <div className="mt-4 text-[13px] opacity-80">{b.program.stampsRequired} sellos = {b.program.rewardDescription.toLowerCase()}</div>
         <div className="mt-1 text-[11px] opacity-60">Sin app · Sin contraseña</div>
-        <div className="mt-5 flex justify-center"><VluxMark className="text-[color:var(--cream)] opacity-70" /></div>
+        <div className="mt-5 flex justify-center"><VluxMark tone="chip" className="text-[color:var(--cream)] opacity-90" /></div>
       </div>
       <p className="text-[12.5px] text-slate2 font-mono break-all text-center">{url}</p>
       <Button variant="secondary" onClick={() => window.print()}><Printer size={16} /> Imprimir</Button>

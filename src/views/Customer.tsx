@@ -51,7 +51,7 @@ export function CustomerApp({ slug }: { slug: string }) {
   if (!view && networkDown) return <div className="mx-auto max-w-[460px] gutter"><OfflineNotice hasData={false} onRetry={card.refresh} /></div>;
 
   return (
-    <div className="cafe-bg min-h-full min-h-[100dvh]" data-vertical={view?.business.vertical ?? b.vertical} data-standalone={standalone ? '1' : undefined} style={brandVars(view?.business.primaryColor ?? b.primaryColor, view?.business.accentColor ?? b.accentColor)}>
+    <div className="cafe-bg min-h-full min-h-[100dvh]" data-vertical={view?.business.vertical ?? b.vertical} data-standalone={standalone ? '1' : undefined} style={brandVars(view?.business.primaryColor ?? b.primaryColor, view?.business.accentColor ?? b.accentColor, view?.business.cardFinish ?? b.cardFinish)}>
       <div className="mx-auto w-full max-w-[460px] gutter pb-10 safe-top">
         {b.isDemo && <div className="mt-3 rounded-xl bg-[#F4F3FF] border border-[#D9D6FE] px-3 py-2 text-[12px] text-[#5925DC]">Negocio de demostración: no escribas datos personales reales.</div>}
         {view && networkDown && <OfflineNotice hasData onRetry={card.refresh} />}

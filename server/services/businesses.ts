@@ -50,6 +50,7 @@ export interface PublicBusiness {
   vertical: string;
   primaryColor: string;
   accentColor: string;
+  cardFinish: 'signature' | 'silver' | 'black';
   reviewUrl: string | null;
   isDemo: boolean;
   /** URL versionada del logotipo (o null). El logotipo se sirve aparte para no inflar el JSON que se consulta cada pocos segundos. */
@@ -66,7 +67,7 @@ export async function getBusinessBySlug(slug: string): Promise<PublicBusiness> {
 export async function getBusinessById(id: string): Promise<PublicBusiness> {
   return withTenant(id, async (tx) => {
     const row = (await tx.query(
-      `SELECT b.id, b.slug, b.name, b.city, b.vertical, b.primary_color, b.accent_color, b.review_url, b.is_demo,
+      `SELECT b.id, b.slug, b.name, b.city, b.vertical, b.primary_color, b.accent_color, b.card_finish, b.review_url, b.is_demo,
               CASE WHEN b.logo_data_url IS NULL THEN NULL ELSE substr(md5(b.logo_data_url), 1, 12) END AS logo_v,
               r.id AS rule_id, r.version, r.stamps_required, r.stamp_mode, r.max_stamps_per_purchase, r.visit_window_minutes, r.reward_description
          FROM businesses b JOIN reward_rules r ON r.business_id = b.id AND r.active
@@ -76,7 +77,7 @@ export async function getBusinessById(id: string): Promise<PublicBusiness> {
     if (!row) throw notFound('Negocio');
     return {
       id: row.id, slug: row.slug, name: row.name, city: row.city, vertical: row.vertical,
-      primaryColor: row.primary_color, accentColor: row.accent_color, reviewUrl: row.review_url, isDemo: row.is_demo,
+      primaryColor: row.primary_color, accentColor: row.accent_color, cardFinish: row.card_finish, reviewUrl: row.review_url, isDemo: row.is_demo,
       logoUrl: row.logo_v ? `/api/public/businesses/${row.slug}/logo?v=${row.logo_v}` : null,
       program: {
         ruleId: row.rule_id, version: row.version, stampsRequired: row.stamps_required, stampMode: row.stamp_mode,

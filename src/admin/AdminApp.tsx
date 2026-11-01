@@ -71,10 +71,7 @@ function Frame({ children }: { children: React.ReactNode }) {
 export function Wordmark({ small }: { small?: boolean }) {
   return (
     <div className="flex items-center gap-2.5 select-none">
-      <svg width={small ? 20 : 24} height={small ? 20 : 24} viewBox="0 0 24 24" aria-hidden>
-        <path d="M3 4h4.2L12 15.2 16.8 4H21l-7.4 16h-3.2z" fill="#E9ECEF" />
-        <path d="M14.3 15.6 21 4" stroke="#67C7D3" strokeWidth="1.4" opacity=".9" />
-      </svg>
+      <img src="/brand/vlux-isotipo-dark.jpg" alt="" width="36" height="30" className="brand-screen h-[28px] w-auto" style={small ? { height: 22 } : undefined} />
       <div className="leading-none">
         <div className={cx('font-medium tracking-[0.18em]', small ? 'text-[12px]' : 'text-[13px]')}>VLUX</div>
         <div className="mt-1 text-[10px] tracking-[0.14em] uppercase cc-faint">Control Center</div>

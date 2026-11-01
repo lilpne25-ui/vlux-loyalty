@@ -15,6 +15,7 @@ import { emailSchema, rulesSchema, slugSchema, verticals } from '../validation';
 
 const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Usa colores en formato #RRGGBB.');
 const logoSchema = z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, 'El logotipo debe ser PNG, JPG o WebP.').max(90000, 'El logotipo es demasiado grande (máximo ~64 KB).').nullable();
+export const cardFinishes = ['signature', 'silver', 'black'] as const;
 const reviewUrl = z.string().trim().regex(/^https:\/\/\S+$/, 'El enlace de reseñas debe empezar con https://').max(500).nullable();
 export const planCodes = ['piloto', 'inicio', 'crecimiento'] as const;
 export const commercialStatuses = ['piloto', 'activo', 'vencido', 'suspendido', 'cancelado'] as const;
@@ -30,6 +31,7 @@ export const wizardSchema = z.object({
   logoDataUrl: logoSchema.default(null),
   primaryColor: color,
   accentColor: color,
+  cardFinish: z.enum(cardFinishes).default('signature'),
   rules: rulesSchema,
   reviewUrl: reviewUrl.default(null),
   plan: z.enum(planCodes),
@@ -44,6 +46,7 @@ export const businessEditSchema = z.object({
   city: z.string().trim().max(80),
   primaryColor: color,
   accentColor: color,
+  cardFinish: z.enum(cardFinishes).default('signature'),
   reviewUrl,
   logoDataUrl: logoSchema,
 });
@@ -89,9 +92,9 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
       slug = `${base.slice(0, 36)}-${i}`;
     }
     const biz = (await tx.query(
-      `INSERT INTO businesses (slug, name, city, vertical, primary_color, accent_color, review_url, is_demo, logo_data_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [slug, input.name, input.city, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl, input.isDemo, input.logoDataUrl],
+      `INSERT INTO businesses (slug, name, city, vertical, primary_color, accent_color, review_url, is_demo, logo_data_url, card_finish)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [slug, input.name, input.city, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl, input.isDemo, input.logoDataUrl, input.cardFinish],
     )).rows[0].id as string;
     await tx.query("SELECT set_config('app.business_id', $1, true)", [biz]);
     const r = input.rules;
@@ -230,9 +233,9 @@ export async function updateBusiness(admin: AdminSession, id: string, raw: unkno
   const input = businessEditSchema.parse(raw);
   return withTenant(id, async (tx) => {
     const r = await tx.query(
-      `UPDATE businesses SET name = $2, vertical = $3, city = $4, primary_color = $5, accent_color = $6, review_url = $7, logo_data_url = $8
+      `UPDATE businesses SET name = $2, vertical = $3, city = $4, primary_color = $5, accent_color = $6, review_url = $7, logo_data_url = $8, card_finish = $9
         WHERE id = $1 RETURNING id`,
-      [id, input.name, input.vertical, input.city, input.primaryColor, input.accentColor, input.reviewUrl, input.logoDataUrl],
+      [id, input.name, input.vertical, input.city, input.primaryColor, input.accentColor, input.reviewUrl, input.logoDataUrl, input.cardFinish],
     );
     if (!r.rowCount) throw notFound('Negocio');
     await audit(tx, id, { type: 'platform', id: null }, 'business.updated', 'business', id);

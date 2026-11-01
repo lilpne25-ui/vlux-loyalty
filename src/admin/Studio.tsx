@@ -12,8 +12,9 @@ import { paletteFromImage, Palette } from '../lib/palette';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { QRCode, BusinessLogo } from '../components/ui';
 import { brandVars } from '../components/Brand';
+import { FINISHES, type CardFinish } from '../lib/finish';
 
-type Brand = { name: string; city: string; logo: string | null; primary: string; accent: string; reward: string; stamps: number; filled: number };
+type Brand = { name: string; city: string; logo: string | null; primary: string; accent: string; reward: string; stamps: number; filled: number; finish?: CardFinish };
 
 const PRESETS: { id: string; label: string; icon: React.ReactNode; brand: Brand }[] = [
   { id: 'cafe', label: 'Café Demo Toluca', icon: <Coffee size={14} />, brand: { name: 'Café Demo Toluca', city: 'Toluca', logo: null, primary: '#2B1B14', accent: '#C9A15B', reward: 'Una bebida de cortesía', stamps: 8, filled: 5 } },
@@ -36,7 +37,7 @@ function PhoneFrame({ children, label }: { children: React.ReactNode; label: str
 
 function PortalPreview({ b }: { b: Brand }) {
   return (
-    <div className="cafe-bg h-full flex flex-col gap-3 p-4 pt-9" style={brandVars(b.primary, b.accent)}>
+    <div className="cafe-bg h-full flex flex-col gap-3 p-4 pt-9" style={brandVars(b.primary, b.accent, b.finish)}>
       <div className="flex items-center gap-2"><BusinessLogo name={shown(b)} size={28} src={b.logo} /><div className="font-display text-[12.5px] text-cafe-ink leading-tight line-clamp-2">{shown(b)}</div></div>
       <div className="rounded-2xl p-4 relative overflow-hidden flex-1 min-h-[96px] flex items-end" style={{ background: 'var(--brand)' }}>
         <div className="absolute inset-0 hero-glow" />
@@ -54,7 +55,7 @@ function HomeScreenPreview({ b }: { b: Brand }) {
     <div className="h-full p-4 pt-8 flex flex-col gap-4" style={{ background: 'linear-gradient(160deg,#2d3b57,#111827 60%,#1f2937)' }}>
       <div className="grid grid-cols-4 gap-x-3 gap-y-4">
         {apps.map((a) => (<div key={a} className="flex flex-col items-center gap-1"><span className="h-9 w-9 rounded-[10px] bg-white/15" /><span className="text-[7.5px] text-white/70">{a}</span></div>))}
-        <div className="flex flex-col items-center gap-1 studio-appin" style={brandVars(b.primary, b.accent)}>
+        <div className="flex flex-col items-center gap-1 studio-appin" style={brandVars(b.primary, b.accent, b.finish)}>
           <span className="h-9 w-9 rounded-[10px] overflow-hidden flex items-center justify-center" style={{ background: 'var(--brand)', boxShadow: '0 4px 10px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.18) inset' }}>
             {b.logo ? <img src={b.logo} alt="" className="h-full w-full object-contain p-1 bg-white" /> : <span className="font-display text-[15px]" style={{ color: 'var(--accent)' }}>{shown(b).replace(/caf[eé]|barber[ií]a/i, '').trim().slice(0, 1).toUpperCase() || shown(b).slice(0, 1).toUpperCase()}</span>}
           </span>
@@ -93,7 +94,7 @@ export function Studio() {
   };
 
   const useInWizard = () => {
-    try { sessionStorage.setItem('vlux:studio', JSON.stringify({ name: b.name, logoDataUrl: b.logo, primaryColor: b.primary, accentColor: b.accent, rewardDescription: b.reward, stampsRequired: b.stamps })); } catch { /* sin almacenamiento */ }
+    try { sessionStorage.setItem('vlux:studio', JSON.stringify({ name: b.name, logoDataUrl: b.logo, primaryColor: b.primary, accentColor: b.accent, cardFinish: b.finish ?? 'signature', rewardDescription: b.reward, stampsRequired: b.stamps })); } catch { /* sin almacenamiento */ }
     navigate('/vlux-admin/negocios/nuevo');
   };
 
@@ -138,6 +139,13 @@ export function Studio() {
             <label htmlFor="st-primary" className="cc-colorbox"><input id="st-primary" data-testid="studio-primary" type="color" value={b.primary} onChange={(e) => set('primary', e.target.value.toUpperCase())} /> Principal <span className="font-mono text-[11.5px] ml-auto">{b.primary.toUpperCase()}</span></label>
             <label htmlFor="st-accent" className="cc-colorbox"><input id="st-accent" data-testid="studio-accent" type="color" value={b.accent} onChange={(e) => set('accent', e.target.value.toUpperCase())} /> Acento <span className="font-mono text-[11.5px] ml-auto">{b.accent.toUpperCase()}</span></label>
           </div>
+          <div role="radiogroup" aria-label="Acabado de la tarjeta" data-testid="studio-finish" className="grid grid-cols-3 gap-2">
+            {FINISHES.map((f) => (
+              <button key={f.id} type="button" role="radio" aria-checked={(b.finish ?? 'signature') === f.id} data-testid={`finish-${f.id}`} title={f.hint}
+                className={cx('studio-chip text-[12px] px-2 py-2 rounded-xl border', (b.finish ?? 'signature') === f.id ? 'border-[var(--cc-cyan)] bg-white/10' : 'border-white/10')}
+                onClick={() => set('finish', f.id)}>{f.label}</button>
+            ))}
+          </div>
           <CField label="Premio" htmlFor="st-reward"><input id="st-reward" className="cc-input" value={b.reward} maxLength={80} onChange={(e) => set('reward', e.target.value)} /></CField>
           <div className="grid grid-cols-2 gap-3">
             <CField label={`Sellos para el premio: ${b.stamps}`} htmlFor="st-stamps"><input id="st-stamps" type="range" min={3} max={12} value={b.stamps} onChange={(e) => { const n = Number(e.target.value); setB((x) => ({ ...x, stamps: n, filled: Math.min(x.filled, n) })); }} /></CField>
@@ -146,7 +154,7 @@ export function Studio() {
         </section>
 
         <section className="flex flex-col gap-8 min-w-0" aria-label="Vista previa">
-          <div className="cc-panel studio-stage p-6 sm:p-8 flex items-center justify-center" style={brandVars(b.primary, b.accent)} data-testid="studio-card">
+          <div className="cc-panel studio-stage p-6 sm:p-8 flex items-center justify-center" style={brandVars(b.primary, b.accent, b.finish)} data-testid="studio-card">
             <div className="w-full max-w-[420px]">
               <LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={b.filled} rewardReady={b.filled >= b.stamps} logoUrl={b.logo} footer={<span className="opacity-70">Ejemplo</span>} />
             </div>
@@ -169,7 +177,7 @@ export function Studio() {
 // ---------- Presentación comercial a pantalla completa ----------
 function SlideCard({ b, big }: { b: Brand; big?: boolean }) {
   return (
-    <div style={brandVars(b.primary, b.accent)} className={cx('w-full', big ? 'max-w-[460px]' : 'max-w-[360px]')}>
+    <div style={brandVars(b.primary, b.accent, b.finish)} className={cx('w-full', big ? 'max-w-[460px]' : 'max-w-[360px]')}>
       <LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={b.filled} rewardReady={b.filled >= b.stamps} logoUrl={b.logo} footer={<span className="opacity-70">Ejemplo</span>} />
     </div>
   );
@@ -193,8 +201,8 @@ function Presentation3({ brand: b, onClose }: { brand: Brand; onClose: () => voi
       art: (
         <div className="flex flex-wrap items-center justify-center gap-8">
           <div className="studio-scan"><ScanLine size={34} /><span>Escaneando tarjeta…</span></div>
-          <button className="studio-stampbtn" onClick={() => setStamped(true)} style={brandVars(b.primary, b.accent)}>{stamped ? <><Check size={18} /> +1 sello registrado</> : 'Registrar compra'}</button>
-          <div style={brandVars(b.primary, b.accent)} className="w-[300px] max-w-full"><LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={Math.min(b.stamps, b.filled + (stamped ? 1 : 0))} animateFrom={stamped ? b.filled : null} logoUrl={b.logo} compact footer={<span className="opacity-70">En vivo</span>} /></div>
+          <button className="studio-stampbtn" onClick={() => setStamped(true)} style={brandVars(b.primary, b.accent, b.finish)}>{stamped ? <><Check size={18} /> +1 sello registrado</> : 'Registrar compra'}</button>
+          <div style={brandVars(b.primary, b.accent, b.finish)} className="w-[300px] max-w-full"><LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={Math.min(b.stamps, b.filled + (stamped ? 1 : 0))} animateFrom={stamped ? b.filled : null} logoUrl={b.logo} compact footer={<span className="opacity-70">En vivo</span>} /></div>
         </div>
       ),
     },
@@ -220,7 +228,7 @@ function Presentation3({ brand: b, onClose }: { brand: Brand; onClose: () => voi
     },
     {
       kicker: 'Cómo empezamos', title: 'Piloto con acompañamiento', body: 'Configuramos tu marca, imprimimos tu QR y capacitamos a tu equipo. Medimos juntos cuántos clientes regresan.',
-      art: <div className="flex flex-col items-center gap-4"><SlideCard b={b} /><div className="inline-flex items-center gap-2 text-[14px] opacity-90"><Sparkles size={16} /> Empezamos esta semana</div></div>,
+      art: <div className="flex flex-col items-center gap-4"><SlideCard b={b} /><img src="/brand/vlux-lockup-dark.jpg" alt="VLUX · AI Transformation Partner" width="800" height="620" className="w-[200px] h-auto rounded-2xl" /><div className="inline-flex items-center gap-2 text-[14px] opacity-90"><Sparkles size={16} /> Empezamos esta semana</div></div>,
     },
   ], [b, stamped]);
 

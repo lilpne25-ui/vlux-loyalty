@@ -167,7 +167,7 @@ export function buildApp() {
   // ---------- Público ----------
   api.get('/public/businesses/:slug', async (c) => {
     const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
-    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, isDemo: b.isDemo, logoUrl: b.logoUrl }, program: { stampsRequired: b.program.stampsRequired, stampMode: b.program.stampMode, maxStampsPerPurchase: b.program.maxStampsPerPurchase, rewardDescription: b.program.rewardDescription }, privacyNoticeVersion: config.privacyNoticeVersion });
+    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, cardFinish: b.cardFinish, isDemo: b.isDemo, logoUrl: b.logoUrl }, program: { stampsRequired: b.program.stampsRequired, stampMode: b.program.stampMode, maxStampsPerPurchase: b.program.maxStampsPerPurchase, rewardDescription: b.program.rewardDescription }, privacyNoticeVersion: config.privacyNoticeVersion });
   });
 
   // Accesos del negocio: qué dirección usa cada persona. Son direcciones derivadas del nombre público; no incluyen tokens ni credenciales.

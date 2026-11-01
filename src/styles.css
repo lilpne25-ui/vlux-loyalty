@@ -170,12 +170,15 @@ select.cc-input { appearance: none; background-image: linear-gradient(45deg, tra
 .cc-scroll::-webkit-scrollbar-thumb { background: rgba(185,192,201,.16); border-radius: 8px; }
 .cc :focus-visible { outline: 2px solid var(--cc-cyan); outline-offset: 2px; }
 
+.brand-screen { mix-blend-mode: screen; }
+.brand-multiply { mix-blend-mode: multiply; }
+
 /* ===== V0.4 · Tarjeta metálica premium ===== */
-.card-stage { perspective: 900px; --mx: 50%; --my: 30%; --rx: 0deg; --ry: 0deg; touch-action: pan-y; }
+.card-stage { --brand: var(--card-brand); --accent: var(--card-accent); --cream: var(--card-cream); perspective: 900px; --mx: 50%; --my: 30%; --rx: 0deg; --ry: 0deg; touch-action: pan-y; }
 .card-metal {
   --edge: color-mix(in srgb, var(--accent) 55%, #fff);
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--brand) 82%, #fff) 0%, var(--brand) 38%, color-mix(in srgb, var(--brand) 70%, #000) 100%);
+    linear-gradient(135deg, color-mix(in srgb, var(--brand) calc(100% - var(--card-hi, 18%)), #fff) 0%, var(--brand) 38%, color-mix(in srgb, var(--brand) 70%, #000) 100%);
   transform: rotateX(var(--rx)) rotateY(var(--ry));
   transform-style: preserve-3d;
   transition: transform .45s cubic-bezier(.2,.8,.2,1), box-shadow .45s;
