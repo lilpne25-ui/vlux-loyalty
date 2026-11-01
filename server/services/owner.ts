@@ -17,8 +17,8 @@ export async function dashboard(session: StaffSession, days = 14) {
          (SELECT count(*) FROM customers WHERE anonymized_at IS NULL)::int AS customers,
          (SELECT count(*) FROM customers WHERE created_at >= now() - interval '7 days')::int AS new_customers_7d,
          (SELECT count(*) FROM visits)::int AS visits,
-         (SELECT count(*) FROM purchases)::int AS purchases,
-         (SELECT coalesce(sum(delta), 0) FROM stamp_events WHERE reason = 'purchase')::int AS stamps,
+         (SELECT count(*) FROM purchases WHERE voided_at IS NULL)::int AS purchases,
+         (SELECT coalesce(sum(delta), 0) FROM stamp_events WHERE reason IN ('purchase','void'))::int AS stamps,
          (SELECT count(*) FROM (SELECT card_id FROM visits GROUP BY card_id HAVING count(*) >= 2) x)::int AS recurring,
          (SELECT count(*) FROM rewards)::int AS rewards_unlocked,
          (SELECT count(*) FROM rewards WHERE status = 'redeemed')::int AS redemptions,
@@ -29,7 +29,7 @@ export async function dashboard(session: StaffSession, days = 14) {
     const series = (await tx.query(
       `SELECT d::date AS day,
               (SELECT count(*) FROM visits v WHERE (v.started_at AT TIME ZONE $2)::date = d::date)::int AS visits,
-              (SELECT count(*) FROM purchases p WHERE (p.created_at AT TIME ZONE $2)::date = d::date)::int AS purchases
+              (SELECT count(*) FROM purchases p WHERE p.voided_at IS NULL AND (p.created_at AT TIME ZONE $2)::date = d::date)::int AS purchases
          FROM generate_series((now() AT TIME ZONE $2)::date - ($1::int - 1), (now() AT TIME ZONE $2)::date, interval '1 day') d
         ORDER BY d`,
       [days, TZ],
@@ -69,7 +69,7 @@ export async function listCustomers(session: StaffSession) {
     const rows = (await tx.query(
       `SELECT c.id AS card_id, c.public_code, c.stamp_balance, c.last_visit_at, c.created_at, cu.id AS customer_id, cu.display_name, cu.contact_type, cu.marketing_consent, cu.anonymized_at,
               (SELECT count(*) FROM visits v WHERE v.card_id = c.id)::int AS visits,
-              (SELECT count(*) FROM purchases p WHERE p.card_id = c.id)::int AS purchases,
+              (SELECT count(*) FROM purchases p WHERE p.card_id = c.id AND p.voided_at IS NULL)::int AS purchases,
               (SELECT count(*) FROM rewards r WHERE r.card_id = c.id AND r.status = 'redeemed')::int AS redeemed,
               EXISTS (SELECT 1 FROM rewards r WHERE r.card_id = c.id AND r.status = 'available') AS has_reward
          FROM cards c JOIN customers cu ON cu.id = c.customer_id
@@ -132,7 +132,7 @@ export async function createEmployee(session: StaffSession, raw: unknown) {
     const existing = (await tx.query('SELECT id FROM staff_users WHERE email = $1', [input.email])).rows[0];
     // Por privacidad no se reutiliza ni se revela una cuenta existente de otro negocio.
     if (existing) throw new AppError(409, 'email_taken', 'Ese correo ya tiene una cuenta. Usa otro correo para este empleado.');
-    const userId = (await tx.query('INSERT INTO staff_users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id', [input.email, hash, input.displayName])).rows[0].id;
+    const userId = (await tx.query('INSERT INTO staff_users (email, password_hash, display_name, must_change_password) VALUES ($1, $2, $3, true) RETURNING id', [input.email, hash, input.displayName])).rows[0].id;
     return (await tx.query("INSERT INTO staff_memberships (business_id, user_id, role) VALUES ($1, $2, 'EMPLOYEE') RETURNING id", [session.businessId, userId])).rows[0].id as string;
   });
   await withTenant(session.businessId, (tx) => audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'staff.created', 'staff_membership', membershipId, { role: 'EMPLOYEE' }));
@@ -172,7 +172,7 @@ export async function exportCustomer(session: StaffSession, customerId: string) 
     const c = (await tx.query('SELECT id, display_name, contact, contact_type, marketing_consent, privacy_notice_version, privacy_accepted_at, created_at, anonymized_at FROM customers WHERE id = $1', [customerId])).rows[0];
     if (!c) throw notFound('Cliente');
     const cards = (await tx.query('SELECT id, public_code, stamp_balance, cycle, status, created_at FROM cards WHERE customer_id = $1', [customerId])).rows;
-    const purchases = (await tx.query('SELECT p.created_at, p.item_count, p.stamps_awarded FROM purchases p JOIN cards c ON c.id = p.card_id WHERE c.customer_id = $1 ORDER BY p.created_at', [customerId])).rows;
+    const purchases = (await tx.query('SELECT p.created_at, p.item_count, p.stamps_awarded, p.voided_at FROM purchases p JOIN cards c ON c.id = p.card_id WHERE c.customer_id = $1 ORDER BY p.created_at', [customerId])).rows;
     const rewards = (await tx.query('SELECT r.code, r.description, r.status, r.unlocked_at, r.redeemed_at FROM rewards r JOIN cards c ON c.id = r.card_id WHERE c.customer_id = $1 ORDER BY r.unlocked_at', [customerId])).rows;
     await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'customer.exported', 'customer', customerId);
     return { customer: c, cards, purchases, rewards, generatedAt: new Date().toISOString() };

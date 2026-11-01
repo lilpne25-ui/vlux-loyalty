@@ -99,7 +99,16 @@ test('el cliente solo ve su tarjeta y no tiene acceso a caja', async () => {
 test('el enlace personal abre la tarjeta en otro teléfono', async () => {
   const b = await newBusiness();
   const c = await registerCustomer(b.slug, 'Carla Sintética');
-  const token = c.personalLink.split('/t/')[1];
+  // V0.2.1: el token va en el fragmento (#), que el navegador nunca envía al servidor.
+  assert.match(c.personalLink, /\/t#[A-Za-z0-9_-]{43}$/);
+  const token = c.personalLink.split('/t#')[1];
+  const viaApi = new Device('tercer teléfono');
+  const ok = await viaApi.post('/api/card-access', { token });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.slug, b.slug);
+  assert.equal((await viaApi.get(`/api/me/${b.slug}/card`)).json.card.customerName, 'Carla Sintética');
+  assert.equal((await new Device('y').post('/api/card-access', { token: 'A'.repeat(43) })).status, 404);
+  // Compatibilidad: los enlaces antiguos /t/<token> siguen funcionando.
   const second = new Device('segundo teléfono');
   const r = await second.req('GET', `/t/${token}`);
   assert.equal(r.status, 302);
@@ -118,9 +127,17 @@ test('CSRF: mutaciones sin JSON u origen ajeno se rechazan', async () => {
   assert.equal(foreign.status, 403);
 });
 
-test('alta de negocio de plataforma exige token', async () => {
+test('API heredada de plataforma: apagada por omisión y, encendida, exige token', async () => {
   const d = new Device('x');
-  assert.equal((await d.req('POST', '/api/platform/businesses', {}, { authorization: 'Bearer nope' })).status, 401);
+  const prev = process.env.PLATFORM_LEGACY_API;
+  try {
+    delete process.env.PLATFORM_LEGACY_API;
+    assert.equal((await d.req('POST', '/api/platform/businesses', {}, { authorization: `Bearer ${process.env.PLATFORM_ADMIN_TOKEN}` })).status, 404);
+    process.env.PLATFORM_LEGACY_API = '1';
+    assert.equal((await d.req('POST', '/api/platform/businesses', {}, { authorization: 'Bearer nope' })).status, 401);
+  } finally {
+    if (prev === undefined) delete process.env.PLATFORM_LEGACY_API; else process.env.PLATFORM_LEGACY_API = prev;
+  }
 });
 
 test('solicitudes demasiado grandes se rechazan', async () => {
@@ -149,5 +166,5 @@ test('las respuestas no exponen hashes ni tokens de sesión', async () => {
   const owner = await loggedIn('dueño', b.ownerEmail);
   const me = JSON.stringify((await owner.get('/api/staff/me')).json);
   const staff = JSON.stringify((await owner.get('/api/owner/staff')).json);
-  for (const body of [me, staff]) assert.doesNotMatch(body, /scrypt|password|token_hash/i);
+  for (const body of [me, staff]) assert.doesNotMatch(body, /scrypt|password_hash|"password"|token_hash/i);
 });

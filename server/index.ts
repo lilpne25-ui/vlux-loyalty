@@ -13,6 +13,7 @@ const indexPath = join(clientDir, 'index.html');
 if (existsSync(indexPath)) {
   const indexHtml = readFileSync(indexPath, 'utf8');
   app.use('/assets/*', async (c, next) => { await next(); c.header('Cache-Control', 'public, max-age=31536000, immutable'); });
+  app.use('/sw.js', async (c, next) => { await next(); c.header('Cache-Control', 'no-cache, max-age=0'); });
   app.use('/*', serveStatic({ root: clientDir }));
   // Rutas del SPA (/, /n/:slug, /acceso, /caja, /panel...) devuelven index.html.
   app.get('*', (c) => (c.req.path.startsWith('/api/') ? c.json({ error: { code: 'not_found', message: 'Ruta no encontrada.' } }, 404) : c.html(indexHtml)));

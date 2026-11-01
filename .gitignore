@@ -10,3 +10,4 @@ shots/
 msa-lud*/
 CLAUDE.local.md
 *.y4m
+.vercel/

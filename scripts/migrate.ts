@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import pg from 'pg';
+import { pgSsl, redactUrl, stripSslParams } from '../server/pgssl';
 
 const dir = join(import.meta.dirname, '..', 'db', 'migrations');
 const url = process.env.DATABASE_ADMIN_URL;
@@ -13,8 +14,9 @@ const ups = readdirSync(dir).filter((f) => f.endsWith('.up.sql')).sort();
 const versionOf = (f: string) => f.replace('.up.sql', '');
 
 async function main(cmd: string) {
-  const db = new pg.Client({ connectionString: url });
+  const db = new pg.Client({ connectionString: stripSslParams(url!), ssl: pgSsl() });
   await db.connect();
+  console.log(`BD: ${redactUrl(url!)}`);
   try {
     await db.query('CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())');
     const applied = new Map((await db.query('SELECT version, checksum FROM schema_migrations')).rows.map((r) => [r.version, r.checksum]));

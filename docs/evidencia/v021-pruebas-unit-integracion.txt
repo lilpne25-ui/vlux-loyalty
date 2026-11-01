@@ -1,0 +1,76 @@
+# npm test (unit + integración) · 2026-10-31T19:51:02Z · PostgreSQL local
+ok 1 - TLS: sin variables no usa TLS (PostgreSQL local)
+ok 2 - TLS: DATABASE_SSL=supabase verifica con el certificado raíz de Supabase
+ok 3 - TLS: la URL pierde sslmode para que manden las opciones explícitas
+ok 4 - logs: la URL se describe sin contraseña
+ok 5 - compra con 2 cafés en modo por artículo da 2 sellos y 1 sola visita
+ok 6 - dos compras separadas dentro de la ventana cuentan como una visita
+ok 7 - una compra fuera de la ventana es una visita nueva (recurrencia)
+ok 8 - modo por compra: 3 artículos siguen siendo 1 sello
+ok 9 - modo por artículo respeta el tope por compra
+ok 10 - cantidad de artículos inválida se rechaza
+ok 11 - ventana de visita: límites
+ok 12 - desbloqueo solo al llegar a la meta y sin premio pendiente
+ok 13 - canje descuenta la meta y conserva el excedente
+ok 14 - ciclo completo: 8 visitas, desbloqueo, canje y excedente
+ok 15 - el premio se desbloquea con menos visitas si una compra da varios sellos
+ok 16 - canjear sin premio disponible no hace nada
+ok 17 - validación de reglas
+ok 18 - scrypt: verifica la correcta y rechaza la incorrecta; sal distinta cada vez
+ok 19 - códigos opacos con el formato esperado y sin caracteres ambiguos
+ok 20 - lectura de QR y captura manual
+# tests 20
+# pass 20
+# fail 0
+ok 1 - login correcto crea sesión con cookie HttpOnly; incorrecto devuelve 401 genérico
+ok 2 - bloqueo temporal tras 5 contraseñas incorrectas
+ok 3 - sin sesión no hay acceso a caja ni panel
+ok 4 - un empleado NO puede entrar al panel del dueño ni a su configuración
+ok 5 - un empleado no puede operar tarjetas de otro negocio
+ok 6 - desactivar a un empleado revoca su sesión de inmediato
+ok 7 - logout invalida la sesión en el servidor
+ok 8 - el cliente solo ve su tarjeta y no tiene acceso a caja
+ok 9 - el enlace personal abre la tarjeta en otro teléfono
+ok 10 - CSRF: mutaciones sin JSON u origen ajeno se rechazan
+ok 11 - alta de negocio de plataforma exige token
+ok 12 - solicitudes demasiado grandes se rechazan
+ok 13 - registro masivo desde la misma IP se limita
+ok 14 - sin aceptar el aviso de privacidad no hay registro
+ok 15 - las respuestas no exponen hashes ni tokens de sesión
+ok 16 - 2 cafés en una compra (modo por artículo) = 2 sellos, 1 compra, 1 visita
+ok 17 - segunda compra en la misma visita: suma sellos pero no visitas
+ok 18 - una visita en otro día cuenta como regreso (recurrencia)
+ok 19 - idempotencia: la misma llave enviada 2 veces registra 1 sola compra
+ok 20 - idempotencia con 10 solicitudes simultáneas idénticas: 1 compra
+ok 21 - doble toque con llaves distintas: el segundo pide confirmación (no suma)
+ok 22 - el cliente no puede agregarse sellos ni canjear
+ok 23 - 8 compras desbloquean la recompensa; el cliente la ve; se canjea una vez
+ok 24 - canje concurrente: 10 intentos simultáneos consumen la recompensa 1 sola vez
+ok 25 - compras y canje concurrentes en la misma tarjeta mantienen el saldo íntegro
+ok 26 - el excedente pasa al siguiente ciclo
+ok 27 - QR de recompensa identifica la tarjeta; códigos inválidos se rechazan sin revelar datos
+ok 28 - bajar la meta desbloquea premios en tarjetas que ya la alcanzan; los ganados conservan su costo
+ok 29 - invitación a reseña: desde la 2a visita, una vez, sin premio
+ok 30 - derechos ARCO: exportar y anonimizar al cliente revoca su acceso
+ok 31 - cliente y tarjeta persisten y se recuperan desde una sesión independiente
+ok 32 - RLS: sin negocio fijado no se ve ninguna tarjeta
+ok 33 - RLS: un negocio no ve ni puede escribir datos de otro
+ok 34 - una tarjeta no puede apuntar a un cliente de otro negocio (FK compuesta)
+ok 35 - saldo negativo y dos recompensas disponibles se rechazan en BD
+ok 36 - la app no puede borrar ni editar auditoría
+ok 37 - pooler: conexiones reutilizadas no filtran el negocio de una transacción a otra
+ok 38 - pooler: el negocio A no puede leer, modificar, comprar ni canjear en el negocio B
+ok 39 - errores de conexión: reintenta y falla de forma controlada, sin tumbar el proceso
+ok 40 - rol de BD inseguro: en producción la app se niega a operar como superusuario
+ok 41 - rate limit compartido: dos instancias distintas suman al mismo contador
+ok 42 - login: el bloqueo de cuenta responde igual que el límite por IP (no revela si el correo existe)
+ok 43 - anular compra: quita sellos, queda auditada, no cuenta en el panel y no se anula dos veces
+ok 44 - anular compra: invalida el premio si ya no alcanza, y se rechaza si los sellos ya se canjearon
+ok 45 - cambio de contraseña: exige la actual, cierra las otras sesiones y la nueva funciona
+ok 46 - restablecimiento: el dueño emite un enlace de un solo uso para su empleado
+ok 47 - enlace de tarjeta: reemitirlo revoca el anterior
+ok 48 - todas las tablas de la app tienen RLS activo y el rol de la app no es dueño ni BYPASSRLS
+ok 49 - respuestas de API y enlace /t no se guardan en caché
+# tests 49
+# pass 49
+# fail 0

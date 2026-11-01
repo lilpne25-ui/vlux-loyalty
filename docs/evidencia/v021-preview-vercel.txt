@@ -1,0 +1,24 @@
+# Preview privado en Vercel · 2026-10-31 (UTC)
+Despliegue: dpl_cxcjrggPpcRGcYscLhyKDch8vmQS · https://vlux-loyalty-8abv2gh4j-vlux-s-projects.vercel.app
+Rama v0.2.1 · commit d76df27 · región iad1 · VERCEL_ENV=preview (según logs de runtime) · Vercel Authentication activa
+
+Historial:
+- dpl_DDWvK47N7kdENNcmihuwzcy4ftJo  Vercel lo clasificó como Production → CANCELADO por el Ignored Build Step (nada publicado)
+- dpl_DNojiD3jrMKy4Y3Ebg2pXGo2CtuZ  ERROR: "vite: command not found" (NODE_ENV=production omitía devDependencies) → installCommand = npm ci --include=dev
+- dpl_BrMYo49rHiQGkLzsYJ1jcAWeEQRj  READY; /api/health?db=1 = 500 "tenant/user not found" → host del pooler corregido a aws-0-us-east-1
+- dpl_cxcjrggPpcRGcYscLhyKDch8vmQS  READY (redeploy con la variable corregida)
+
+Comprobaciones (GET con acceso autenticado de Vercel):
+PASS GET /api/health?db=1 → 200 {"ok":true,"db":true}  (conexión por Transaction Pooler, TLS verificado con CA de Supabase, rol seguro verificado por ensureSafeRole en NODE_ENV=production)
+PASS GET /api/public/businesses/cafe-demo-toluca → 200 con datos del negocio demo (lectura real a Supabase como vlux_app con RLS)
+PASS GET /api/staff/me sin sesión → 200 {"session":null}
+PASS GET /api/ruta-inexistente → 404 JSON, Cache-Control: private, no-store
+PASS GET /n/no-existe → 200 index.html (fallback del SPA), Cache-Control: public, max-age=0, must-revalidate
+PASS Encabezados: CSP, HSTS, X-Frame-Options (DENY en estáticos, SAMEORIGIN en API), nosniff, Referrer-Policy no-referrer, Permissions-Policy camera=(self), X-Robots-Tag noindex
+PASS Logs de runtime: el error registrado contiene ruta, código y mensaje; sin contraseña ni cadena de conexión
+
+Datos: 2 negocios demo sintéticos (Café Demo Toluca, Barbería Demo Metepec) con dueño y caja; dominios .vlux.test; sin personas reales.
+
+NO EJECUTADO contra el Preview:
+- Suites E2E (29 + 14) en HTTPS: la red de este entorno de trabajo bloquea la conexión a *.vercel.app; solo se pudo consultar por GET mediante la herramienta de Vercel.
+- Teléfonos físicos.

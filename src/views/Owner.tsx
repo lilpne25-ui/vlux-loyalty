@@ -1,12 +1,12 @@
 // Panel del dueño: métricas reales, clientes, actividad, configuración, equipo y QR del mostrador.
 // V0.2: todo viene de la BD de SU negocio (RLS). Ya no hay datos de ejemplo mezclados con datos reales.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Users, Footprints, Repeat, Gift, Stamp, Star, Settings2, LayoutGrid, ListChecks, Save, RotateCcw, Info, ShoppingBag, Trophy, UserPlus, QrCode, Printer, Download, Trash2 } from 'lucide-react';
+import { Users, Footprints, Repeat, Gift, Stamp, Star, Settings2, LayoutGrid, ListChecks, Save, RotateCcw, Info, ShoppingBag, Trophy, UserPlus, QrCode, Printer, Download, Trash2, KeyRound, Undo2 } from 'lucide-react';
 import { api, ApiError, BusinessInfo, HistoryItem, Program, Vertical } from '../lib/api';
 import { relativeTime, businessQrValue } from '../lib/format';
 import { usePolling } from '../lib/usePolling';
 import { VERTICAL_LABEL } from '../lib/vertical';
-import { Badge, Button, Field, inputCls, useToast, cx, Modal, QRCode, BusinessLogo, VluxMark } from '../components/ui';
+import { Badge, Button, Field, inputCls, useToast, cx, Modal, QRCode, BusinessLogo, VluxMark, CopyButton } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { HistoryTable } from './Employee';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
@@ -201,7 +201,20 @@ function Customers() {
   const list = usePolling(() => api<{ customers: CustomerRow[] }>('GET', '/owner/customers'), 15_000, []);
   const act = usePolling(() => api<{ items: HistoryItem[] }>('GET', '/owner/activity?limit=30'), 8000, []);
   const [toDelete, setToDelete] = useState<CustomerRow | null>(null);
+  const [toVoid, setToVoid] = useState<HistoryItem | null>(null);
+  const [voidReason, setVoidReason] = useState('');
   const toast = useToast();
+  const voidPurchase = async () => {
+    if (!toVoid?.purchaseId) return;
+    try {
+      const r = await api<{ stampsRemoved: number; rewardVoided: boolean }>('POST', `/owner/purchases/${toVoid.purchaseId}/void`, { reason: voidReason });
+      toast('good', `Compra anulada: se quitaron ${r.stampsRemoved} sello(s)${r.rewardVoided ? ' y la recompensa pendiente' : ''}.`);
+      setToVoid(null); setVoidReason('');
+      act.refresh(); list.refresh();
+    } catch (e) {
+      toast('bad', (e as ApiError).message);
+    }
+  };
   const exportData = async (c: CustomerRow) => {
     try {
       const data = await api('GET', `/owner/customers/${c.customerId}/export`);
@@ -272,7 +285,15 @@ function Customers() {
           </table>
         </div>
       </section>
-      <HistoryTable items={act.data?.items ?? []} title="Actividad reciente" showCustomer />
+      <HistoryTable items={act.data?.items ?? []} title="Actividad reciente" showCustomer onVoid={(item) => { setToVoid(item); setVoidReason(''); }} />
+      <Modal open={!!toVoid} onClose={() => setToVoid(null)} title="Anular compra" labelledBy="void-title">
+        <p className="text-[14px] text-[#475467]">Se quitarán {toVoid?.stamps ?? 0} sello(s) de <strong>{toVoid?.customerName}</strong>. La compra queda registrada como anulada con tu nombre y el motivo. Si esos sellos ya se usaron en un canje, no se puede anular.</p>
+        <div className="mt-4"><Field label="Motivo" htmlFor="void-reason"><input id="void-reason" className={inputCls} value={voidReason} maxLength={200} placeholder="Ej. se registró dos veces" onChange={(e) => setVoidReason(e.target.value)} /></Field></div>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <Button variant="secondary" onClick={() => setToVoid(null)}>Cancelar</Button>
+          <Button variant="danger" onClick={voidPurchase} disabled={voidReason.trim().length < 3}><Undo2 size={15} /> Anular compra</Button>
+        </div>
+      </Modal>
       <Modal open={!!toDelete} onClose={() => setToDelete(null)} title="Eliminar datos personales" labelledBy="del-title">
         <p className="text-[14px] text-[#475467]">Se borran el nombre y contacto de <strong>{toDelete?.customerName}</strong>, su tarjeta deja de funcionar y su premio pendiente se anula. Las cifras del panel se conservan sin datos personales. No se puede deshacer.</p>
         <div className="mt-5 grid grid-cols-2 gap-2">
@@ -405,7 +426,40 @@ function Team() {
   const { data, error, refresh } = usePolling(() => api<{ staff: { membershipId: string; role: string; active: boolean; email: string; displayName: string }[] }>('GET', '/owner/staff'), 30_000, []);
   const [form, setForm] = useState({ displayName: '', email: '', password: '' });
   const [msg, setMsg] = useState<string | null>(null);
+  const [reset, setReset] = useState<{ name: string; link: string } | null>(null);
+  const [mode, setMode] = useState<'link' | 'password'>('link');
+  const [invite, setInvite] = useState<{ name: string; link: string } | null>(null);
+  const { data: invites, refresh: refreshInvites } = usePolling(() => api<{ invitations: { id: string; email: string; displayName: string; status: string }[] }>('GET', '/owner/invitations'), 60_000, []);
   const toast = useToast();
+  const inviteByLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
+    try {
+      const r = await api<{ link: string }>('POST', '/owner/invitations', { email: form.email, displayName: form.displayName });
+      setInvite({ name: form.displayName, link: r.link });
+      setForm({ displayName: '', email: '', password: '' });
+      refreshInvites();
+    } catch (err) {
+      setMsg((err as ApiError).message);
+    }
+  };
+  const inviteAction = async (id: string, name: string, what: 'resend' | 'revoke') => {
+    try {
+      const r = await api<{ link?: string }>('POST', `/owner/invitations/${id}/${what}`);
+      if (r.link) setInvite({ name, link: r.link }); else toast('good', 'Invitación revocada.');
+      refreshInvites();
+    } catch (err) {
+      toast('bad', (err as ApiError).message);
+    }
+  };
+  const issueReset = async (id: string, name: string) => {
+    try {
+      const r = await api<{ resetLink: string }>('POST', `/owner/staff/${id}/reset-link`);
+      setReset({ name, link: r.resetLink });
+    } catch (err) {
+      toast('bad', (err as ApiError).message);
+    }
+  };
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
@@ -439,21 +493,54 @@ function Team() {
                 <div className="text-[12.5px] text-slate2 break-all">{s.email}</div>
               </div>
               {s.role !== 'OWNER' && (
-                <Button size="sm" variant={s.active ? 'secondary' : 'primary'} onClick={() => toggle(s.membershipId, !s.active)}>{s.active ? 'Desactivar' : 'Reactivar'}</Button>
+                <div className="flex flex-wrap gap-2">
+                  {s.active && <Button size="sm" variant="secondary" onClick={() => issueReset(s.membershipId, s.displayName)}><KeyRound size={14} /> Nueva contraseña</Button>}
+                  <Button size="sm" variant={s.active ? 'secondary' : 'primary'} onClick={() => toggle(s.membershipId, !s.active)}>{s.active ? 'Desactivar' : 'Reactivar'}</Button>
+                </div>
               )}
             </li>
           ))}
         </ul>
       </section>
-      <form onSubmit={add} className="panel p-4 sm:p-5 flex flex-col gap-4">
+      <div className="flex flex-col gap-5">
+      <form onSubmit={mode === 'link' ? inviteByLink : add} className="panel p-4 sm:p-5 flex flex-col gap-4">
         <h2 className="text-[15px] font-semibold text-ink inline-flex items-center gap-2"><UserPlus size={16} /> Agregar empleado</h2>
+        <div className="grid grid-cols-2 p-0.5 rounded-xl bg-[#F1F3F6] text-[12.5px]" role="tablist" aria-label="Forma de alta">
+          <button type="button" role="tab" aria-selected={mode === 'link'} onClick={() => { setMode('link'); setMsg(null); }} className={cx('h-8 rounded-[10px] transition', mode === 'link' ? 'bg-white shadow-sm text-ink font-medium' : 'text-slate2')}>Invitar por enlace</button>
+          <button type="button" role="tab" aria-selected={mode === 'password'} onClick={() => { setMode('password'); setMsg(null); }} className={cx('h-8 rounded-[10px] transition', mode === 'password' ? 'bg-white shadow-sm text-ink font-medium' : 'text-slate2')}>Contraseña temporal</button>
+        </div>
         <Field label="Nombre" htmlFor="emp-name"><input id="emp-name" className={inputCls} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} /></Field>
         <Field label="Correo" htmlFor="emp-email"><input id="emp-email" type="email" className={inputCls} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-        <Field label="Contraseña inicial" htmlFor="emp-pass" hint="Mínimo 10 caracteres. Compártela en persona."><input id="emp-pass" type="password" autoComplete="new-password" className={inputCls} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+        {mode === 'password' && <Field label="Contraseña inicial" htmlFor="emp-pass" hint="Mínimo 10 caracteres. Es temporal: al entrar, el empleado elige la suya."><input id="emp-pass" type="password" autoComplete="new-password" className={inputCls} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>}
         {msg && <p className="text-[13px] text-[#B42318]" role="alert">{msg}</p>}
-        <Button type="submit" disabled={form.displayName.trim().length < 2 || !form.email || form.password.length < 10}>Agregar</Button>
-        <p className="text-[11.5px] text-slate2">Los empleados solo ven la caja: no tienen acceso a este panel ni a la configuración.</p>
+        <Button type="submit" disabled={form.displayName.trim().length < 2 || !form.email || (mode === 'password' && form.password.length < 10)}>{mode === 'link' ? 'Generar invitación' : 'Agregar'}</Button>
+        <p className="text-[11.5px] text-slate2">{mode === 'link' ? 'El empleado abre el enlace, elige su contraseña y entra a la caja. Sirve una vez y vence en 72 h.' : 'Los empleados solo ven la caja: no tienen acceso a este panel ni a la configuración.'}</p>
       </form>
+      {(invites?.invitations ?? []).some((i) => i.status === 'pendiente' || i.status === 'vencida') && (
+        <section className="panel overflow-hidden">
+          <div className="px-4 sm:px-5 py-3 border-b border-line text-[14px] font-semibold text-ink">Invitaciones pendientes</div>
+          <ul className="divide-y divide-line" data-testid="owner-invitations">
+            {invites!.invitations.filter((i) => i.status === 'pendiente' || i.status === 'vencida').map((i) => (
+              <li key={i.id} className="px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0"><div className="text-[13.5px] text-ink">{i.displayName} <Badge tone={i.status === 'vencida' ? 'warn' : 'info'}>{i.status}</Badge></div><div className="text-[12px] text-slate2 break-all">{i.email}</div></div>
+                <div className="flex gap-1.5">
+                  <Button size="sm" variant="secondary" onClick={() => inviteAction(i.id, i.displayName, 'resend')}>Nuevo enlace</Button>
+                  {i.status === 'pendiente' && <Button size="sm" variant="ghost" onClick={() => inviteAction(i.id, i.displayName, 'revoke')}>Revocar</Button>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      </div>
+      <Modal open={!!invite} onClose={() => setInvite(null)} title="Invitación para tu empleado" labelledBy="invite-title">
+        <p className="text-[14px] text-[#475467]">Envíale este enlace a <strong>{invite?.name}</strong> (WhatsApp o en persona) o que escanee el código. VLUX no envía correos. Sirve una sola vez y vence en 72 horas.</p>
+        {invite && <div className="mt-4 flex flex-col items-center gap-3"><QRCode value={invite.link} size={168} label="Código de la invitación" /><span className="text-[11px] font-mono text-slate2 break-all select-all text-center" data-testid="employee-invite-link">{invite.link}</span><CopyButton text={invite.link} /></div>}
+      </Modal>
+      <Modal open={!!reset} onClose={() => setReset(null)} title="Enlace para nueva contraseña" labelledBy="reset-title">
+        <p className="text-[14px] text-[#475467]">Envíale este enlace a <strong>{reset?.name}</strong> o que escanee el código. Sirve una sola vez durante 60 minutos y cierra sus sesiones abiertas.</p>
+        {reset && <div className="mt-4 flex flex-col items-center gap-3"><QRCode value={reset.link} size={168} label="Código del enlace para nueva contraseña" /><span className="text-[11px] font-mono text-slate2 break-all select-all text-center" data-testid="reset-link">{reset.link}</span><CopyButton text={reset.link} /></div>}
+      </Modal>
     </div>
   );
 }

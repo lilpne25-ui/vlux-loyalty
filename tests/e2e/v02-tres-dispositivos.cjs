@@ -59,6 +59,7 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
   await owner.click('[role=tab]:has-text("Equipo")');
   await owner.fill('#emp-name', 'Barista E2E');
   await owner.fill('#emp-email', `caja@${slug}.e2e.test`);
+  await owner.getByRole('tab', { name: 'Contraseña temporal' }).click(); // V0.3: por omisión se invita por enlace
   await owner.fill('#emp-pass', PASSWORD);
   await owner.click('button:has-text("Agregar")');
   await owner.waitForSelector(`text=caja@${slug}.e2e.test`);
@@ -100,7 +101,14 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
   const empCtx = await camBrowser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, permissions: ['camera'] });
   const emp = await empCtx.newPage(); watch(emp, 'empleado');
   await login(emp, `caja@${slug}.e2e.test`);
+  // V0.2.1: la contraseña que puso el dueño es temporal; el empleado elige la suya al entrar.
+  await emp.waitForSelector('text=Cambia tu contraseña temporal');
+  await emp.fill('#pwd-current', PASSWORD);
+  await emp.fill('#pwd-new', PASSWORD + '-propia');
+  await emp.fill('#pwd-repeat', PASSWORD + '-propia');
+  await emp.click('button:has-text("Cambiar contraseña")');
   await emp.waitForSelector('text=Panel del empleado');
+  ok('02b empleado cambia su contraseña temporal al primer acceso', true);
   ok('14a empleado entra directo a caja (sin panel del dueño en el menú)', (await emp.locator('nav >> text=Panel').count()) === 0);
   await emp.click('button:has-text("Escanear con cámara")');
   await emp.waitForSelector('[data-testid=card-panel]', { timeout: 15000 });

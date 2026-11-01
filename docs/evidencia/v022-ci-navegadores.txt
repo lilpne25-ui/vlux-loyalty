@@ -1,0 +1,11 @@
+V0.2.2 · E2E PWA en GitHub Actions (emulador de Vercel + PostgreSQL 16, navegadores de Playwright 1.63.0)
+Workflow: .github/workflows/pwa-navegadores.yml · run 41239773278 · commit 0c7422a · 2026-10-31 20:37–20:39 UTC
+https://github.com/lilpne25-ui/vlux-loyalty/actions/runs/41239773278
+  local (chromium)  job 124651063815  success   Total chromium: 40 PASS, 0 FAIL (corrida local equivalente en docs/evidencia/v022-e2e-pwa-chromium-local.txt)
+  local (webkit)    job 124651063904  success   Total webkit: 40 PASS, 0 FAIL
+  local (firefox)   job 124651064039  success   Total firefox: 40 PASS, 0 FAIL
+  despliegue        skipped (solo se ejecuta manualmente con secretos)
+Re-ejecución con las correcciones MSA: run 41253210873 (commit e7a88c2), lanzada 23:36 UTC.
+
+Aclaración: WebKit de Playwright en Linux NO es Safari de un iPhone físico. No simula "Agregar a pantalla de inicio",
+el almacenamiento separado de la app instalada ni la cámara. Esas pruebas están en docs/CHECKLIST_DISPOSITIVOS_FISICOS.md como NOT TESTED.

@@ -1,0 +1,38 @@
+# Pruebas en cada push: tipos, unitarias e integración contra PostgreSQL real (datos sintéticos).
+name: Pruebas
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: solo-ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Configurar base de pruebas
+        run: |
+          cat > .env.test <<'ENV'
+          DATABASE_URL=postgres://vlux_app:solo-ci-app@127.0.0.1:5432/vlux_loyalty_test
+          DATABASE_ADMIN_URL=postgres://postgres:solo-ci@127.0.0.1:5432/vlux_loyalty_test
+          APP_DB_PASSWORD=solo-ci-app
+          PLATFORM_ADMIN_TOKEN=solo-ci-token-0123456789abcdef0123456789
+          ENV
+          npm run db:setup:test
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build:vercel

@@ -1,0 +1,17 @@
+# Migraciones 0001-0004: up, down x4, status, up (base temporal) · 2026-10-31T19:44:50Z
+aplicada 0001_init
+aplicada 0002_serverless_supabase
+aplicada 0003_operacion_piloto
+aplicada 0004_search_path
+revertida 0004_search_path
+revertida 0003_operacion_piloto
+revertida 0002_serverless_supabase
+revertida 0001_init
+pendiente  0001_init
+pendiente  0002_serverless_supabase
+pendiente  0003_operacion_piloto
+pendiente  0004_search_path
+aplicada 0001_init
+aplicada 0002_serverless_supabase
+aplicada 0003_operacion_piloto
+aplicada 0004_search_path

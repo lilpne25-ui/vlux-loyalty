@@ -1,6 +1,6 @@
 {
   "name": "vlux-loyalty",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "VLUX Loyalty: tarjetas de fidelidad web multiempresa",
   "scripts": {
     "dev:web": "vite",
@@ -18,7 +18,10 @@
     "build": "vite build",
     "start": "node --env-file-if-exists=.env --import tsx server/index.ts",
     "dev:api": "node --env-file=.env --watch --import tsx server/index.ts",
-    "test:e2e": "node --env-file=.env tests/e2e/v02-tres-dispositivos.cjs"
+    "test:e2e": "node --env-file=.env tests/e2e/v02-tres-dispositivos.cjs",
+    "build:vercel": "vite build && node scripts/build-vercel.mjs",
+    "preview:vercel": "node --env-file=.env scripts/preview-vercel-output.mjs",
+    "test:e2e:v021": "node --env-file=.env tests/e2e/v021-operacion.cjs"
   },
   "license": "UNLICENSED",
   "dependencies": {
@@ -44,6 +47,7 @@
     "postcss": "8.5.32",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
-    "vite": "8.3.5"
+    "vite": "8.3.5",
+    "esbuild": "0.28.2"
   }
 }

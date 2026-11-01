@@ -1,13 +1,13 @@
 // Caja (empleado y dueño): identificar tarjeta, registrar compra, canjear premio e historial.
 // V0.2: toda operación la autoriza el servidor con la sesión del empleado; la interfaz solo la solicita.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ScanLine, Keyboard, Users, Search, Gift, CheckCircle2, Camera, ImageUp, History, ChevronRight, ShoppingBag, Minus, Plus, CameraOff, ShieldCheck } from 'lucide-react';
+import { ScanLine, Keyboard, Users, Search, Gift, CheckCircle2, Camera, ImageUp, History, ChevronRight, ShoppingBag, Minus, Plus, CameraOff, ShieldCheck, Link2 } from 'lucide-react';
 import { api, ApiError, HistoryItem, newIdempotencyKey, Program, StaffCard } from '../lib/api';
 import { formatDateTime, relativeTime, plural } from '../lib/format';
 import { usePolling } from '../lib/usePolling';
 import { cameraSupported, decodeQrFromFile, startCameraScanner } from '../lib/qr';
 import { navigate } from '../lib/router';
-import { Button, Badge, inputCls, useToast, cx, Modal } from '../components/ui';
+import { Button, Badge, inputCls, useToast, cx, Modal, QRCode, CopyButton } from '../components/ui';
 import { StampGrid } from '../components/LoyaltyCard';
 import { ErrorBox } from '../components/Brand';
 
@@ -212,6 +212,8 @@ function CardPanel({ cardId }: { cardId: string }) {
   const [busy, setBusy] = useState(false);
   const [confirmRedeem, setConfirmRedeem] = useState(false);
   const [dupPrompt, setDupPrompt] = useState<string | null>(null);
+  const [newLink, setNewLink] = useState<string | null>(null);
+  const [confirmLink, setConfirmLink] = useState(false);
   const [animFrom, setAnimFrom] = useState<number | null>(null);
   // Si la red falla, el reintento reutiliza la misma llave: el servidor no duplica la compra.
   const pendingKey = useRef<string | null>(null);
@@ -283,6 +285,7 @@ function CardPanel({ cardId }: { cardId: string }) {
               <span className="font-mono">{card.publicCode}</span>
               <span>Ciclo {card.cycle}</span>
               <span>Última compra: {relativeTime(card.lastPurchaseAt)}</span>
+              <button className="text-[12.5px] font-medium underline underline-offset-2 inline-flex items-center gap-1" onClick={() => setConfirmLink(true)}><Link2 size={12} /> Nuevo enlace</button>
             </div>
           </div>
           {reward ? <Badge tone="gold"><Gift size={12} /> Recompensa disponible</Badge> : <Badge tone="neutral">Faltan {plural(remaining, 'sello', 'sellos')}</Badge>}
@@ -343,6 +346,28 @@ function CardPanel({ cardId }: { cardId: string }) {
         </div>
       </Modal>
 
+      <Modal open={confirmLink} onClose={() => { setConfirmLink(false); setNewLink(null); }} title="Nuevo enlace de tarjeta" labelledBy="link-title">
+        {!newLink ? (
+          <>
+            <p className="text-[14px] text-[#475467]">Úsalo si {card.customerName} cambió de teléfono o perdió su enlace. El enlace anterior y los teléfonos donde estaba abierta la tarjeta dejarán de tener acceso. Los sellos no cambian.</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <Button variant="secondary" onClick={() => setConfirmLink(false)}>Cancelar</Button>
+              <Button variant="primary" onClick={async () => {
+                try { setNewLink((await api<{ personalLink: string }>('POST', `/staff/cards/${cardId}/link`)).personalLink); }
+                catch (e) { toast('bad', (e as ApiError).message); setConfirmLink(false); }
+              }}><Link2 size={15} /> Generar</Button>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center gap-3">
+            <p className="text-[14px] text-[#475467] text-center">Que {card.customerName} escanee este código con la cámara de su teléfono.</p>
+            <QRCode value={newLink} size={180} label="Código del nuevo enlace de la tarjeta" />
+            <span className="text-[11px] font-mono text-slate2 break-all select-all text-center" data-testid="new-card-link">{newLink}</span>
+            <CopyButton text={newLink} />
+          </div>
+        )}
+      </Modal>
+
       <Modal open={!!dupPrompt} onClose={() => setDupPrompt(null)} title="¿Otra compra?" labelledBy="dup-title">
         <p className="text-[14px] text-[#475467]">{dupPrompt}</p>
         <div className="mt-5 grid grid-cols-2 gap-2">
@@ -357,11 +382,12 @@ function CardPanel({ cardId }: { cardId: string }) {
 const KIND_LABEL: Record<HistoryItem['kind'], string> = {
   card_created: 'Tarjeta creada',
   purchase: 'Compra',
+  purchase_voided: 'Compra anulada',
   reward_unlocked: 'Recompensa desbloqueada',
   reward_redeemed: 'Recompensa canjeada',
 };
 
-export function HistoryTable({ items, title = 'Historial reciente', showCustomer = false }: { items: HistoryItem[]; title?: string; showCustomer?: boolean }) {
+export function HistoryTable({ items, title = 'Historial reciente', showCustomer = false, onVoid }: { items: HistoryItem[]; title?: string; showCustomer?: boolean; onVoid?: (item: HistoryItem) => void }) {
   return (
     <section className="panel overflow-hidden">
       <div className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-2 border-b border-line">
@@ -383,11 +409,16 @@ export function HistoryTable({ items, title = 'Historial reciente', showCustomer
               <tr key={o.kind + o.at + i} className="row-in">
                 {showCustomer && <td className="px-4 sm:px-5 py-2.5 text-ink font-medium whitespace-nowrap">{o.customerName}</td>}
                 <td className={cx('py-2.5 text-[#344054] whitespace-nowrap', showCustomer ? 'px-3' : 'px-4 sm:px-5')}>
-                  <span className="inline-flex items-center gap-1.5"><OpDot kind={o.kind} /> {KIND_LABEL[o.kind]}{o.kind === 'purchase' && o.items && o.items > 1 ? <span className="text-slate2">({o.items} artículos)</span> : null}</span>
+                  <span className="inline-flex items-center gap-1.5"><OpDot kind={o.kind} /> <span className={o.kind === 'purchase' && o.voided ? 'line-through text-slate2' : undefined}>{KIND_LABEL[o.kind]}</span>{o.kind === 'purchase' && o.items && o.items > 1 ? <span className="text-slate2">({o.items} artículos)</span> : null}{o.kind === 'purchase' && o.voided ? <span className="text-slate2">(anulada)</span> : null}</span>
                 </td>
                 <td className="px-3 py-2.5 text-slate2 tabular-nums whitespace-nowrap">{formatDateTime(o.at)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums text-ink">{o.stamps > 0 ? `+${o.stamps}` : o.stamps < 0 ? o.stamps : '–'}</td>
-                <td className="px-4 sm:px-5 py-2.5 text-right text-slate2 whitespace-nowrap">{o.staffName ?? '–'}</td>
+                <td className="px-4 sm:px-5 py-2.5 text-right text-slate2 whitespace-nowrap">
+                  {o.staffName ?? '–'}
+                  {onVoid && o.kind === 'purchase' && !o.voided && o.purchaseId && (
+                    <button onClick={() => onVoid(o)} className="ml-2 text-[12px] font-medium text-[#B42318] hover:underline" aria-label={`Anular compra de ${o.customerName ?? 'cliente'}`}>Anular</button>
+                  )}
+                </td>
               </tr>
             ))}
             {!items.length && (<tr><td colSpan={showCustomer ? 5 : 4} className="px-5 py-6 text-center text-slate2">Aún no hay operaciones.</td></tr>)}
@@ -399,6 +430,6 @@ export function HistoryTable({ items, title = 'Historial reciente', showCustomer
 }
 
 function OpDot({ kind }: { kind: string }) {
-  const color = kind === 'purchase' ? '#2E90A0' : kind === 'reward_redeemed' ? '#12B76A' : kind === 'reward_unlocked' ? '#C9A15B' : kind === 'card_created' ? '#7A5AF8' : '#98A2B3';
+  const color = kind === 'purchase' ? '#2E90A0' : kind === 'purchase_voided' ? '#B42318' : kind === 'reward_redeemed' ? '#12B76A' : kind === 'reward_unlocked' ? '#C9A15B' : kind === 'card_created' ? '#7A5AF8' : '#98A2B3';
   return <span className="h-2 w-2 rounded-full shrink-0" style={{ background: color }} />;
 }

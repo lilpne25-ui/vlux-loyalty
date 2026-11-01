@@ -1,0 +1,13 @@
+VLUX Loyalty V0.3 · ops/backup-verify.sh contra la base LOCAL de desarrollo (datos sintéticos) · 2026-11-01T00:25:58Z
+1) Respaldo lógico (pg_dump formato custom, solo esquema public)
+08c8b13e962800760e1c996f9c4abeb12338c83dd9495d77e99d67cb8f2ccdfd  vlux-20261101T002558Z.dump
+2) Restauración en base AISLADA: vlux_restore_20261101002558
+3) Verificación de integridad (origen vs restaurada)
+   origen:      audit_events=226 business_subscriptions=2 businesses=28 cards=28 customers=28 migrations=6 platform_audit_events=4 purchases=57 rewards=9 staff_users=44 stamp_events=69 visits=15
+   restaurada:  audit_events=226 business_subscriptions=2 businesses=28 cards=28 customers=28 migrations=6 platform_audit_events=4 purchases=57 rewards=9 staff_users=44 stamp_events=69 visits=15
+   tarjetas con saldo distinto a su libro mayor: 0
+   tablas sin RLS tras restaurar: 0
+   tarjetas con más de un premio disponible: 0
+   permisos mínimos de vlux_app tras restaurar: t
+4) Registro del último respaldo verificado
+RESPALDO Y RESTAURACIÓN VERIFICADOS (LOCAL). NO es evidencia de un respaldo de Supabase.

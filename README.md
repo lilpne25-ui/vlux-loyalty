@@ -1,16 +1,19 @@
-# VLUX Loyalty · V0.2 (MVP)
+# VLUX Loyalty · V0.3 (VLUX Control Center)
 
 > Haz que tus clientes tengan una razón más para regresar.
 
 Tarjeta de recompensas web para pequeños negocios (cafeterías, barberías, salones…). El cliente no instala nada: escanea el QR del mostrador y obtiene su tarjeta en el navegador. El personal registra compras desde su teléfono y el dueño ve los resultados en su panel. Un solo despliegue atiende a muchos negocios, con los datos aislados entre ellos.
 
-**Estado:** MVP funcional verificado en entorno local. **No está desplegado en producción.** Apple Wallet y Google Wallet son la siguiente fase (ver `docs/PROPUESTA_V03_WALLET.md`).
+**Estado:** V0.2.2 en Vercel (solo Preview) + Supabase. El cliente puede guardar su tarjeta en la pantalla de inicio del iPhone o Android (PWA, sin tienda de apps). Demo pública para clientes sin cuenta de Vercel y entorno interno protegido (ver `docs/ACCESO_VERCEL_V022.md`). **No hay despliegue en Production.** La PWA **no es** Apple Wallet ni Google Wallet; esas siguen como fase futura (`docs/PROPUESTA_V03_WALLET.md`). Pruebas en teléfonos físicos: pendientes.
+
+**V0.3 · Control Center** (rama `v0.3`, solo Preview): consola `/vlux-admin` para el equipo VLUX con contraseña + 2FA obligatorio; alta de negocios con asistente de 4 pasos; invitaciones de un solo uso para dueños y empleados; selector de negocio; suscripciones manuales; bitácora global. Google Wallet: preparado pero **bloqueado** sin cuenta de emisor. Apple Wallet: solo evaluación. Respaldos: **no operativos** todavía. Ver `docs/V03_CONTROL_CENTER.md`.
 
 ## Qué hace
 - Registro del cliente desde el QR del negocio (`/n/<negocio>`), sin contraseña; enlace personal para abrir su tarjeta en otro teléfono.
 - Caja (`/caja`): identificar tarjeta con cámara en vivo, foto o código; registrar compra; canjear recompensa.
 - Panel del dueño (`/panel`): clientes, visitas, compras, sellos, recurrentes, recompensas, canjes, reseñas; configuración del programa y de la marca; equipo; QR imprimible; exportar y eliminar datos de un cliente.
 - Reglas: 1 sello por compra o por artículo (con tope); varias compras dentro de la ventana cuentan como **una visita**.
+- Tarjeta instalable (V0.2.2): "Guarda tu tarjeta" con instalación nativa en Android y guía en iPhone; manifiesto e ícono por negocio; si la app instalada no tiene la tarjeta, se vincula con un código de un solo uso.
 - Seguridad: sesiones en cookies HttpOnly, roles en servidor, Row Level Security en PostgreSQL, idempotencia y bloqueo transaccional en sellos y canjes.
 
 ## Requisitos
@@ -40,6 +43,9 @@ cp .env .env.test             # y cambia el nombre de la base a vlux_loyalty_tes
 npm run db:setup:test         # crea y migra la base de pruebas
 npm test                      # unitarias + integración (API real contra PostgreSQL)
 npm run test:e2e              # 3 navegadores independientes contra el servidor en marcha (requiere Playwright/Chromium y ffmpeg)
+npm run build:vercel && npm run preview:vercel   # salida de Vercel emulada en :8788
+npm run test:e2e:v021         # recuperación de contraseña, nuevo enlace, anular compra
+node tests/e2e/v022-pwa.cjs           # V0.2.2: PWA + escenario A/B/C (BROWSER=chromium|webkit|firefox)
 ```
 Resultados guardados en `docs/evidencia/`.
 
@@ -55,16 +61,35 @@ legacy/v01/                V0.1 original (referencia; no se compila)
 docs/                      informes, manuales, evidencia
 ```
 
-## Despliegue (no realizado)
-Un proceso Node (`npm run build && npm start`) + PostgreSQL administrado. Ver `docs/INFORME_TECNICO.md`. Antes de producción: HTTPS, `NODE_ENV=production`, `TRUST_PROXY=1` si hay proxy, respaldos de BD y aviso de privacidad revisado por un abogado.
+## Despliegue (Vercel + Supabase)
+`npm run build:vercel` genera `.vercel/output` (Build Output API v3): estáticos + una Function Node 22 con Hono. Base: Supabase vía Transaction Pooler con el rol `vlux_app` (sin privilegios de dueño). Production está bloqueado a propósito. Paso a paso, variables y recuperación en `docs/DESPLIEGUE_VERCEL_SUPABASE.md`.
 
 ## Documentación
+- `docs/V03_CONTROL_CENTER.md` · instalación y uso del Control Center
+- `docs/V03_SEGURIDAD.md` · informe de seguridad V0.3
+- `docs/V03_AUDITORIA.md` · auditoría inicial
+- `docs/calidad/atomos-v03.md` · átomos V0.3 y estado
+- `docs/V03_GOOGLE_WALLET.md` · preparación Google Wallet
+- `docs/V03_APPLE_WALLET.md` · evaluación Apple Wallet
+- `docs/V03_PLAN_PILOTO_COMERCIAL.md` · plan de piloto comercial
 - `docs/INFORME_TECNICO.md` · arquitectura y decisiones
-- `docs/INFORME_SEGURIDAD.md` · controles y pendientes
+- `docs/INFORME_SEGURIDAD.md` · controles y pendientes (V0.2)
+- `docs/INFORME_SEGURIDAD_V021.md` · seguridad en Vercel + Supabase
+- `docs/INFORME_SEGURIDAD_V022.md` · seguridad de la PWA y revisión MSA
+- `docs/ACCESO_VERCEL_V022.md` · acceso de clientes sin cuenta de Vercel
+- `docs/PWA_INVESTIGACION_V022.md` · PWA vs Wallet, instalación por plataforma
+- `docs/DIFF_V021_V022.md` · qué cambió desde V0.2.1
+- `docs/calidad/atomos-v022.md` · átomos V0.2.2 y estado
+- `docs/DESPLIEGUE_VERCEL_SUPABASE.md` · manual técnico de despliegue
+- `docs/RESPALDOS.md` · respaldos y restauración
+- `docs/COSTOS_V021.md` · costos para 2/10/30/100 negocios
+- `docs/MANUAL_COMERCIAL_CAFETERIA.md` · alta comercial de una cafetería
+- `docs/CHECKLIST_DISPOSITIVOS_FISICOS.md` · prueba manual en iPhone y Android
 - `docs/REPORTE_MIGRACION.md` · qué se reutilizó de V0.1
 - `docs/MANUAL_PILOTO.md` · uso para el negocio piloto
 - `docs/PREPARACION_COMERCIAL.md` · qué está listo y qué no
 - `docs/PROPUESTA_V03_WALLET.md` · Apple Wallet y Google Wallet
-- `docs/calidad/compuertas.md` · compuertas de calidad por átomo
+- `docs/calidad/compuertas.md` · compuertas de calidad por átomo (V0.2)
+- `docs/calidad/compuertas-v021.md` · átomos V0.2.1 y estado final
 
 © VLUX — eTransformation Partner. Código propietario.

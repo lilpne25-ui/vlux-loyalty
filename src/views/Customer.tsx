@@ -10,6 +10,8 @@ import { rewardSentence, stampRule, welcomeHeadline } from '../lib/vertical';
 import { Button, Modal, QRCode, CopyButton, Field, inputCls, BusinessLogo, CupIllustration, PoweredByVlux, useToast, cx, Badge } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
+import { SaveCardPanel, PairScreen, OfflineNotice } from '../components/SaveCard';
+import { applyBusinessAppHead, isStandalone, useOnline } from '../lib/pwa';
 
 const POLL_MS = 4000;
 
@@ -23,21 +25,40 @@ export function CustomerApp({ slug }: { slug: string }) {
   const [personalLink, setPersonalLink] = useState<string | null>(null);
   const card = usePolling(() => api<CustomerCardView | { card: null }>('GET', `/me/${slug}/card`), POLL_MS, [slug]);
 
-  useEffect(() => {
-    api('GET', `/public/businesses/${slug}`).then(setPub).catch((e: ApiError) => setPubError(e.status === 404 ? 'Este negocio no existe o ya no está activo.' : e.message));
+  const [pubOffline, setPubOffline] = useState(false);
+  const loadPub = useCallback(() => {
+    setPubOffline(false);
+    api('GET', `/public/businesses/${slug}`).then((p) => { setPub(p); setPubError(null); }).catch((e: ApiError) => {
+      if (e.code === 'network') setPubOffline(true);
+      else setPubError(e.status === 404 ? 'Este negocio no existe o ya no está activo.' : e.message);
+    });
   }, [slug]);
+  useEffect(() => { loadPub(); }, [loadPub]);
+  const online = useOnline();
+  useEffect(() => { if (online && pubOffline) loadPub(); }, [online, pubOffline, loadPub]);
+
+  // Manifiesto e ícono del negocio para "Agregar a pantalla de inicio" (solo datos públicos).
+  useEffect(() => { if (pub) applyBusinessAppHead(slug, pub.business.name, pub.business.primaryColor); }, [pub, slug]);
+  const [standalone] = useState(() => isStandalone());
+  const [wantsNew, setWantsNew] = useState(false);
 
   if (pubError) return <div className="mx-auto max-w-[460px] gutter pt-16"><ErrorBox message={pubError} /></div>;
+  const networkDown = !online || pubOffline || card.error?.code === 'network';
+  if (!pub && networkDown) return <div className="mx-auto max-w-[460px] gutter"><OfflineNotice hasData={false} onRetry={() => { loadPub(); card.refresh(); }} /></div>;
   if (!pub || (card.loading && !card.data)) return <Loading />;
   const b = pub.business;
   const view = card.data && card.data.card ? (card.data as CustomerCardView) : null;
+  if (!view && networkDown) return <div className="mx-auto max-w-[460px] gutter"><OfflineNotice hasData={false} onRetry={card.refresh} /></div>;
 
   return (
-    <div className="cafe-bg min-h-full" data-vertical={view?.business.vertical ?? b.vertical} style={brandVars(view?.business.primaryColor ?? b.primaryColor, view?.business.accentColor ?? b.accentColor)}>
-      <div className="mx-auto w-full max-w-[460px] gutter pb-10">
+    <div className="cafe-bg min-h-full min-h-[100dvh]" data-vertical={view?.business.vertical ?? b.vertical} data-standalone={standalone ? '1' : undefined} style={brandVars(view?.business.primaryColor ?? b.primaryColor, view?.business.accentColor ?? b.accentColor)}>
+      <div className="mx-auto w-full max-w-[460px] gutter pb-10 safe-top">
         {b.isDemo && <div className="mt-3 rounded-xl bg-[#F4F3FF] border border-[#D9D6FE] px-3 py-2 text-[12px] text-[#5925DC]">Negocio de demostración: no escribas datos personales reales.</div>}
+        {view && networkDown && <OfflineNotice hasData onRetry={card.refresh} />}
         {view ? (
           <CardScreen view={view} slug={slug} refresh={card.refresh} personalLink={personalLink} onLinkSeen={() => setPersonalLink(null)} />
+        ) : standalone && !wantsNew ? (
+          <PairScreen slug={slug} businessName={b.name} onPaired={card.refresh} onNew={() => setWantsNew(true)} />
         ) : screen === 'welcome' ? (
           <Welcome business={b} program={pub.program} onStart={() => setScreen('register')} />
         ) : (
@@ -283,6 +304,8 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
         <p className="text-[12px] text-cafe-muted max-w-[300px]">Si no se puede escanear, el personal puede escribir este código. El código solo identifica tu tarjeta: los sellos los autoriza el personal.</p>
       </section>
 
+      <SaveCardPanel slug={slug} businessName={b.name} />
+
       <div className="grid grid-cols-2 gap-2.5">
         <button onClick={() => setWalletOpen('apple')} className="wallet-btn"><Wallet size={17} /> <span className="leading-tight text-left"><span className="block text-[10.5px] opacity-70">Vista previa</span>Apple Wallet</span></button>
         <button onClick={() => setWalletOpen('google')} className="wallet-btn"><Wallet size={17} /> <span className="leading-tight text-left"><span className="block text-[10.5px] opacity-70">Vista previa</span>Google Wallet</span></button>
@@ -314,7 +337,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
             <li key={o.kind + o.at + i} className="px-5 py-2.5 flex items-center justify-between gap-3 text-[13px]">
               <span className="inline-flex items-center gap-2 text-cafe-body min-w-0">
                 {o.kind === 'purchase' ? <VerticalIcon v={b.vertical} size={14} /> : o.kind === 'card_created' ? <Plus size={14} /> : o.kind === 'reward_redeemed' ? <Check size={14} /> : <Gift size={14} />}
-                <span className="truncate">{o.kind === 'purchase' ? `Compra · +${plural(o.stamps, 'sello', 'sellos')}` : o.kind === 'card_created' ? 'Tarjeta creada' : o.kind === 'reward_redeemed' ? 'Recompensa canjeada' : 'Recompensa desbloqueada'}</span>
+                <span className="truncate">{o.kind === 'purchase' ? `Compra · +${plural(o.stamps, 'sello', 'sellos')}` : o.kind === 'purchase_voided' ? `Compra anulada · ${o.stamps} ${Math.abs(o.stamps) === 1 ? 'sello' : 'sellos'}` : o.kind === 'card_created' ? 'Tarjeta creada' : o.kind === 'reward_redeemed' ? 'Recompensa canjeada' : 'Recompensa desbloqueada'}</span>
               </span>
               <span className="shrink-0 text-cafe-muted tabular-nums text-[12px] inline-flex items-center gap-1"><Clock size={12} /> {formatDateTime(o.at)}</span>
             </li>

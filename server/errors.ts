@@ -1,6 +1,6 @@
 // Errores de negocio con código estable (para la UI) y estado HTTP.
 export class AppError extends Error {
-  constructor(public status: 400 | 401 | 403 | 404 | 409 | 422 | 429, public code: string, message: string, public details?: Record<string, unknown>) {
+  constructor(public status: 400 | 401 | 403 | 404 | 409 | 410 | 422 | 429, public code: string, message: string, public details?: Record<string, unknown>) {
     super(message);
   }
 }
