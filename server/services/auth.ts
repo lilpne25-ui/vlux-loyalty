@@ -6,7 +6,7 @@ import { DUMMY_PASSWORD_HASH, newToken, sha256, verifyPassword } from '../securi
 import { audit } from './audit';
 
 export type Role = 'OWNER' | 'EMPLOYEE';
-export interface StaffSession { sessionId: string; userId: string; email: string; displayName: string; businessId: string; businessSlug: string; businessName: string; role: Role; mustChangePassword: boolean; }
+export interface StaffSession { sessionId: string; userId: string; email: string; displayName: string; businessId: string; businessSlug: string; businessName: string; role: Role; mustChangePassword: boolean; demo?: boolean; }
 
 const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
@@ -18,12 +18,14 @@ export type LoginResult =
   | { kind: 'choose'; businesses: BusinessChoice[] };
 
 /** Crea la sesión del personal para una membresía concreta (dentro de una transacción). */
-export async function createStaffSession(tx: import('../db').Tx, userId: string, membershipId: string, businessId: string) {
+export const DEMO_EMAIL_DOMAIN = 'demo.vlux.invalid';
+
+export async function createStaffSession(tx: import('../db').Tx, userId: string, membershipId: string, businessId: string, hours = config.staffSessionHours) {
   const token = newToken();
   const id = (await tx.query(
     `INSERT INTO staff_sessions (token_hash, user_id, membership_id, business_id, expires_at)
      VALUES ($1, $2, $3, $4, now() + make_interval(hours => $5)) RETURNING id`,
-    [sha256(token), userId, membershipId, businessId, config.staffSessionHours],
+    [sha256(token), userId, membershipId, businessId, hours],
   )).rows[0].id as string;
   return { token, sessionId: id };
 }
@@ -101,17 +103,17 @@ export async function switchBusiness(s: StaffSession, slug: string) {
 export async function getStaffSession(token: string | undefined): Promise<StaffSession | null> {
   if (!token || token.length > 100) return null;
   const row = (await getPool().query(
-    `SELECT s.id, s.user_id, u.email, u.display_name, u.must_change_password, s.business_id, b.slug, b.name, m.role
+    `SELECT s.id, s.user_id, u.email, u.display_name, u.must_change_password, s.business_id, b.slug, b.name, m.role, (b.is_demo AND u.email LIKE '%@' || $2) AS demo
        FROM staff_sessions s
        JOIN staff_users u ON u.id = s.user_id
        JOIN staff_memberships m ON m.id = s.membership_id
        JOIN businesses b ON b.id = s.business_id
       WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
         AND u.disabled_at IS NULL AND m.active AND b.status = 'active'`,
-    [sha256(token)],
+    [sha256(token), DEMO_EMAIL_DOMAIN],
   )).rows[0];
   if (!row) return null;
-  return { sessionId: row.id, userId: row.user_id, email: row.email, displayName: row.display_name, businessId: row.business_id, businessSlug: row.slug, businessName: row.name, role: row.role, mustChangePassword: !!row.must_change_password };
+  return { sessionId: row.id, userId: row.user_id, email: row.email, displayName: row.display_name, businessId: row.business_id, businessSlug: row.slug, businessName: row.name, role: row.role, mustChangePassword: !!row.must_change_password, demo: !!row.demo };
 }
 
 export async function logout(token: string | undefined) {

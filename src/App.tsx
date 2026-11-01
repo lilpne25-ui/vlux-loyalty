@@ -19,12 +19,16 @@ import { brandVars, Loading } from './components/Brand';
 import { CustomerApp } from './views/Customer';
 import { EmployeeView } from './views/Employee';
 import { OwnerView } from './views/Owner';
-import { ForBusinessView } from './views/ForBusiness';
+import { LandingView } from './views/Landing';
 import { LoginView } from './views/Login';
 import { CardLinkView, ChangePasswordPanel, ResetPasswordView } from './views/Account';
 import { InvitationView } from './views/Invitation';
 
 const AdminApp = lazy(() => import('./admin/AdminApp'));
+const PersonalizarView = lazy(() => import('./views/Personalizar'));
+
+/** Negocios de demostración anteriores (V0.1–V0.4.1): sus rutas públicas ya no son la experiencia principal. */
+const LEGACY_DEMO_SLUGS = new Set(['cafe-demo-toluca', 'barberia-demo-metepec']);
 
 export default function App() {
   return (
@@ -35,6 +39,11 @@ export default function App() {
 }
 
 type SessionState = { loading: boolean; session: StaffSessionInfo | null; colors: { primary: string; accent: string; vertical: string; finish?: 'signature' | 'silver' | 'black' } | null };
+
+function Redirect({ to }: { to: string }) {
+  useEffect(() => { navigate(to, { replace: true }); }, [to]);
+  return <Loading />;
+}
 
 function Shell() {
   const { path, search } = useLocation();
@@ -62,14 +71,18 @@ function Shell() {
   if (path === '/t') return <CardLinkView />;
   if (path === '/restablecer') return <ResetPasswordView />;
 
+  if (path === '/personalizar') return <Suspense fallback={<div className="lp min-h-full" />}><PersonalizarView /></Suspense>;
+
   const customerMatch = path.match(/^\/n\/([a-z0-9-]{3,40})\/?$/);
+  if (customerMatch && LEGACY_DEMO_SLUGS.has(customerMatch[1])) return <Redirect to="/?demo=anterior" />;
   if (customerMatch) return <CustomerApp slug={customerMatch[1]} />;
 
   if (!isStaffRoute) {
     return (
       <div className="app-root flex flex-col min-h-full">
+        {search.get('demo') === 'anterior' && <div className="gutter py-2 text-center text-[12.5px] bg-[#0E1115] text-white/80" role="status">Esa demostración anterior ya no está disponible. Estas son las experiencias actuales de VLUX Loyalty.</div>}
         {search.get('enlace') === 'invalido' && <div className="gutter py-2 text-center text-[12.5px] bg-[#FEF3F2] text-[#B42318]">Ese enlace de tarjeta no es válido o ya no está activo.</div>}
-        <ForBusinessView goTo={(p) => navigate(p)} />
+        <LandingView />
       </div>
     );
   }

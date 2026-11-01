@@ -10,6 +10,7 @@ import { config } from './config';
 import { AppError, forbidden, notFound, unauthorized } from './errors';
 import { rateLimit } from './ratelimit';
 import { loginSchema, reviewEventSchema, slugSchema, uuidSchema } from './validation';
+import { demoStatus, startDemoSession, DEMO_SESSION_HOURS } from './services/demo';
 import { getStaffSession, listMyBusinesses, login, logout, switchBusiness, type Role, type StaffSession } from './services/auth';
 import { acceptInvitation, inspectInvitation, inviteSchema, inviteStaff, listInvitations, resendInvitation, revokeInvitation } from './services/invitations';
 import { buildAdminRoutes } from './admin-routes';
@@ -81,6 +82,8 @@ async function csrfGuard(c: Context, next: Next) {
   }
   await next();
 }
+
+const demoBlocked = () => new AppError(403, 'demo_readonly', 'Esta acción no está disponible en la demostración.');
 
 const requireStaff = (...roles: Role[]) => async (c: Context<Env>, next: Next) => {
   const s = await getStaffSession(getCookie(c, STAFF_COOKIE));
@@ -316,6 +319,16 @@ export function buildApp() {
     return c.json(await resetPasswordWithToken(await jsonBody(c)));
   });
 
+  // Acceso de demostración: sin credenciales publicadas; solo con DEMO_ACCESS=1 y sobre el negocio sintético.
+  api.get('/public/demo', (c) => c.json(demoStatus()));
+  api.post('/public/demo/session', async (c) => {
+    if (!config.demoAccess) throw new AppError(404, 'not_found', 'Ruta no encontrada.');
+    await rateLimit(`demo-session:${clientIp(c)}`, 30, 15 * 60_000);
+    const r = await startDemoSession(await jsonBody(c));
+    setCookie(c, STAFF_COOKIE, r.token, cookieOpts(DEMO_SESSION_HOURS * 3600));
+    return c.json({ ok: true, slug: r.slug, landing: r.landing });
+  });
+
   api.post('/staff/logout', async (c) => {
     await logout(getCookie(c, STAFF_COOKIE));
     deleteCookie(c, STAFF_COOKIE, { path: '/' });
@@ -359,6 +372,7 @@ export function buildApp() {
     return c.json(await redeemReward(s, uuidSchema.parse(c.req.param('rewardId'))));
   });
   staff.post('/password', async (c) => {
+    if (c.get('staff').demo) throw demoBlocked();
     const s = c.get('staff');
     await rateLimit(`pwd:${s.userId}`, 5, 15 * 60_000);
     return c.json(await changePassword(s, await jsonBody(c)));
@@ -374,6 +388,12 @@ export function buildApp() {
   // ---------- Dueño ----------
   const owner = new Hono<Env>();
   owner.use('*', requireStaff('OWNER'));
+  // Las sesiones de demostración solo leen y operan caja; no cambian el programa, el personal ni los datos de clientes.
+  owner.use('*', async (c, next) => {
+    const path = c.req.path;
+    if (c.get('staff').demo && ((c.req.method !== 'GET' && !path.endsWith('/void')) || path.endsWith('/export'))) throw demoBlocked();
+    await next();
+  });
   owner.use('*', async (c, next) => {
     if (c.req.method !== 'GET') await rateLimit(`owner-write:${c.get('staff').userId}`, 120, 60_000);
     await next();
@@ -468,5 +488,5 @@ export function buildApp() {
 }
 
 function publicSession(s: StaffSession) {
-  return { userId: s.userId, email: s.email, displayName: s.displayName, role: s.role, mustChangePassword: s.mustChangePassword, business: { id: s.businessId, slug: s.businessSlug, name: s.businessName } };
+  return { userId: s.userId, email: s.email, displayName: s.displayName, role: s.role, mustChangePassword: s.mustChangePassword, demo: !!s.demo, business: { id: s.businessId, slug: s.businessSlug, name: s.businessName } };
 }

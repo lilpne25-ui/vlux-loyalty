@@ -29,6 +29,9 @@ export const config = {
   platformAdminToken: process.env.PLATFORM_ADMIN_TOKEN || '',
   privacyNoticeVersion: process.env.PRIVACY_NOTICE_VERSION || 'borrador-2026-10',
   staffSessionHours: 12,
+  /** V0.4.2: acceso de demostración (solo proyecto público de demostración). */
+  get demoAccess() { return process.env.DEMO_ACCESS === '1'; },
+  get demoBusinessSlug() { return /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(process.env.DEMO_BUSINESS_SLUG || '') ? (process.env.DEMO_BUSINESS_SLUG as string) : 'vlux-demo'; },
   // V0.3 · Control Center. En producción (NODE_ENV=production, incluido Vercel) solo se activa con
   // CONTROL_CENTER_ENABLED=1 (proyecto interno). En desarrollo y pruebas está activo salvo CONTROL_CENTER_ENABLED=0.
   get controlCenterEnabled() {

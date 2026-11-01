@@ -17,9 +17,10 @@ import { FINISHES, type CardFinish } from '../lib/finish';
 type Brand = { name: string; city: string; logo: string | null; primary: string; accent: string; reward: string; stamps: number; filled: number; finish?: CardFinish };
 
 const PRESETS: { id: string; label: string; icon: React.ReactNode; brand: Brand }[] = [
-  { id: 'cafe', label: 'Café Demo Toluca', icon: <Coffee size={14} />, brand: { name: 'Café Demo Toluca', city: 'Toluca', logo: null, primary: '#2B1B14', accent: '#C9A15B', reward: 'Una bebida de cortesía', stamps: 8, filled: 5 } },
-  { id: 'barberia', label: 'Barbería Demo Metepec', icon: <Scissors size={14} />, brand: { name: 'Barbería Demo Metepec', city: 'Metepec', logo: null, primary: '#14181F', accent: '#B9C0C9', reward: 'Un corte de cortesía', stamps: 6, filled: 4 } },
-  { id: 'nuevo', label: 'Nuevo cliente', icon: <Store size={14} />, brand: { name: '', city: '', logo: null, primary: '#0E1013', accent: '#B9C0C9', reward: 'Un producto de cortesía', stamps: 8, filled: 3 } },
+  { id: 'vlux', label: 'VLUX Demo', icon: <Sparkles size={14} />, brand: { name: 'VLUX Demo', city: '', logo: null, primary: '#14171C', accent: '#67C7D3', reward: 'Un beneficio de cortesía', stamps: 6, filled: 4, finish: 'silver' } },
+  { id: 'cafe', label: 'Ejemplo: cafetería', icon: <Coffee size={14} />, brand: { name: 'Cafetería de ejemplo', city: '', logo: null, primary: '#2B1B14', accent: '#C9A15B', reward: 'Una bebida de cortesía', stamps: 8, filled: 5 } },
+  { id: 'barberia', label: 'Ejemplo: barbería', icon: <Scissors size={14} />, brand: { name: 'Barbería de ejemplo', city: '', logo: null, primary: '#14181F', accent: '#B9C0C9', reward: 'Un corte de cortesía', stamps: 6, filled: 4, finish: 'black' } },
+  { id: 'nuevo', label: 'Mi negocio', icon: <Store size={14} />, brand: { name: '', city: '', logo: null, primary: '#0E1013', accent: '#B9C0C9', reward: 'Un producto de cortesía', stamps: 8, filled: 3 } },
 ];
 
 const SAMPLE_URL = 'https://tu-negocio.vlux.mx/n/tu-tarjeta';
@@ -70,8 +71,9 @@ function Swatch({ hex, active, onPick }: { hex: string; active?: boolean; onPick
   return <button type="button" onClick={onPick} aria-label={`Usar ${hex}`} title={hex} className={cx('h-7 w-7 rounded-full border transition hover:scale-110', active ? 'border-white ring-2 ring-[#67C7D3]' : 'border-white/20')} style={{ background: hex }} />;
 }
 
-export function Studio() {
-  const [preset, setPreset] = useState('cafe');
+/** publicMode: versión comercial abierta (datos temporales en el navegador: nada se sube ni se crea). */
+export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
+  const [preset, setPreset] = useState('vlux');
   const [b, setB] = useState<Brand>(PRESETS[0].brand);
   const [swatches, setSwatches] = useState<string[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
@@ -102,8 +104,8 @@ export function Studio() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Estudio de marca"
-        sub="Sube el logo de un prospecto y mira al instante cómo quedaría su tarjeta. Todo se calcula en este navegador; nada se guarda."
-        actions={<><CButton onClick={useInWizard} data-testid="studio-use">Crear negocio con esta marca</CButton><CButton variant="primary" onClick={() => setPresent(true)} data-testid="studio-present"><PresentationIcon size={15} /> Presentar</CButton></>}
+        sub={publicMode ? 'Sube tu logo y mira al instante cómo quedaría tu tarjeta. Todo ocurre en tu navegador: no se sube ni se guarda nada, y no se crea ningún negocio.' : 'Sube el logo de un prospecto y mira al instante cómo quedaría su tarjeta. Todo se calcula en este navegador; nada se guarda.'}
+        actions={<>{publicMode ? <CButton onClick={() => navigate('/#solicitar')} data-testid="studio-request">Quiero esto con mi marca</CButton> : <CButton onClick={useInWizard} data-testid="studio-use">Crear negocio con esta marca</CButton>}<CButton variant="primary" onClick={() => setPresent(true)} data-testid="studio-present"><PresentationIcon size={15} /> Presentar</CButton></>}
       />
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Casos de demostración">
@@ -157,6 +159,11 @@ export function Studio() {
           <div className="cc-panel studio-stage p-6 sm:p-8 flex items-center justify-center" style={brandVars(b.primary, b.accent, b.finish)} data-testid="studio-card">
             <div className="w-full max-w-[420px]">
               <LoyaltyCardFace businessName={shown(b)} customerName="Mariana López" cardId="VX-4F7K-92" total={b.stamps} filled={b.filled} rewardReady={b.filled >= b.stamps} logoUrl={b.logo} footer={<span className="opacity-70">Ejemplo</span>} />
+              <div className="mt-4 flex items-center justify-center gap-3">
+                {b.filled >= b.stamps
+                  ? <CButton variant="primary" onClick={() => set('filled', 0)} data-testid="studio-redeem"><Check size={15} /> Canjear: {b.reward.toLowerCase()}</CButton>
+                  : <CButton variant="primary" onClick={() => set('filled', Math.min(b.stamps, b.filled + 1))} data-testid="studio-stamp"><Sparkles size={15} /> Registrar compra (+1 sello)</CButton>}
+              </div>
             </div>
           </div>
           <div className="flex flex-wrap justify-center gap-8">

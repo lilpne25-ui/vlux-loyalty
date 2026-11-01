@@ -2,6 +2,8 @@
 // para que quepa en el límite del servidor (~64 KB). No se sube a ningún servicio externo.
 const MAX_SIDE = 256;
 const MAX_CHARS = 90_000;
+const MAX_PIXELS = 40_000_000; // protege la memoria del navegador (una foto de 8000×5000 ya es el límite)
+const DECODE_TIMEOUT_MS = 10_000;
 
 export async function prepareLogo(file: File): Promise<string> {
   if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw new Error('Usa una imagen PNG, JPG o WebP.');
@@ -12,8 +14,10 @@ export async function prepareLogo(file: File): Promise<string> {
       const i = new Image();
       i.onload = () => ok(i);
       i.onerror = () => bad(new Error('No se pudo leer la imagen.'));
+      setTimeout(() => bad(new Error('La imagen tardó demasiado en leerse.')), DECODE_TIMEOUT_MS);
       i.src = url;
     });
+    if (img.naturalWidth * img.naturalHeight > MAX_PIXELS || !img.naturalWidth || !img.naturalHeight) throw new Error('La imagen es demasiado grande en píxeles. Usa una de menos de 40 megapíxeles.');
     const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
