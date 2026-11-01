@@ -7,7 +7,7 @@ import { config } from '../config';
 import { getPool, withTx, type Tx } from '../db';
 import { AppError, unauthorized } from '../errors';
 import { CODE_ALPHABET, DUMMY_PASSWORD_HASH, hashPassword, newToken, sha256, verifyPassword } from '../security';
-import { decryptSecret, encryptSecret, newTotpSecret, otpauthUri, verifyTotp } from '../totp';
+import { decryptSecret, encryptSecret, newTotpSecret, otpauthUri, recoveryCodeHash, verifyTotp } from '../totp';
 import { emailSchema, passwordSchema } from '../validation';
 
 const MAX_FAILED = 5;
@@ -43,8 +43,8 @@ export async function needsBootstrap() {
 export async function bootstrapFirstAdmin(raw: unknown) {
   const input = bootstrapSchema.parse(raw);
   const expected = config.platformAdminToken;
-  const got = input.setupToken;
-  if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) {
+  // Se comparan hashes (mismo largo siempre): sin errores por caracteres multibyte ni fugas de longitud.
+  if (expected.length < 32 || !timingSafeEqual(sha256(input.setupToken), sha256(expected))) {
     throw new AppError(401, 'invalid_setup_token', 'El código de instalación no es correcto.');
   }
   const hash = await hashPassword(input.password);
@@ -77,7 +77,7 @@ export async function adminLogin(raw: unknown, userAgent?: string) {
   const a = (await pool.query('SELECT id, password_hash, failed_logins, locked_until, disabled_at, totp_enabled_at FROM platform_admins WHERE email = $1', [input.email])).rows[0];
   const ok = await verifyPassword(input.password, a?.password_hash ?? DUMMY_PASSWORD_HASH);
   if (!a || a.disabled_at) { await platformAudit(pool, null, 'admin.login_failed', { details: { reason: 'unknown_or_disabled' } }); throw invalid(); }
-  if (a.locked_until && new Date(a.locked_until) > new Date()) throw new AppError(429, 'rate_limited', 'Demasiados intentos. Espera un momento y vuelve a intentar.');
+  // Contraseña incorrecta = siempre 401 (bloqueada o no): no revela qué correos existen.
   if (!ok) {
     await pool.query(
       `UPDATE platform_admins SET failed_logins = failed_logins + 1,
@@ -87,6 +87,7 @@ export async function adminLogin(raw: unknown, userAgent?: string) {
     await platformAudit(pool, a.id, 'admin.login_failed', { details: { reason: 'password' } });
     throw invalid();
   }
+  if (a.locked_until && new Date(a.locked_until) > new Date()) throw new AppError(429, 'rate_limited', 'Demasiados intentos. Espera un momento y vuelve a intentar.');
   const token = await withTx(async (tx) => {
     await tx.query('UPDATE platform_admins SET failed_logins = 0, locked_until = NULL WHERE id = $1', [a.id]);
     return createSession(tx, a.id, false, userAgent);
@@ -115,7 +116,8 @@ export async function verifySecondFactor(s: AdminSession, raw: unknown, userAgen
   if (s.mfaVerified) throw new AppError(409, 'already_verified', 'La sesión ya está verificada.');
   if (!s.totpEnabled) throw new AppError(409, 'enroll_required', 'Primero configura tu app de autenticación.');
   return withTx(async (tx) => {
-    const a = (await tx.query('SELECT totp_secret_enc, totp_last_step, failed_logins FROM platform_admins WHERE id = $1 FOR UPDATE', [s.adminId])).rows[0];
+    const a = (await tx.query('SELECT totp_secret_enc, totp_last_step, mfa_failures, locked_until FROM platform_admins WHERE id = $1 FOR UPDATE', [s.adminId])).rows[0];
+    if (a.locked_until && new Date(a.locked_until) > new Date()) return { ok: false as const, locked: true };
     const clean = code.replace(/\s/g, '');
     let used: 'totp' | 'recovery' | null = null;
     if (/^\d{6}$/.test(clean)) {
@@ -126,26 +128,29 @@ export async function verifySecondFactor(s: AdminSession, raw: unknown, userAgen
       }
     } else {
       const norm = clean.toUpperCase().replace(/-/g, '');
-      const r = await tx.query('UPDATE platform_admin_recovery_codes SET used_at = now() WHERE admin_id = $1 AND code_hash = $2 AND used_at IS NULL RETURNING id', [s.adminId, sha256(`recovery:${norm}`)]);
+      const r = await tx.query('UPDATE platform_admin_recovery_codes SET used_at = now() WHERE admin_id = $1 AND code_hash = $2 AND used_at IS NULL RETURNING id', [s.adminId, recoveryCodeHash(norm)]);
       if (r.rowCount) used = 'recovery';
     }
     if (!used) {
-      // Cuenta los fallos del segundo factor en el mismo contador del bloqueo.
+      // Contador propio del 2FA: un login correcto no lo reinicia. Al llegar al máximo se bloquea la cuenta
+      // y se revocan TODAS sus sesiones previas (no solo la actual).
+      const n = Number(a.mfa_failures) + 1;
       await tx.query(
-        `UPDATE platform_admins SET failed_logins = failed_logins + 1,
-           locked_until = CASE WHEN failed_logins + 1 >= $2 THEN now() + make_interval(mins => $3) ELSE locked_until END WHERE id = $1`,
-        [s.adminId, MAX_FAILED, LOCK_MINUTES],
+        `UPDATE platform_admins SET mfa_failures = $2::int,
+           locked_until = CASE WHEN $2::int >= $3::int THEN now() + make_interval(mins => $4) ELSE locked_until END WHERE id = $1`,
+        [s.adminId, n, MAX_FAILED, LOCK_MINUTES],
       );
-      if (Number(a.failed_logins) + 1 >= MAX_FAILED) await tx.query('UPDATE platform_admin_sessions SET revoked_at = now() WHERE id = $1', [s.sessionId]);
-      await platformAudit(tx, s.adminId, 'admin.mfa_failed');
+      if (n >= MAX_FAILED) await tx.query('UPDATE platform_admin_sessions SET revoked_at = now() WHERE admin_id = $1 AND NOT mfa_verified AND revoked_at IS NULL', [s.adminId]);
+      await platformAudit(tx, s.adminId, 'admin.mfa_failed', { details: { failures: n } });
       return { ok: false as const };
     }
-    await tx.query('UPDATE platform_admins SET failed_logins = 0 WHERE id = $1', [s.adminId]);
+    await tx.query('UPDATE platform_admins SET failed_logins = 0, mfa_failures = 0 WHERE id = $1', [s.adminId]);
     await tx.query('UPDATE platform_admin_sessions SET revoked_at = now() WHERE id = $1', [s.sessionId]);
     const token = await createSession(tx, s.adminId, true, userAgent);
     await platformAudit(tx, s.adminId, 'admin.login', { details: { factor: used } });
     return { ok: true as const, token };
   }).then((r) => {
+    if (!r.ok && 'locked' in r) throw new AppError(429, 'rate_limited', 'Demasiados intentos. Espera un momento y vuelve a intentar.');
     if (!r.ok) throw new AppError(401, 'invalid_code', 'El código no es correcto o ya se usó.');
     return r.token;
   });
@@ -169,9 +174,10 @@ export async function enrollConfirm(s: AdminSession, raw: unknown, userAgent?: s
     if (!a?.totp_secret_enc) throw new AppError(409, 'enroll_not_started', 'Primero genera el código QR.');
     const step = verifyTotp(decryptSecret(a.totp_secret_enc), code.replace(/\s/g, ''));
     if (step === null) return null;
-    await tx.query('UPDATE platform_admins SET totp_enabled_at = now(), totp_last_step = $2 WHERE id = $1', [s.adminId, step]);
+    const en = await tx.query('UPDATE platform_admins SET totp_enabled_at = now(), totp_last_step = $2 WHERE id = $1 AND totp_enabled_at IS NULL', [s.adminId, step]);
+    if (!en.rowCount) throw new AppError(409, 'already_enrolled', 'Tu segundo factor ya está configurado.');
     const codes = Array.from({ length: RECOVERY_CODES }, recoveryCode);
-    for (const c of codes) await tx.query('INSERT INTO platform_admin_recovery_codes (admin_id, code_hash) VALUES ($1, $2)', [s.adminId, sha256(`recovery:${c}`)]);
+    for (const c of codes) await tx.query('INSERT INTO platform_admin_recovery_codes (admin_id, code_hash) VALUES ($1, $2)', [s.adminId, recoveryCodeHash(c)]);
     await tx.query('UPDATE platform_admin_sessions SET revoked_at = now() WHERE id = $1', [s.sessionId]);
     const token = await createSession(tx, s.adminId, true, userAgent);
     await platformAudit(tx, s.adminId, 'admin.mfa_enrolled');

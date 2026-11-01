@@ -5,7 +5,8 @@
 //
 // Uso local (BD desechable): E2E_RESET_ADMINS=1 BASE=http://localhost:8788 PLATFORM_ADMIN_TOKEN=... node tests/e2e/v03-control-center.cjs
 // E2E_RESET_ADMINS=1 vacía SOLO las tablas de administradores de plataforma en una BD local (127.0.0.1/localhost).
-const { chromium } = require('playwright');
+const playwright = require('playwright');
+const engine = playwright[process.env.BROWSER || 'chromium'];
 const crypto = require('node:crypto');
 const path = require('node:path');
 
@@ -13,7 +14,7 @@ const BASE = process.env.BASE || 'http://localhost:8788';
 const TOKEN = process.env.PLATFORM_ADMIN_TOKEN;
 const PASSWORD = 'contraseña-e2e-2026';
 const ADMIN_PASSWORD = 'clave-admin-e2e-sintetica';
-const OUT = path.join(__dirname, '..', '..', 'docs', 'evidencia', 'capturas');
+const OUT = process.env.OUT || path.join(__dirname, '..', '..', 'docs', 'evidencia', 'capturas');
 const results = [];
 const ok = (name, cond, extra = '') => { results.push([cond, name]); console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${extra ? ' · ' + extra : ''}`); };
 const errors = [];
@@ -21,7 +22,8 @@ const watch = (page, who, allowed = /40[1349]|410|429/) => {
   page.on('pageerror', (e) => errors.push(`${who}: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error' && !allowed.test(m.text())) errors.push(`${who}: ${m.text()}`); });
 };
-const shot = async (page, name) => { await page.waitForTimeout(450); return page.screenshot({ path: path.join(OUT, `v03-${name}.png`), fullPage: true }); };
+// Las capturas tapan el QR/clave TOTP y los enlaces con token (aunque sean de cuentas sintéticas desechables).
+const shot = async (page, name) => { await page.waitForTimeout(450); return page.screenshot({ path: path.join(OUT, `v03-${name}.png`), fullPage: true, mask: [page.locator('[data-testid=totp-secret]'), page.locator('svg[aria-label^="Código QR para la app"]'), page.locator('[data-testid=owner-invite-link]'), page.locator('[data-testid=employee-invite-link]'), page.locator('svg[aria-label*="invitación"]')] }); };
 
 // TOTP RFC 6238 (SHA1, 30 s, 6 dígitos): el "teléfono" del administrador dentro de la prueba.
 function b32decode(s) {
@@ -53,9 +55,9 @@ async function resetAdminsIfAsked() {
 (async () => {
   await resetAdminsIfAsked();
   const run = crypto.randomBytes(3).toString('hex');
-  const browser = await chromium.launch();
+  const browser = await engine.launch();
   const desktop = { viewport: { width: 1360, height: 900 } };
-  const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+  const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, ...(process.env.BROWSER === 'firefox' ? {} : { isMobile: true }) };
   const vlux = await (await browser.newContext(desktop)).newPage(); watch(vlux, 'VLUX');
   const owner = await (await browser.newContext(desktop)).newPage(); watch(owner, 'dueño 1');
   const emp = await (await browser.newContext(mobile)).newPage(); watch(emp, 'empleado');

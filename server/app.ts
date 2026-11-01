@@ -145,7 +145,10 @@ export function buildApp() {
   const tooLarge = () => { throw new AppError(400, 'body_too_large', 'La solicitud es demasiado grande.'); };
   const smallBody = bodyLimit({ maxSize: 16 * 1024, onError: tooLarge });
   const adminBody = bodyLimit({ maxSize: 128 * 1024, onError: tooLarge });
-  api.use('*', (c, next) => (c.req.path.startsWith('/api/admin/') ? adminBody(c, next) : smallBody(c, next)));
+  // Solo el alta y la edición de negocios llevan logotipo; el resto del Control Center (login, 2FA...) queda en 16 KB.
+  const bigBody = (c: { req: { method: string; path: string } }) =>
+    (c.req.method === 'POST' && c.req.path === '/api/admin/businesses') || (c.req.method === 'PATCH' && /^\/api\/admin\/businesses\/[0-9a-f-]{36}$/.test(c.req.path));
+  api.use('*', (c, next) => (bigBody(c) ? adminBody(c, next) : smallBody(c, next)));
   api.use('*', csrfGuard);
   api.use('*', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next(); });
 

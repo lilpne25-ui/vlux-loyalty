@@ -34,6 +34,14 @@ export async function createInvitation(tx: Tx, p: { businessId: string; email: s
     [p.businessId, p.email],
   )).rows[0];
   if (member?.active) throw new AppError(409, 'already_member', 'Esa persona ya tiene acceso a este negocio.');
+  const open = (await tx.query(
+    `SELECT role, invited_by_type FROM staff_invitations WHERE business_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()`,
+    [p.businessId, p.email],
+  )).rows[0];
+  // El dueño no puede reemplazar una invitación de otro rol ni una emitida por VLUX (p. ej. un co-dueño).
+  if (open && p.by.type === 'staff' && (open.role !== p.role || open.invited_by_type === 'platform')) {
+    throw new AppError(409, 'invitation_pending', 'Ya hay una invitación pendiente para ese correo emitida por VLUX o con otro rol.');
+  }
   await tx.query('UPDATE staff_invitations SET revoked_at = now() WHERE business_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL', [p.businessId, p.email]);
   const token = newToken();
   const id = (await tx.query(
@@ -120,16 +128,19 @@ export async function acceptInvitation(raw: unknown) {
   const input = acceptSchema.parse(raw);
   const inv = await findByToken(input.token);
   checkUsable(inv);
-  if (inv.failed_attempts >= MAX_ATTEMPTS) throw invalidInvite();
-
   let newHash: string | null = null;
   if (inv.user_id) {
+    // Se reserva el intento ANTES de verificar (atómico): peticiones en paralelo no pasan del máximo.
+    const slot = await getPool().query(
+      `UPDATE staff_invitations SET failed_attempts = failed_attempts + 1
+        WHERE id = $1 AND failed_attempts < $2 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING failed_attempts`, [inv.id, MAX_ATTEMPTS],
+    );
+    if (!slot.rowCount) throw invalidInvite();
     const u = (await getPool().query('SELECT password_hash, disabled_at FROM staff_users WHERE id = $1', [inv.user_id])).rows[0];
     const ok = await verifyPassword(input.password, u?.password_hash ?? DUMMY_PASSWORD_HASH);
     if (!ok || u.disabled_at) {
       const r = (await getPool().query(
-        `UPDATE staff_invitations SET failed_attempts = failed_attempts + 1,
-           revoked_at = CASE WHEN failed_attempts + 1 >= $2 THEN now() ELSE revoked_at END
+        `UPDATE staff_invitations SET revoked_at = CASE WHEN failed_attempts >= $2 THEN now() ELSE revoked_at END
          WHERE id = $1 RETURNING failed_attempts`, [inv.id, MAX_ATTEMPTS],
       )).rows[0];
       await withTenant(inv.business_id, (tx) => audit(tx, inv.business_id, { type: 'system', id: null }, 'invitation.failed_attempt', 'staff_invitation', inv.id, { attempts: r.failed_attempts }));
@@ -155,7 +166,9 @@ export async function acceptInvitation(raw: unknown) {
       userId = (await tx.query('INSERT INTO staff_users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id',
         [inv.email, newHash, input.displayName || inv.display_name])).rows[0].id as string;
     }
-    const existing = (await tx.query('SELECT id FROM staff_memberships WHERE business_id = $1 AND user_id = $2', [inv.business_id, userId])).rows[0];
+    const existing = (await tx.query('SELECT id, active FROM staff_memberships WHERE business_id = $1 AND user_id = $2 FOR UPDATE', [inv.business_id, userId])).rows[0];
+    // Si ya es miembro activo, la invitación no cambia su rol (evita degradar a un dueño).
+    if (existing?.active) throw new AppError(409, 'already_member', 'Ya tienes acceso a este negocio. Entra con tu correo y contraseña.');
     let membershipId: string;
     if (existing) {
       await tx.query('UPDATE staff_memberships SET active = true, role = $2 WHERE id = $1', [existing.id, inv.role]);

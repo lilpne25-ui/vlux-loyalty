@@ -55,13 +55,22 @@ export function otpauthUri(secretB32: string, email: string) {
 
 // ---------- Cifrado de secretos ----------
 const DEV_KEY_MATERIAL = 'solo-desarrollo-local-no-usar-en-produccion-vlux';
-function key(): Buffer {
+function keyMaterial(): string {
   let material = config.adminSecretsKeyMaterial;
   if (material.length < 32) {
-    if (config.isProduction) throw new Error('Falta ADMIN_SECRETS_KEY (32+ caracteres) o PLATFORM_ADMIN_TOKEN para cifrar el segundo factor.');
+    if (config.isProduction) throw new Error('Falta ADMIN_SECRETS_KEY (32+ caracteres) para cifrar el segundo factor.');
     material = DEV_KEY_MATERIAL;
   }
-  return Buffer.from(hkdfSync('sha256', material, 'vlux-control-center', 'totp-secret-v1', 32));
+  return material;
+}
+function key(): Buffer {
+  return Buffer.from(hkdfSync('sha256', keyMaterial(), 'vlux-control-center', 'totp-secret-v1', 32));
+}
+
+/** Hash de un código de recuperación: HMAC con llave del servidor (un volcado de BD solo no basta para probarlos offline). */
+export function recoveryCodeHash(normalized: string): Buffer {
+  const k = Buffer.from(hkdfSync('sha256', keyMaterial(), 'vlux-control-center', 'recovery-code-v1', 32));
+  return createHmac('sha256', k).update(normalized).digest();
 }
 
 export function encryptSecret(plain: string): string {

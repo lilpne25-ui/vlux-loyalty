@@ -359,3 +359,47 @@ test('métricas globales: la función de estadísticas solo la puede ejecutar la
   const r = (await db.query("SELECT has_function_privilege('public', 'platform_business_stats()', 'EXECUTE') AS pub")).rows[0];
   assert.equal(r.pub, false);
 });
+
+test('2FA: los fallos no se reinician al volver a iniciar sesión; al 5.º se bloquea y se revocan las sesiones previas', async () => {
+  await resetRateLimits();
+  const email = `mfa-${randomUUID().slice(0, 6)}@vlux.test`;
+  const inv = await A.post('/api/admin/admins/invite', { email, displayName: 'MFA Prueba' });
+  await new Device('n').post('/api/admin/admins/accept', { token: inv.json.link.split('#')[1], password: ADMIN_PASSWORD });
+  // Alta de su 2FA
+  const first = await adminLogin(email);
+  const sec = (await first.d.post('/api/admin/auth/enroll/start')).json.secret as string;
+  const st = currentStep();
+  assert.equal((await first.d.post('/api/admin/auth/enroll/confirm', { code: totpAt(sec, st) })).status, 200);
+  // Atacante con la contraseña: dos sesiones previas y fallos repartidos entre logins.
+  const p1 = await adminLogin(email);
+  const p2 = await adminLogin(email);
+  for (let i = 0; i < 2; i++) assert.equal((await p1.d.post('/api/admin/auth/totp', { code: '000000' })).status, 401);
+  const p3 = await adminLogin(email); // un login correcto NO reinicia el contador del 2FA
+  for (let i = 0; i < 3; i++) assert.equal((await p3.d.post('/api/admin/auth/totp', { code: '111111' })).status, 401);
+  assert.equal((await p2.d.post('/api/admin/auth/totp', { code: totpAt(sec, st + 1) })).status, 401, 'sesión previa revocada tras el bloqueo');
+  await resetRateLimits();
+  const after = await new Device('x').post('/api/admin/auth/login', { email, password: ADMIN_PASSWORD });
+  assert.equal(after.status, 429, 'cuenta bloqueada');
+  assert.equal((await new Device('x').post('/api/admin/auth/login', { email, password: 'otra-incorrecta' })).status, 401, 'contraseña incorrecta = 401 aunque esté bloqueada');
+});
+
+test('el dueño no puede reemplazar la invitación de co-dueño emitida por VLUX; aceptar no degrada a un miembro activo', async () => {
+  await resetRateLimits();
+  const b = await createViaWizard();
+  const owner = new Device('dueño');
+  await owner.post('/api/invitations/accept', { token: b.token, password: PASSWORD });
+  const coEmail = `co-${randomUUID().slice(0, 6)}@ejemplo.test`;
+  const co = await A.post(`/api/admin/businesses/${b.businessId}/invitations`, { email: coEmail, displayName: 'Co Dueña', role: 'OWNER' });
+  assert.equal(co.status, 201);
+  assert.equal((await owner.post('/api/owner/invitations', { email: coEmail, displayName: 'Como empleado' })).status, 409);
+  assert.equal((await new Device('i').post('/api/invitations/inspect', { token: co.json.link.split('#')[1] })).status, 200, 'la de VLUX sigue vigente');
+
+  // Miembro activo + invitación vieja: aceptar no cambia su rol.
+  const empEmail = `e-${randomUUID().slice(0, 6)}@ejemplo.test`;
+  const e1 = await owner.post('/api/owner/invitations', { email: empEmail, displayName: 'Emp' });
+  const tok1 = e1.json.link.split('#')[1];
+  await new Device('e').post('/api/invitations/accept', { token: tok1, password: PASSWORD });
+  await db.query("UPDATE staff_invitations SET accepted_at = NULL WHERE business_id = $1 AND email = $2", [b.businessId, empEmail]); // simula una invitación aún abierta
+  const r = await new Device('e2').post('/api/invitations/accept', { token: tok1, password: PASSWORD });
+  assert.equal(r.status, 409);
+});

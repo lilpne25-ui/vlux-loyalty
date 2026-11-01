@@ -19,14 +19,14 @@ export const config = {
   platformAdminToken: process.env.PLATFORM_ADMIN_TOKEN || '',
   privacyNoticeVersion: process.env.PRIVACY_NOTICE_VERSION || 'borrador-2026-10',
   staffSessionHours: 12,
-  // V0.3 · Control Center. En Vercel solo se activa con CONTROL_CENTER_ENABLED=1 (proyecto interno).
-  // Fuera de Vercel (desarrollo y pruebas) está activo salvo CONTROL_CENTER_ENABLED=0.
+  // V0.3 · Control Center. En producción (NODE_ENV=production, incluido Vercel) solo se activa con
+  // CONTROL_CENTER_ENABLED=1 (proyecto interno). En desarrollo y pruebas está activo salvo CONTROL_CENTER_ENABLED=0.
   get controlCenterEnabled() {
     const v = process.env.CONTROL_CENTER_ENABLED;
-    return v === '1' || (process.env.VERCEL !== '1' && v !== '0');
+    return v === '1' || (process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1' && v !== '0');
   },
-  /** Llave para cifrar secretos TOTP. ADMIN_SECRETS_KEY (32+ caracteres) o, si no existe, derivada de PLATFORM_ADMIN_TOKEN. */
-  get adminSecretsKeyMaterial() { return process.env.ADMIN_SECRETS_KEY || process.env.PLATFORM_ADMIN_TOKEN || ''; },
+  /** Llave para cifrar secretos TOTP y códigos de recuperación. En producción es obligatoria y SEPARADA del token de instalación. */
+  get adminSecretsKeyMaterial() { return process.env.ADMIN_SECRETS_KEY || ''; },
   /** API antigua con token de plataforma (V0.2): apagada salvo PLATFORM_LEGACY_API=1. */
   get legacyPlatformApi() { return process.env.PLATFORM_LEGACY_API === '1'; },
   adminSessionHours: 8,

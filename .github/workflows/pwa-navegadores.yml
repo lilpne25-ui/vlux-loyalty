@@ -51,6 +51,8 @@ jobs:
           PLATFORM_ADMIN_TOKEN=solo-ci-token-0123456789abcdef0123456789
           PUBLIC_BASE_URL=http://localhost:8788
           PORT=8788
+          PLATFORM_LEGACY_API=1
+          CONTROL_CENTER_ENABLED=1
           ENV
           npm run db:setup:test
           npm run build:vercel
@@ -64,6 +66,11 @@ jobs:
           BASE=http://localhost:8788 BROWSER=${{ matrix.browser }} OUT=resultados \
           PLATFORM_ADMIN_TOKEN=solo-ci-token-0123456789abcdef0123456789 \
           node tests/e2e/v022-pwa.cjs | tee resultados/e2e-${{ matrix.browser }}.txt
+      - name: E2E Control Center V0.3 (${{ matrix.browser }})
+        run: |
+          set -o pipefail
+          E2E_RESET_ADMINS=1 BASE=http://localhost:8788 BROWSER=${{ matrix.browser }} OUT=resultados \
+          node --env-file=.env.test tests/e2e/v03-control-center.cjs | tee resultados/e2e-v03-${{ matrix.browser }}.txt
       - if: always()
         uses: actions/upload-artifact@v4
         with:

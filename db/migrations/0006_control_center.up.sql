@@ -11,7 +11,8 @@ CREATE TABLE platform_admins (
   totp_secret_enc  text,                       -- secreto TOTP cifrado (AES-256-GCM) con la llave del servidor
   totp_enabled_at  timestamptz,
   totp_last_step   bigint NOT NULL DEFAULT 0,  -- evita reutilizar el mismo código
-  failed_logins    integer NOT NULL DEFAULT 0,
+  failed_logins    integer NOT NULL DEFAULT 0,  -- contraseñas incorrectas
+  mfa_failures     integer NOT NULL DEFAULT 0,  -- códigos 2FA incorrectos (contador propio: el login NO lo reinicia)
   locked_until     timestamptz,
   disabled_at      timestamptz,
   created_by       uuid REFERENCES platform_admins(id),

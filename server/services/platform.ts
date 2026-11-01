@@ -9,6 +9,8 @@ import { audit } from './audit';
 import { getBusinessById } from './businesses';
 import { createInvitation, listInvitations } from './invitations';
 import { platformAudit, type AdminSession } from './platform-auth';
+import { GoogleWalletProvider } from '../wallet/google';
+import { AppleWalletProvider } from '../wallet/apple';
 import { emailSchema, rulesSchema, slugSchema, verticals } from '../validation';
 
 const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Usa colores en formato #RRGGBB.');
@@ -178,9 +180,17 @@ export async function overview() {
       node: process.version,
       database: { ok: true, latencyMs: dbMs, schema: 'V0.3 (0006_control_center)' },
       emailProvider: 'no configurado (las invitaciones se entregan por enlace)',
-      wallet: { google: 'no configurado', apple: 'no disponible (sin certificados)' },
+      wallet: {
+        google: walletLabel(GoogleWalletProvider.fromEnv().status()),
+        apple: new AppleWalletProvider().status().state === 'configured' ? 'configurado' : 'no disponible (sin certificados de Apple)',
+      },
     },
   };
+}
+
+function walletLabel(st: ReturnType<GoogleWalletProvider['status']>) {
+  // "Configurado" solo significa que hay credenciales; funcionar requiere la prueba K con Google.
+  return st.state === 'configured' ? `credenciales cargadas (modo ${st.mode}); sin verificar con Google` : 'no configurado';
 }
 
 export async function businessDetail(id: string) {

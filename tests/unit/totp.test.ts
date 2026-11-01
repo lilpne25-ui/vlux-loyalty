@@ -32,6 +32,8 @@ test('cifrado de secretos: ida y vuelta, IV aleatorio y detección de manipulaci
   assert.notEqual(a, b);
   assert.equal(decryptSecret(a), 'JBSWY3DPEHPK3PXP');
   const parts = a.split('.');
-  parts[2] = parts[2].slice(0, -2) + (parts[2].endsWith('A') ? 'BB' : 'AA');
+  const enc = Buffer.from(parts[2], 'base64url');
+  enc[0] ^= 0x01; // cambia un bit real del texto cifrado (no solo bits de relleno de base64)
+  parts[2] = enc.toString('base64url');
   assert.throws(() => decryptSecret(parts.join('.')));
 });

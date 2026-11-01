@@ -32,7 +32,8 @@ Q="SELECT string_agg(t || '=' || n, ' ' ORDER BY t) FROM (
   UNION ALL SELECT 'customers', count(*) FROM customers UNION ALL SELECT 'cards', count(*) FROM cards
   UNION ALL SELECT 'purchases', count(*) FROM purchases UNION ALL SELECT 'visits', count(*) FROM visits
   UNION ALL SELECT 'rewards', count(*) FROM rewards UNION ALL SELECT 'stamp_events', count(*) FROM stamp_events
-  UNION ALL SELECT 'audit_events', count(*) FROM audit_events UNION ALL SELECT 'migrations', count(*) FROM schema_migrations) x"
+  UNION ALL SELECT 'audit_events', count(*) FROM audit_events UNION ALL SELECT 'migrations', count(*) FROM schema_migrations
+  UNION ALL SELECT 'business_subscriptions', count(*) FROM business_subscriptions UNION ALL SELECT 'platform_audit_events', count(*) FROM platform_audit_events) x"
 SRC="$(psql "$SOURCE_URL" -Atc "$Q")"; DST="$(psql "$RESTORE_URL" -Atc "$Q")"
 echo "   origen:      $SRC"; echo "   restaurada:  $DST"
 [ "$SRC" = "$DST" ] || { echo "FALLA: los conteos no coinciden"; exit 1; }

@@ -63,6 +63,7 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, jsonBody }: Helpers)
     await rateLimit(`admin-totp-ip:${clientIp(c)}`, 10, 15 * 60_000);
     const s = await session(c);
     if (!s) throw new AppError(401, 'unauthorized', 'Tu sesión venció. Vuelve a iniciar sesión.');
+    await rateLimit(`admin-totp:${s.adminId}`, 10, 15 * 60_000); // además del límite por IP
     setAdminCookie(c, await verifySecondFactor(s, await jsonBody(c), ua(c)));
     return c.json({ ok: true });
   });
