@@ -107,6 +107,36 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   ok('L8 el reflejo de la tarjeta sigue al puntero', after !== before && parseFloat(after) > 60, `${before} → ${after}`);
   await shot(vlux, 'L4-estudio-reflejo');
 
+  // ---------- S · identidad oficial, acabados y movimiento reducido ----------
+  const logoOk = await vlux.evaluate(() => [...document.querySelectorAll('img[src^="/brand/"]')].map((i) => i.complete && i.naturalWidth > 0));
+  ok('S1 el logo oficial de VLUX carga en el Control Center', logoOk.length > 0 && logoOk.every(Boolean), String(logoOk.length));
+  const finishInfo = async () => vlux.evaluate(() => {
+    const st = document.querySelector('[data-testid=studio-card] .card-stage'); const cs = getComputedStyle(st);
+    const parse = (h) => { h = h.trim(); const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const L = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    const con = (a, b) => { const [x, y] = [L(a), L(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    const brand = cs.getPropertyValue('--brand').trim(), accent = cs.getPropertyValue('--accent').trim(), cream = cs.getPropertyValue('--cream').trim();
+    return { brand, accent, accentContrast: con(parse(brand), parse(accent)), textContrast: con(parse(brand), parse(cream)), hi: cs.getPropertyValue('--card-hi').trim() };
+  });
+  const sig = await finishInfo();
+  await vlux.click('[data-testid=finish-black]');
+  const blk = await finishInfo();
+  ok('S2 «Negro premium» oscurece la tarjeta y conserva el acento legible', parseInt(blk.brand.slice(1, 3), 16) < 40 && blk.accentContrast >= 3 && blk.textContrast >= 7, JSON.stringify(blk));
+  await shot(vlux, 'S2-acabado-negro');
+  await vlux.click('[data-testid=finish-silver]');
+  const slv = await finishInfo();
+  ok('S3 «Plata metálica» es distinta del negro, con mayor brillo y texto legible', slv.brand !== blk.brand && parseInt(slv.hi) > parseInt(blk.hi) && slv.textContrast >= 4.5 && slv.accentContrast >= 3, JSON.stringify(slv));
+  await shot(vlux, 'S3-acabado-plata');
+  await vlux.click('[data-testid=finish-signature]');
+  const back = await finishInfo();
+  ok('S4 «Color del negocio» devuelve el color original sin tocar el programa de sellos', back.brand === sig.brand && (await vlux.textContent('[data-testid=studio-card]')).includes('/'));
+  await vlux.emulateMedia({ reducedMotion: 'reduce' });
+  const anim = await vlux.evaluate(() => getComputedStyle(document.querySelector('[data-testid=studio-card] .card-metal-shine')).animationName);
+  ok('S5 con «reducir movimiento» la tarjeta no anima el brillo', anim === 'none', anim);
+  await vlux.emulateMedia({ reducedMotion: 'no-preference' });
+  await vlux.click('[data-testid=finish-silver]');
+
   // ---------- M · presentación comercial ----------
   await vlux.click('[data-testid=studio-present]');
   await vlux.waitForSelector('[data-testid=deck]');
@@ -124,6 +154,7 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   // ---------- N · crear el negocio con esa marca ----------
   await vlux.click('[data-testid=studio-use]');
   await vlux.waitForSelector('h1:has-text("Nuevo negocio")');
+  ok('N0 el acabado elegido en el Estudio llega al asistente', (await vlux.inputValue('#wz-finish')) === 'silver');
   ok('N1 el asistente recibe nombre, colores y logo del Estudio', (await vlux.inputValue('#wz-name')) === 'Barbería Don Beto' && (await vlux.inputValue('#wz-primary')).toUpperCase() === primary);
   await vlux.selectOption('#wz-vertical', 'barberia');
   await vlux.fill('#wz-city', 'Toluca');
@@ -203,6 +234,7 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   await anon.goto(BASE + '/');
   const probe = async (p, method = 'GET') => anon.evaluate(async ([u, m]) => { const r = await fetch(u.replace(/^https?:\/\/[^/]+/, ''), { method: m, headers: m === 'POST' ? { 'content-type': 'application/json' } : {}, body: m === 'POST' ? '{}' : undefined }); return r.status; }, [BASE + p, method]);
   ok('Q1 portal del cliente y su API pública responden sin sesión', (await probe(`/n/${slug}`)) === 200 && (await probe(`/api/public/businesses/${slug}`)) === 200 && (await probe(`/api/public/businesses/${slug}/logo`)) === 200);
+  ok('Q1b el acabado guardado del negocio se publica con su marca', (await anon.evaluate(async (u) => (await (await fetch(u)).json()).business.cardFinish, `/api/public/businesses/${slug}`)) === 'silver');
   ok('Q2 las pantallas de caja y panel cargan, pero sus datos exigen sesión (401)', (await probe('/caja')) === 200 && (await probe('/api/staff/business')) === 401 && (await probe('/api/owner/dashboard')) === 401);
   ok('Q3 el Control Center y su API siguen exigiendo credenciales de VLUX', (await probe('/api/admin/overview')) === 401 && (await probe('/api/admin/businesses')) === 401);
   ok('Q4 el manifiesto del panel es público pero solo trae marca (sin datos)', (await probe(`/api/pwa/${slug}/staff/panel/manifest.webmanifest`)) === 200);

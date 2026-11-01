@@ -168,7 +168,7 @@ test('asistente: logotipo y datos inválidos se rechazan', async () => {
   assert.equal((await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/svg+xml;base64,PHN2Zz4=' }))).status, 422);
   assert.equal((await A.post('/api/admin/businesses', wizard({ ownerEmail: 'no-es-correo' }))).status, 422);
   assert.equal((await A.post('/api/admin/businesses', wizard({ plan: 'enterprise' }))).status, 422);
-  const ok = await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/png;base64,iVBORw0KGgo=' }));
+  const ok = await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' }));
   assert.equal(ok.status, 201);
 });
 
@@ -424,4 +424,15 @@ test('acabado de tarjeta: por omisión signature, se guarda y rechaza valores in
   });
   assert.equal(ed.status, 200, JSON.stringify(ed.json));
   assert.equal((await A.get(`/api/admin/businesses/${r1.json.businessId}`)).json.cardFinish, 'black');
+});
+
+test('logotipo: el servidor valida los bytes reales, no solo el prefijo del navegador', async () => {
+  const falso = 'data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>padding-padding').toString('base64');
+  const r = await A.post('/api/admin/businesses', wizard({ logoDataUrl: falso, name: 'Logo Falso Toluca' }));
+  assert.equal(r.status, 422);
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const ok = await A.post('/api/admin/businesses', wizard({ logoDataUrl: PNG, name: 'Logo Real Metepec' }));
+  assert.equal(ok.status, 201, JSON.stringify(ok.json));
+  const svg = await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', name: 'Logo Svg Toluca' }));
+  assert.equal(svg.status, 422);
 });
