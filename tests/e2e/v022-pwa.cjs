@@ -12,7 +12,7 @@
 //
 // Uso local:  BASE=http://localhost:8788 BROWSER=webkit PLATFORM_ADMIN_TOKEN=... node tests/e2e/v022-pwa.cjs
 // Contra un despliegue sin token de plataforma (negocio demo ya creado):
-//   BASE=https://… SLUG=cafe-demo-toluca OWNER_EMAIL=… EMP_EMAIL=… STAFF_PASSWORD=… node tests/e2e/v022-pwa.cjs
+//   BASE=https://… SLUG=vlux-demo OWNER_EMAIL=… EMP_EMAIL=… STAFF_PASSWORD=… node tests/e2e/v022-pwa.cjs
 // Despliegue protegido por Vercel: VERCEL_BYPASS=<secreto> (nunca en el repositorio).
 const playwright = require('playwright');
 const crypto = require('node:crypto');

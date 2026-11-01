@@ -78,12 +78,12 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   // ---------- L · Estudio de marca ----------
   await vlux.click('nav >> a:has-text("Estudio de marca")');
   await vlux.waitForSelector('h1:has-text("Estudio de marca")');
-  ok('L1 el Estudio abre con un caso de demostración (Café Demo Toluca)', (await vlux.textContent('[data-testid=studio-card]')).includes('Café Demo Toluca'));
+  ok('L1 el Estudio abre con un caso neutro (VLUX Demo)', (await vlux.textContent('[data-testid=studio-card]')).includes('VLUX Demo'));
   await shot(vlux, 'L1-estudio-cafe');
-  await vlux.click('[role=tab]:has-text("Barbería Demo Metepec")');
-  ok('L2 cambiar de caso actualiza la tarjeta', (await vlux.textContent('[data-testid=studio-card]')).includes('Barbería Demo Metepec'));
+  await vlux.click('[role=tab]:has-text("Ejemplo: barbería")');
+  ok('L2 cambiar de caso actualiza la tarjeta', (await vlux.textContent('[data-testid=studio-card]')).includes('Barbería de ejemplo'));
   await shot(vlux, 'L2-estudio-barberia');
-  await vlux.click('[role=tab]:has-text("Nuevo cliente")');
+  await vlux.click('[role=tab]:has-text("Mi negocio")');
   await vlux.fill('#st-name', 'Barbería Don Beto');
   await vlux.setInputFiles('#st-logo', logoFile);
   await vlux.waitForSelector('text=Detectamos sus colores');

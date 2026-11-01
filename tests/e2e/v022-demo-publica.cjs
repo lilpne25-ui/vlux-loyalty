@@ -3,12 +3,12 @@
 // service worker, manifiesto, íconos, registro de tarjeta sintética y vinculación con código.
 // La parte de Empleado B y Dueño C necesita las contraseñas de la demo y se corre aparte
 // (tests/e2e/v022-pwa.cjs en modo despliegue). Uso:
-//   DEMO=https://…vercel.app INTERNO=https://…vercel.app SLUG=cafe-demo-toluca node tests/e2e/v022-demo-publica.cjs
+//   DEMO=https://…vercel.app INTERNO=https://…vercel.app SLUG=vlux-demo node tests/e2e/v022-demo-publica.cjs
 const { chromium } = require('playwright');
 
 const DEMO = (process.env.DEMO || '').replace(/\/$/, '');
 const INTERNO = (process.env.INTERNO || '').replace(/\/$/, '');
-const SLUG = process.env.SLUG || 'cafe-demo-toluca';
+const SLUG = process.env.SLUG || 'vlux-demo';
 const results = [];
 const check = (id, name, ok, detail = '') => { results.push({ id, ok }); console.log(`${ok ? 'PASS' : 'FAIL'} ${id} ${name}${detail ? ' · ' + detail : ''}`); };
 
