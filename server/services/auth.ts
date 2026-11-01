@@ -12,7 +12,24 @@ const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
 const invalid = () => new AppError(401, 'invalid_credentials', 'Correo o contraseña incorrectos.');
 
-export async function login(email: string, password: string, businessSlug?: string): Promise<{ token: string; session: StaffSession; businesses: { slug: string; name: string; role: Role }[] }> {
+export type BusinessChoice = { slug: string; name: string; role: Role };
+export type LoginResult =
+  | { kind: 'session'; token: string; session: StaffSession; businesses: BusinessChoice[] }
+  | { kind: 'choose'; businesses: BusinessChoice[] };
+
+/** Crea la sesión del personal para una membresía concreta (dentro de una transacción). */
+export async function createStaffSession(tx: import('../db').Tx, userId: string, membershipId: string, businessId: string) {
+  const token = newToken();
+  const id = (await tx.query(
+    `INSERT INTO staff_sessions (token_hash, user_id, membership_id, business_id, expires_at)
+     VALUES ($1, $2, $3, $4, now() + make_interval(hours => $5)) RETURNING id`,
+    [sha256(token), userId, membershipId, businessId, config.staffSessionHours],
+  )).rows[0].id as string;
+  return { token, sessionId: id };
+}
+
+/** Si el usuario tiene varios negocios y no eligió uno, devuelve la lista (V0.3: nunca se elige el primero en silencio). */
+export async function login(email: string, password: string, businessSlug?: string): Promise<LoginResult> {
   const pool = getPool();
   const user = (await pool.query('SELECT id, email, display_name, password_hash, failed_logins, locked_until, disabled_at, must_change_password FROM staff_users WHERE email = $1', [email])).rows[0];
   const ok = await verifyPassword(password, user?.password_hash ?? DUMMY_PASSWORD_HASH);
@@ -36,25 +53,48 @@ export async function login(email: string, password: string, businessSlug?: stri
     [user.id],
   )).rows;
   if (!memberships.length) throw new AppError(403, 'no_business', 'Tu usuario no tiene un negocio activo.');
+  const choices: BusinessChoice[] = memberships.map((x) => ({ slug: x.slug, name: x.name, role: x.role }));
+  if (!businessSlug && memberships.length > 1) {
+    await pool.query('UPDATE staff_users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [user.id]);
+    return { kind: 'choose', businesses: choices };
+  }
   const m = businessSlug ? memberships.find((x) => x.slug === businessSlug) : memberships[0];
   if (!m) throw new AppError(403, 'forbidden', 'No perteneces a ese negocio.');
 
-  const token = newToken();
-  const sessionId = await withTx(async (tx) => {
+  const { token, sessionId } = await withTx(async (tx) => {
     await tx.query('UPDATE staff_users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [user.id]);
-    const s = (await tx.query(
-      `INSERT INTO staff_sessions (token_hash, user_id, membership_id, business_id, expires_at)
-       VALUES ($1, $2, $3, $4, now() + make_interval(hours => $5)) RETURNING id`,
-      [sha256(token), user.id, m.id, m.business_id, config.staffSessionHours],
-    )).rows[0].id as string;
-    return s;
+    return createStaffSession(tx, user.id, m.id, m.business_id);
   });
   await withTenant(m.business_id, (tx) => audit(tx, m.business_id, { type: 'staff', id: user.id }, 'staff.login', 'staff_user', user.id, { role: m.role }));
   return {
+    kind: 'session',
     token,
     session: { sessionId, userId: user.id, email: user.email, displayName: user.display_name, businessId: m.business_id, businessSlug: m.slug, businessName: m.name, role: m.role, mustChangePassword: !!user.must_change_password },
-    businesses: memberships.map((x) => ({ slug: x.slug, name: x.name, role: x.role })),
+    businesses: choices,
   };
+}
+
+/** Negocios activos del usuario (para el selector dentro de la sesión). */
+export async function listMyBusinesses(userId: string): Promise<BusinessChoice[]> {
+  return (await getPool().query(
+    `SELECT b.slug, b.name, m.role FROM staff_memberships m JOIN businesses b ON b.id = m.business_id
+      WHERE m.user_id = $1 AND m.active AND b.status = 'active' ORDER BY b.name`, [userId],
+  )).rows.map((r) => ({ slug: r.slug, name: r.name, role: r.role }));
+}
+
+/** Cambia de negocio sin volver a pedir contraseña: nueva sesión para esa membresía y se revoca la actual. */
+export async function switchBusiness(s: StaffSession, slug: string) {
+  const m = (await getPool().query(
+    `SELECT m.id, m.business_id FROM staff_memberships m JOIN businesses b ON b.id = m.business_id
+      WHERE m.user_id = $1 AND b.slug = $2 AND m.active AND b.status = 'active'`, [s.userId, slug],
+  )).rows[0];
+  if (!m) throw new AppError(403, 'forbidden', 'No perteneces a ese negocio.');
+  const r = await withTx(async (tx) => {
+    await tx.query('UPDATE staff_sessions SET revoked_at = now() WHERE id = $1', [s.sessionId]);
+    return createStaffSession(tx, s.userId, m.id, m.business_id);
+  });
+  await withTenant(m.business_id, (tx) => audit(tx, m.business_id, { type: 'staff', id: s.userId }, 'staff.switched_business', 'staff_user', s.userId));
+  return r.token;
 }
 
 /** Resuelve la sesión y revalida en cada solicitud que la membresía siga activa (revocación inmediata). */

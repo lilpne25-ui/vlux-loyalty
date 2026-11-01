@@ -127,9 +127,17 @@ test('CSRF: mutaciones sin JSON u origen ajeno se rechazan', async () => {
   assert.equal(foreign.status, 403);
 });
 
-test('alta de negocio de plataforma exige token', async () => {
+test('API heredada de plataforma: apagada por omisión y, encendida, exige token', async () => {
   const d = new Device('x');
-  assert.equal((await d.req('POST', '/api/platform/businesses', {}, { authorization: 'Bearer nope' })).status, 401);
+  const prev = process.env.PLATFORM_LEGACY_API;
+  try {
+    delete process.env.PLATFORM_LEGACY_API;
+    assert.equal((await d.req('POST', '/api/platform/businesses', {}, { authorization: `Bearer ${process.env.PLATFORM_ADMIN_TOKEN}` })).status, 404);
+    process.env.PLATFORM_LEGACY_API = '1';
+    assert.equal((await d.req('POST', '/api/platform/businesses', {}, { authorization: 'Bearer nope' })).status, 401);
+  } finally {
+    if (prev === undefined) delete process.env.PLATFORM_LEGACY_API; else process.env.PLATFORM_LEGACY_API = prev;
+  }
 });
 
 test('solicitudes demasiado grandes se rechazan', async () => {

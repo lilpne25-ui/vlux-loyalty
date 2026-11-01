@@ -10,7 +10,9 @@ import { config } from './config';
 import { AppError, forbidden, unauthorized } from './errors';
 import { rateLimit } from './ratelimit';
 import { loginSchema, reviewEventSchema, slugSchema, uuidSchema } from './validation';
-import { getStaffSession, login, logout, type Role, type StaffSession } from './services/auth';
+import { getStaffSession, listMyBusinesses, login, logout, switchBusiness, type Role, type StaffSession } from './services/auth';
+import { acceptInvitation, inspectInvitation, inviteSchema, inviteStaff, listInvitations, resendInvitation, revokeInvitation } from './services/invitations';
+import { buildAdminRoutes } from './admin-routes';
 import { createBusiness, getBusinessBySlug } from './services/businesses';
 import { changePassword, ownerIssueEmployeeReset, platformIssueReset, reissueCardLink, resetPasswordWithToken, voidPurchase } from './services/operations';
 import { ensureSafeRole } from './db';
@@ -139,7 +141,11 @@ export function buildApp() {
   });
 
   const api = new Hono<Env>();
-  api.use('*', bodyLimit({ maxSize: 16 * 1024, onError: () => { throw new AppError(400, 'body_too_large', 'La solicitud es demasiado grande.'); } }));
+  // 16 KB en general; el Control Center admite hasta 128 KB porque el alta/edición lleva el logotipo (máx. ~64 KB).
+  const tooLarge = () => { throw new AppError(400, 'body_too_large', 'La solicitud es demasiado grande.'); };
+  const smallBody = bodyLimit({ maxSize: 16 * 1024, onError: tooLarge });
+  const adminBody = bodyLimit({ maxSize: 128 * 1024, onError: tooLarge });
+  api.use('*', (c, next) => (c.req.path.startsWith('/api/admin/') ? adminBody(c, next) : smallBody(c, next)));
   api.use('*', csrfGuard);
   api.use('*', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next(); });
 
@@ -252,8 +258,23 @@ export function buildApp() {
     const input = loginSchema.parse(await jsonBody(c));
     await rateLimit(`login-ip:${clientIp(c)}`, 20, 15 * 60_000);
     const r = await login(input.email, input.password, input.businessSlug);
+    // Varios negocios y ninguno elegido: se devuelve la lista y NO se abre sesión (nada de elegir el primero en silencio).
+    if (r.kind === 'choose') return c.json({ chooseBusiness: true, businesses: r.businesses });
     setCookie(c, STAFF_COOKIE, r.token, cookieOpts(config.staffSessionHours * 3600));
     return c.json({ session: publicSession(r.session), businesses: r.businesses });
+  });
+
+  // ---------- Invitaciones (quien recibe el enlace) ----------
+  api.post('/invitations/inspect', async (c) => {
+    await rateLimit(`invite-inspect:${clientIp(c)}`, 30, 15 * 60_000);
+    const body = (await jsonBody(c)) as { token?: unknown };
+    return c.json(await inspectInvitation(typeof body?.token === 'string' ? body.token : ''));
+  });
+  api.post('/invitations/accept', async (c) => {
+    await rateLimit(`invite-accept:${clientIp(c)}`, 10, 15 * 60_000);
+    const r = await acceptInvitation(await jsonBody(c));
+    setCookie(c, STAFF_COOKIE, r.token, cookieOpts(config.staffSessionHours * 3600));
+    return c.json({ role: r.role, businessSlug: r.businessSlug, linkedExisting: r.linkedExisting });
   });
 
   api.post('/staff/password-reset', async (c) => {
@@ -275,6 +296,16 @@ export function buildApp() {
   const staff = new Hono<Env>();
   staff.use('*', requireStaff('OWNER', 'EMPLOYEE'));
   staff.get('/business', async (c) => c.json(await getBusinessBySlug(c.get('staff').businessSlug)));
+  staff.get('/businesses', async (c) => c.json({ businesses: await listMyBusinesses(c.get('staff').userId), current: c.get('staff').businessSlug }));
+  staff.post('/switch', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`switch:${s.userId}`, 30, 60_000);
+    const body = (await jsonBody(c)) as { slug?: unknown };
+    const token = await switchBusiness(s, slugSchema.parse(body?.slug));
+    setCookie(c, STAFF_COOKIE, token, cookieOpts(config.staffSessionHours * 3600));
+    const next = await getStaffSession(token);
+    return c.json({ session: next ? publicSession(next) : null });
+  });
   staff.post('/cards/lookup', async (c) => {
     const s = c.get('staff');
     await rateLimit(`lookup:${s.sessionId}`, 120, 60_000);
@@ -332,6 +363,25 @@ export function buildApp() {
     const r = await ownerIssueEmployeeReset(s, uuidSchema.parse(c.req.param('membershipId')));
     return c.json({ resetLink: `${publicBaseUrl(c)}/restablecer#${r.token}`, expiresInMinutes: r.expiresInMinutes });
   });
+  // Invitaciones de empleados por enlace (el dueño solo puede invitar EMPLEADOS de su propio negocio).
+  owner.get('/invitations', async (c) => c.json({ invitations: await listInvitations(c.get('staff').businessId, 'EMPLOYEE') }));
+  owner.post('/invitations', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`owner-invite:${s.userId}`, 20, 60 * 60_000);
+    const input = inviteSchema.parse(await jsonBody(c));
+    const r = await inviteStaff({ businessId: s.businessId, email: input.email, displayName: input.displayName, role: 'EMPLOYEE', by: { type: 'staff', id: s.userId } });
+    return c.json({ invitationId: r.invitationId, link: `${publicBaseUrl(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' }, 201);
+  });
+  owner.post('/invitations/:invId/resend', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`owner-invite:${s.userId}`, 20, 60 * 60_000);
+    const r = await resendInvitation(s.businessId, uuidSchema.parse(c.req.param('invId')), { type: 'staff', id: s.userId }, 'EMPLOYEE');
+    return c.json({ invitationId: r.invitationId, link: `${publicBaseUrl(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' });
+  });
+  owner.post('/invitations/:invId/revoke', async (c) => {
+    const s = c.get('staff');
+    return c.json(await revokeInvitation(s.businessId, uuidSchema.parse(c.req.param('invId')), { type: 'staff', id: s.userId }, 'EMPLOYEE'));
+  });
   owner.post('/purchases/:purchaseId/void', async (c) => {
     const s = c.get('staff');
     await rateLimit(`void:${s.userId}`, 30, 60 * 60_000);
@@ -339,7 +389,15 @@ export function buildApp() {
   });
   api.route('/owner', owner);
 
-  // ---------- Plataforma (equipo VLUX) ----------
+  // ---------- Control Center (equipo VLUX) ----------
+  api.route('/admin', buildAdminRoutes({ clientIp, publicBaseUrl, jsonBody }));
+
+  // ---------- API heredada de plataforma (token compartido) ----------
+  // V0.3: apagada por omisión. Solo se enciende con PLATFORM_LEGACY_API=1 (pruebas E2E heredadas).
+  api.use('/platform/*', async (c, next) => {
+    if (!config.legacyPlatformApi) return c.json({ error: { code: 'not_found', message: 'Ruta no encontrada.' } }, 404);
+    await next();
+  });
   api.post('/platform/businesses', async (c) => {
     const expected = config.platformAdminToken;
     const got = (c.req.header('authorization') || '').replace(/^Bearer /, '');

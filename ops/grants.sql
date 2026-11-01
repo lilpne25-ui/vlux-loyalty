@@ -2,10 +2,15 @@
 -- hecho con --no-privileges, o para revisar que el rol tiene exactamente lo necesario.
 GRANT USAGE ON SCHEMA public TO vlux_app;
 GRANT SELECT, INSERT, UPDATE ON businesses, staff_users, staff_memberships, staff_sessions, card_access_tokens,
-  reward_rules, customers, cards, visits, purchases, rewards, password_reset_tokens, card_pair_codes TO vlux_app;
-GRANT SELECT, INSERT ON stamp_events, review_events, audit_events TO vlux_app;
+  reward_rules, customers, cards, visits, purchases, rewards, password_reset_tokens, card_pair_codes,
+  platform_admins, platform_admin_recovery_codes, platform_admin_sessions, platform_admin_invitations,
+  staff_invitations, plans, business_subscriptions TO vlux_app;
+GRANT DELETE ON card_pair_codes TO vlux_app;
+GRANT SELECT, INSERT ON stamp_events, review_events, audit_events, platform_audit_events TO vlux_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON rate_limits TO vlux_app;
 GRANT EXECUTE ON FUNCTION current_business_id() TO vlux_app;
+GRANT EXECUTE ON FUNCTION platform_business_stats() TO vlux_app;
+GRANT EXECUTE ON FUNCTION platform_recent_activity(integer) TO vlux_app;
 DO $$
 DECLARE r text;
 BEGIN
