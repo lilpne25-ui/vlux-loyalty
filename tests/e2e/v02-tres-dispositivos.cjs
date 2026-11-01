@@ -61,7 +61,7 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
   await owner.fill('#emp-email', `caja@${slug}.e2e.test`);
   await owner.getByRole('tab', { name: 'Contraseña temporal' }).click(); // V0.3: por omisión se invita por enlace
   await owner.fill('#emp-pass', PASSWORD);
-  await owner.click('button:has-text("Agregar")');
+  await owner.click('button:text-is("Agregar")');
   await owner.waitForSelector(`text=caja@${slug}.e2e.test`);
   ok('02 alta de empleado desde el panel del dueño', true);
   await shot(owner, 'v02-03-dueno-equipo');
