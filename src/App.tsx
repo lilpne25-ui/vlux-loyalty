@@ -8,8 +8,10 @@
 //   /cuenta       cambio de contraseña del personal
 //   /t#token      abre la tarjeta desde el enlace personal
 //   /restablecer#token  contraseña nueva con enlace de un solo uso
-import React, { useCallback, useEffect, useState } from 'react';
-import { ScanLine, LayoutDashboard, LogOut, KeyRound } from 'lucide-react';
+//   /invitacion#token   aceptar invitación de dueño o empleado (V0.3)
+//   /vlux-admin/*       VLUX Control Center (V0.3, solo equipo VLUX; se carga aparte)
+import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { ScanLine, LayoutDashboard, LogOut, KeyRound, ArrowLeftRight } from 'lucide-react';
 import { api, StaffSessionInfo } from './lib/api';
 import { navigate, useLocation } from './lib/router';
 import { ToastProvider, VluxMark, cx } from './components/ui';
@@ -20,6 +22,9 @@ import { OwnerView } from './views/Owner';
 import { ForBusinessView } from './views/ForBusiness';
 import { LoginView } from './views/Login';
 import { CardLinkView, ChangePasswordPanel, ResetPasswordView } from './views/Account';
+import { InvitationView } from './views/Invitation';
+
+const AdminApp = lazy(() => import('./admin/AdminApp'));
 
 export default function App() {
   return (
@@ -52,6 +57,8 @@ function Shell() {
   const isStaffRoute = path === '/acceso' || path.startsWith('/caja') || path.startsWith('/panel') || path === '/cuenta';
   useEffect(() => { if (isStaffRoute) loadSession(); }, [isStaffRoute, loadSession]);
 
+  if (path === '/vlux-admin' || path.startsWith('/vlux-admin/')) return <Suspense fallback={<div className="cc min-h-full" />}><AdminApp /></Suspense>;
+  if (path === '/invitacion') return <InvitationView />;
   if (path === '/t') return <CardLinkView />;
   if (path === '/restablecer') return <ResetPasswordView />;
 
@@ -89,7 +96,7 @@ function Shell() {
 
   return (
     <div className="app-root flex flex-col min-h-full" data-vertical={s.colors?.vertical} style={s.colors ? brandVars(s.colors.primary, s.colors.accent) : undefined}>
-      <TopBar session={session} path={path} onLogout={logout} />
+      <TopBar session={session} path={path} onLogout={logout} onSwitched={async (role) => { await loadSession(); navigate(role === 'OWNER' ? '/panel' : '/caja', { replace: true }); }} />
       <main className="flex-1">
         <div className="view-in min-h-full">
           {session.mustChangePassword || path === '/cuenta' ? (
@@ -110,7 +117,17 @@ function Shell() {
   );
 }
 
-function TopBar({ session, path, onLogout }: { session: StaffSessionInfo; path: string; onLogout: () => void }) {
+function TopBar({ session, path, onLogout, onSwitched }: { session: StaffSessionInfo; path: string; onLogout: () => void; onSwitched: (role: 'OWNER' | 'EMPLOYEE') => void }) {
+  const [businesses, setBusinesses] = useState<{ slug: string; name: string; role: 'OWNER' | 'EMPLOYEE' }[]>([]);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api<{ businesses: typeof businesses }>('GET', '/staff/businesses').then((r) => setBusinesses(r.businesses)).catch(() => undefined); }, [session.business.slug]);
+  const switchTo = async (slug: string) => {
+    setOpen(false);
+    try {
+      const r = await api<{ session: StaffSessionInfo }>('POST', '/staff/switch', { slug });
+      onSwitched(r.session.role);
+    } catch { /* la sesión actual sigue igual */ }
+  };
   const items: [string, string, React.ReactNode][] = [['/caja', 'Caja', <ScanLine size={15} key="c" />]];
   if (session.role === 'OWNER') items.push(['/panel', 'Panel', <LayoutDashboard size={15} key="p" />]);
   return (
@@ -119,7 +136,26 @@ function TopBar({ session, path, onLogout }: { session: StaffSessionInfo; path: 
         <div className="flex items-center gap-2.5 mr-auto min-w-0">
           <VluxMark className="text-white" />
           <span className="h-3.5 w-px bg-white/20" />
-          <span className="text-[13px] text-white/80 truncate max-w-[40vw]">{session.business.name}</span>
+          {businesses.length > 1 ? (
+            <div className="relative min-w-0">
+              <button onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="listbox" className="h-8 px-2 -ml-2 rounded-lg inline-flex items-center gap-1.5 text-[13px] text-white/85 hover:bg-white/10 max-w-[48vw]" data-testid="business-switcher">
+                <span className="truncate">{session.business.name}</span> <ArrowLeftRight size={13} className="shrink-0 opacity-70" />
+              </button>
+              {open && (
+                <ul role="listbox" aria-label="Cambiar de negocio" className="absolute left-0 mt-1.5 min-w-[240px] max-w-[80vw] rounded-xl bg-white text-ink shadow-xl border border-line py-1 z-40">
+                  {businesses.map((b) => (
+                    <li key={b.slug}>
+                      <button role="option" aria-selected={b.slug === session.business.slug} onClick={() => b.slug !== session.business.slug && switchTo(b.slug)} className={cx('w-full text-left px-3.5 py-2.5 text-[13.5px] hover:bg-[#F5F6F8] flex justify-between gap-3', b.slug === session.business.slug && 'font-medium')}>
+                        <span className="truncate">{b.name}</span><span className="text-[12px] text-slate2 shrink-0">{b.role === 'OWNER' ? 'Dueño' : 'Caja'}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <span className="text-[13px] text-white/80 truncate max-w-[40vw]">{session.business.name}</span>
+          )}
         </div>
         <nav className="flex items-center gap-1" aria-label="Navegación">
           {items.map(([to, label, icon]) => (

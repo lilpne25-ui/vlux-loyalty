@@ -427,7 +427,31 @@ function Team() {
   const [form, setForm] = useState({ displayName: '', email: '', password: '' });
   const [msg, setMsg] = useState<string | null>(null);
   const [reset, setReset] = useState<{ name: string; link: string } | null>(null);
+  const [mode, setMode] = useState<'link' | 'password'>('link');
+  const [invite, setInvite] = useState<{ name: string; link: string } | null>(null);
+  const { data: invites, refresh: refreshInvites } = usePolling(() => api<{ invitations: { id: string; email: string; displayName: string; status: string }[] }>('GET', '/owner/invitations'), 60_000, []);
   const toast = useToast();
+  const inviteByLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
+    try {
+      const r = await api<{ link: string }>('POST', '/owner/invitations', { email: form.email, displayName: form.displayName });
+      setInvite({ name: form.displayName, link: r.link });
+      setForm({ displayName: '', email: '', password: '' });
+      refreshInvites();
+    } catch (err) {
+      setMsg((err as ApiError).message);
+    }
+  };
+  const inviteAction = async (id: string, name: string, what: 'resend' | 'revoke') => {
+    try {
+      const r = await api<{ link?: string }>('POST', `/owner/invitations/${id}/${what}`);
+      if (r.link) setInvite({ name, link: r.link }); else toast('good', 'Invitación revocada.');
+      refreshInvites();
+    } catch (err) {
+      toast('bad', (err as ApiError).message);
+    }
+  };
   const issueReset = async (id: string, name: string) => {
     try {
       const r = await api<{ resetLink: string }>('POST', `/owner/staff/${id}/reset-link`);
@@ -478,15 +502,41 @@ function Team() {
           ))}
         </ul>
       </section>
-      <form onSubmit={add} className="panel p-4 sm:p-5 flex flex-col gap-4">
+      <div className="flex flex-col gap-5">
+      <form onSubmit={mode === 'link' ? inviteByLink : add} className="panel p-4 sm:p-5 flex flex-col gap-4">
         <h2 className="text-[15px] font-semibold text-ink inline-flex items-center gap-2"><UserPlus size={16} /> Agregar empleado</h2>
+        <div className="grid grid-cols-2 p-0.5 rounded-xl bg-[#F1F3F6] text-[12.5px]" role="tablist" aria-label="Forma de alta">
+          <button type="button" role="tab" aria-selected={mode === 'link'} onClick={() => { setMode('link'); setMsg(null); }} className={cx('h-8 rounded-[10px] transition', mode === 'link' ? 'bg-white shadow-sm text-ink font-medium' : 'text-slate2')}>Invitar por enlace</button>
+          <button type="button" role="tab" aria-selected={mode === 'password'} onClick={() => { setMode('password'); setMsg(null); }} className={cx('h-8 rounded-[10px] transition', mode === 'password' ? 'bg-white shadow-sm text-ink font-medium' : 'text-slate2')}>Contraseña temporal</button>
+        </div>
         <Field label="Nombre" htmlFor="emp-name"><input id="emp-name" className={inputCls} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} /></Field>
         <Field label="Correo" htmlFor="emp-email"><input id="emp-email" type="email" className={inputCls} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-        <Field label="Contraseña inicial" htmlFor="emp-pass" hint="Mínimo 10 caracteres. Es temporal: al entrar, el empleado elige la suya."><input id="emp-pass" type="password" autoComplete="new-password" className={inputCls} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
+        {mode === 'password' && <Field label="Contraseña inicial" htmlFor="emp-pass" hint="Mínimo 10 caracteres. Es temporal: al entrar, el empleado elige la suya."><input id="emp-pass" type="password" autoComplete="new-password" className={inputCls} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>}
         {msg && <p className="text-[13px] text-[#B42318]" role="alert">{msg}</p>}
-        <Button type="submit" disabled={form.displayName.trim().length < 2 || !form.email || form.password.length < 10}>Agregar</Button>
-        <p className="text-[11.5px] text-slate2">Los empleados solo ven la caja: no tienen acceso a este panel ni a la configuración.</p>
+        <Button type="submit" disabled={form.displayName.trim().length < 2 || !form.email || (mode === 'password' && form.password.length < 10)}>{mode === 'link' ? 'Generar invitación' : 'Agregar'}</Button>
+        <p className="text-[11.5px] text-slate2">{mode === 'link' ? 'El empleado abre el enlace, elige su contraseña y entra a la caja. Sirve una vez y vence en 72 h.' : 'Los empleados solo ven la caja: no tienen acceso a este panel ni a la configuración.'}</p>
       </form>
+      {(invites?.invitations ?? []).some((i) => i.status === 'pendiente' || i.status === 'vencida') && (
+        <section className="panel overflow-hidden">
+          <div className="px-4 sm:px-5 py-3 border-b border-line text-[14px] font-semibold text-ink">Invitaciones pendientes</div>
+          <ul className="divide-y divide-line" data-testid="owner-invitations">
+            {invites!.invitations.filter((i) => i.status === 'pendiente' || i.status === 'vencida').map((i) => (
+              <li key={i.id} className="px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0"><div className="text-[13.5px] text-ink">{i.displayName} <Badge tone={i.status === 'vencida' ? 'warn' : 'info'}>{i.status}</Badge></div><div className="text-[12px] text-slate2 break-all">{i.email}</div></div>
+                <div className="flex gap-1.5">
+                  <Button size="sm" variant="secondary" onClick={() => inviteAction(i.id, i.displayName, 'resend')}>Nuevo enlace</Button>
+                  {i.status === 'pendiente' && <Button size="sm" variant="ghost" onClick={() => inviteAction(i.id, i.displayName, 'revoke')}>Revocar</Button>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      </div>
+      <Modal open={!!invite} onClose={() => setInvite(null)} title="Invitación para tu empleado" labelledBy="invite-title">
+        <p className="text-[14px] text-[#475467]">Envíale este enlace a <strong>{invite?.name}</strong> (WhatsApp o en persona) o que escanee el código. VLUX no envía correos. Sirve una sola vez y vence en 72 horas.</p>
+        {invite && <div className="mt-4 flex flex-col items-center gap-3"><QRCode value={invite.link} size={168} label="Código de la invitación" /><span className="text-[11px] font-mono text-slate2 break-all select-all text-center" data-testid="employee-invite-link">{invite.link}</span><CopyButton text={invite.link} /></div>}
+      </Modal>
       <Modal open={!!reset} onClose={() => setReset(null)} title="Enlace para nueva contraseña" labelledBy="reset-title">
         <p className="text-[14px] text-[#475467]">Envíale este enlace a <strong>{reset?.name}</strong> o que escanee el código. Sirve una sola vez durante 60 minutos y cierra sus sesiones abiertas.</p>
         {reset && <div className="mt-4 flex flex-col items-center gap-3"><QRCode value={reset.link} size={168} label="Código del enlace para nueva contraseña" /><span className="text-[11px] font-mono text-slate2 break-all select-all text-center" data-testid="reset-link">{reset.link}</span><CopyButton text={reset.link} /></div>}

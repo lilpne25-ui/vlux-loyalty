@@ -32,6 +32,11 @@ export async function createBusiness(raw: CreateBusinessInput) {
        VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
       [biz, r.stampsRequired, r.stampMode, r.maxStampsPerPurchase, r.visitWindowMinutes, r.rewardDescription, userId],
     );
+    // V0.3: todo negocio nace con registro comercial (piloto sin costo) para que el Control Center lo cuente.
+    await tx.query(
+      `INSERT INTO business_subscriptions (business_id, plan_code, commercial_status, start_date, price_cents, currency)
+       VALUES ($1, 'piloto', 'piloto', current_date, 0, 'MXN')`, [biz],
+    );
     await audit(tx, biz, { type: 'platform', id: null }, 'business.created', 'business', biz, { slug: input.slug, ownerReused: !!existing });
     return { businessId: biz, ownerUserId: userId as string, slug: input.slug };
   });

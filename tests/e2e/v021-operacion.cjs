@@ -44,6 +44,7 @@ async function login(page, email, password = PASSWORD) {
   await owner.click('button:has-text("Equipo")');
   await owner.fill('#emp-name', 'Caja E2E');
   await owner.fill('#emp-email', `caja@${slug}.e2e.test`);
+  await owner.getByRole('tab', { name: 'Contraseña temporal' }).click(); // V0.3: por omisión se invita por enlace
   await owner.fill('#emp-pass', PASSWORD);
   await owner.click('form >> button:has-text("Agregar")');
   await owner.waitForSelector(`text=caja@${slug}.e2e.test`);
