@@ -11,21 +11,12 @@ import { createInvitation, listInvitations } from './invitations';
 import { platformAudit, type AdminSession } from './platform-auth';
 import { GoogleWalletProvider } from '../wallet/google';
 import { AppleWalletProvider } from '../wallet/apple';
+import { logoBytesMatch } from '../image-check';
 import { emailSchema, rulesSchema, slugSchema, verticals } from '../validation';
 
 const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Usa colores en formato #RRGGBB.');
 const logoSchema = z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, 'El logotipo debe ser PNG, JPG o WebP.').max(90000, 'El logotipo es demasiado grande (máximo ~64 KB).').refine(logoBytesMatch, 'El archivo no es una imagen válida del tipo indicado.').nullable();
 export const cardFinishes = ['signature', 'silver', 'black'] as const;
-/** Comprueba que los bytes decodificados correspondan al tipo declarado (no basta el prefijo data: del navegador). */
-export function logoBytesMatch(dataUrl: string): boolean {
-  const m = /^data:image\/(png|jpeg|webp);base64,(.+)$/.exec(dataUrl);
-  if (!m) return false;
-  const b = Buffer.from(m[2], 'base64');
-  if (b.length < 32) return false;
-  if (m[1] === 'png') return b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  if (m[1] === 'jpeg') return b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
-  return b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP';
-}
 const reviewUrl = z.string().trim().regex(/^https:\/\/\S+$/, 'El enlace de reseñas debe empezar con https://').max(500).nullable();
 export const planCodes = ['piloto', 'inicio', 'crecimiento'] as const;
 export const commercialStatuses = ['piloto', 'activo', 'vencido', 'suspendido', 'cancelado'] as const;

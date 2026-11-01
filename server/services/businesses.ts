@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { withTenant, withTx } from '../db';
 import { AppError, notFound } from '../errors';
+import { logoBytesMatch } from '../image-check';
 import { hashPassword } from '../security';
 import { createBusinessSchema } from '../validation';
 import { audit } from './audit';
@@ -94,6 +95,7 @@ export async function getBusinessLogo(slug: string): Promise<{ mime: string; byt
   return withTenant(b.id, async (tx) => {
     const row = (await tx.query('SELECT logo_data_url, substr(md5(logo_data_url), 1, 12) AS v FROM businesses WHERE id = $1', [b.id])).rows[0];
     const m = row?.logo_data_url ? /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(row.logo_data_url) : null;
+    if (row?.logo_data_url && !logoBytesMatch(row.logo_data_url)) return null; // bytes que no corresponden al tipo declarado
     return m ? { mime: m[1], bytes: Buffer.from(m[2], 'base64'), version: row.v } : null;
   });
 }

@@ -182,6 +182,7 @@ export function buildApp() {
     // URL versionada (?v=hash): se puede guardar en caché; si el logotipo cambia, cambia la URL.
     c.header('Cache-Control', c.req.query('v') === logo.version ? 'public, max-age=31536000, immutable' : 'public, max-age=300');
     c.header('Content-Type', logo.mime);
+    c.header('Content-Disposition', 'inline');
     return c.body(new Uint8Array(logo.bytes));
   });
 

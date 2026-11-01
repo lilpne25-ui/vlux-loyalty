@@ -15,7 +15,13 @@ export const config = {
   // V0.4 · Origen PÚBLICO de la app para los enlaces que se entregan a negocios y clientes (tarjeta, caja,
   // panel e invitaciones). Sirve cuando el Control Center vive en un despliegue protegido por Vercel
   // Authentication y la parte comercial en otro público. Debe ser https:// (o http://localhost en pruebas).
-  publicAppUrl: (/^https?:\/\/[a-z0-9.:-]+$/i.test((process.env.PUBLIC_APP_URL || '').replace(/\/$/, '')) ? (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '') : ''),
+  // En producción solo se acepta https (http únicamente para localhost); si no cumple, se ignora.
+  publicAppUrl: (() => {
+    const v = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+    if (!/^https?:\/\/[a-z0-9.:-]+$/i.test(v)) return '';
+    if (process.env.NODE_ENV === 'production' && v.startsWith('http://') && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v)) return '';
+    return v;
+  })(),
   onVercel: process.env.VERCEL === '1',
   poolMax: Math.max(1, Math.min(20, Number(process.env.PG_POOL_MAX) || (process.env.VERCEL === '1' ? 3 : 10))),
   allowUnsafeDbRole: process.env.ALLOW_UNSAFE_DB_ROLE === '1',
