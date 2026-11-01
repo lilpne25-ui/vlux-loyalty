@@ -7,18 +7,19 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { ZodError } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from './config';
-import { AppError, forbidden, unauthorized } from './errors';
+import { AppError, forbidden, notFound, unauthorized } from './errors';
 import { rateLimit } from './ratelimit';
 import { loginSchema, reviewEventSchema, slugSchema, uuidSchema } from './validation';
 import { getStaffSession, listMyBusinesses, login, logout, switchBusiness, type Role, type StaffSession } from './services/auth';
 import { acceptInvitation, inspectInvitation, inviteSchema, inviteStaff, listInvitations, resendInvitation, revokeInvitation } from './services/invitations';
 import { buildAdminRoutes } from './admin-routes';
-import { createBusiness, getBusinessBySlug } from './services/businesses';
+import { createBusiness, getBusinessBySlug, getBusinessLogo } from './services/businesses';
 import { changePassword, ownerIssueEmployeeReset, platformIssueReset, reissueCardLink, resetPasswordWithToken, voidPurchase } from './services/operations';
 import { ensureSafeRole } from './db';
 import { registerCustomer, resolveCardToken } from './services/customers';
 import { issuePairCode, redeemPairCode } from './services/pairing';
-import { buildManifest, renderIcon } from './pwa';
+import { accessLinks } from './access-links';
+import { buildManifest, buildStaffManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
 import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
@@ -59,6 +60,11 @@ export function publicBaseUrl(c: Context) {
   const host = c.req.header('host');
   if (config.onVercel && host && /^[a-z0-9.-]+$/i.test(host)) return `https://${host}`;
   return config.publicBaseUrl;
+}
+
+/** Origen para enlaces de negocio (cliente, caja, panel, invitaciones): PUBLIC_APP_URL si existe; si no, el mismo que publicBaseUrl. */
+export function appLinkBase(c: Context) {
+  return config.publicAppUrl || publicBaseUrl(c);
 }
 
 /** Protección CSRF: mutaciones solo con JSON y, si el navegador manda Origin, que sea el nuestro. */
@@ -161,7 +167,22 @@ export function buildApp() {
   // ---------- Público ----------
   api.get('/public/businesses/:slug', async (c) => {
     const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
-    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, isDemo: b.isDemo }, program: { stampsRequired: b.program.stampsRequired, stampMode: b.program.stampMode, maxStampsPerPurchase: b.program.maxStampsPerPurchase, rewardDescription: b.program.rewardDescription }, privacyNoticeVersion: config.privacyNoticeVersion });
+    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, isDemo: b.isDemo, logoUrl: b.logoUrl }, program: { stampsRequired: b.program.stampsRequired, stampMode: b.program.stampMode, maxStampsPerPurchase: b.program.maxStampsPerPurchase, rewardDescription: b.program.rewardDescription }, privacyNoticeVersion: config.privacyNoticeVersion });
+  });
+
+  // Accesos del negocio: qué dirección usa cada persona. Son direcciones derivadas del nombre público; no incluyen tokens ni credenciales.
+  api.get('/public/businesses/:slug/access', async (c) => {
+    const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
+    return c.json(accessLinks(appLinkBase(c), b.slug));
+  });
+
+  api.get('/public/businesses/:slug/logo', async (c) => {
+    const logo = await getBusinessLogo(slugSchema.parse(c.req.param('slug')));
+    if (!logo) throw notFound('Logotipo');
+    // URL versionada (?v=hash): se puede guardar en caché; si el logotipo cambia, cambia la URL.
+    c.header('Cache-Control', c.req.query('v') === logo.version ? 'public, max-age=31536000, immutable' : 'public, max-age=300');
+    c.header('Content-Type', logo.mime);
+    return c.body(new Uint8Array(logo.bytes));
   });
 
   api.post('/public/businesses/:slug/register', async (c) => {
@@ -222,6 +243,15 @@ export function buildApp() {
     c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
     c.header('Content-Type', 'application/manifest+json; charset=utf-8');
     return c.body(JSON.stringify(buildManifest(b)));
+  });
+
+  api.get('/pwa/:slug/staff/:app/manifest.webmanifest', async (c) => {
+    const app = c.req.param('app');
+    if (app !== 'panel' && app !== 'caja') throw new AppError(404, 'not_found', 'Ruta no encontrada.');
+    const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
+    c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
+    c.header('Content-Type', 'application/manifest+json; charset=utf-8');
+    return c.body(JSON.stringify(buildStaffManifest(b, app)));
   });
 
   api.get('/pwa/:slug/icon/:file', async (c) => {
@@ -373,13 +403,13 @@ export function buildApp() {
     await rateLimit(`owner-invite:${s.userId}`, 20, 60 * 60_000);
     const input = inviteSchema.parse(await jsonBody(c));
     const r = await inviteStaff({ businessId: s.businessId, email: input.email, displayName: input.displayName, role: 'EMPLOYEE', by: { type: 'staff', id: s.userId } });
-    return c.json({ invitationId: r.invitationId, link: `${publicBaseUrl(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' }, 201);
+    return c.json({ invitationId: r.invitationId, link: `${appLinkBase(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' }, 201);
   });
   owner.post('/invitations/:invId/resend', async (c) => {
     const s = c.get('staff');
     await rateLimit(`owner-invite:${s.userId}`, 20, 60 * 60_000);
     const r = await resendInvitation(s.businessId, uuidSchema.parse(c.req.param('invId')), { type: 'staff', id: s.userId }, 'EMPLOYEE');
-    return c.json({ invitationId: r.invitationId, link: `${publicBaseUrl(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' });
+    return c.json({ invitationId: r.invitationId, link: `${appLinkBase(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' });
   });
   owner.post('/invitations/:invId/revoke', async (c) => {
     const s = c.get('staff');
@@ -393,7 +423,7 @@ export function buildApp() {
   api.route('/owner', owner);
 
   // ---------- Control Center (equipo VLUX) ----------
-  api.route('/admin', buildAdminRoutes({ clientIp, publicBaseUrl, jsonBody }));
+  api.route('/admin', buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBody }));
 
   // ---------- API heredada de plataforma (token compartido) ----------
   // V0.3: apagada por omisión. Solo se enciende con PLATFORM_LEGACY_API=1 (pruebas E2E heredadas).

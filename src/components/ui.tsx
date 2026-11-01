@@ -188,7 +188,11 @@ export function PoweredByVlux({ dark }: { dark?: boolean }) {
 }
 
 /** Monograma del negocio, construido con su nombre y colores. El grano de café solo aparece en cafeterías (data-vertical). */
-export function BusinessLogo({ name, size = 44, ring = true }: { name: string; size?: number; ring?: boolean }) {
+export function BusinessLogo({ name, size = 44, ring = true, src }: { name: string; size?: number; ring?: boolean; src?: string | null }) {
+  const [broken, setBroken] = useState(false);
+  if (src && !broken) {
+    return <img src={src} alt="" width={size} height={size} onError={() => setBroken(true)} className="shrink-0 rounded-full object-contain bg-white" style={{ width: size, height: size, padding: Math.round(size * 0.1) }} />;
+  }
   const initials = name
     .replace(/caf[eé]/i, '')
     .split(/\s+/)

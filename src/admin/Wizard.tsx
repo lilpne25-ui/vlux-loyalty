@@ -11,7 +11,7 @@ import { ColorField, LogoField } from './Businesses';
 import { LIMITS } from '../../shared/rules';
 
 type Plan = { code: 'piloto' | 'inicio' | 'crecimiento'; name: string; priceCents: number; currency: string };
-type Created = { businessId: string; slug: string; registrationUrl: string; ownerInvitation: { link: string; expiresAt: string } };
+type Created = { businessId: string; slug: string; registrationUrl: string; access?: { customerUrl: string; cashierUrl: string; ownerUrl: string }; ownerInvitation: { link: string; expiresAt: string } };
 
 const PRESETS: Record<Vertical, { primary: string; accent: string; reward: string }> = {
   cafeteria: { primary: '#2B1B14', accent: '#C9A15B', reward: 'Una bebida de cortesía' },
@@ -36,6 +36,25 @@ export function Wizard() {
     rewardDescription: PRESETS.cafeteria.reward, reviewUrl: '',
     plan: 'piloto' as Plan['code'], price: '', pilotDays: 30, isDemo: false,
   });
+  // Marca preparada en el Estudio de marca (solo sesión del navegador; se consume una vez).
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('vlux:studio');
+      if (!raw) return;
+      sessionStorage.removeItem('vlux:studio');
+      const v = JSON.parse(raw);
+      const hex = /^#[0-9a-f]{6}$/i;
+      setF((x) => ({
+        ...x,
+        name: typeof v.name === 'string' ? v.name.slice(0, 60) : x.name,
+        logoDataUrl: typeof v.logoDataUrl === 'string' && v.logoDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoDataUrl) ? v.logoDataUrl : x.logoDataUrl,
+        primaryColor: hex.test(v.primaryColor) ? v.primaryColor : x.primaryColor,
+        accentColor: hex.test(v.accentColor) ? v.accentColor : x.accentColor,
+        rewardDescription: typeof v.rewardDescription === 'string' ? v.rewardDescription.slice(0, 80) : x.rewardDescription,
+        stampsRequired: Number.isInteger(v.stampsRequired) && v.stampsRequired >= 3 && v.stampsRequired <= 15 ? v.stampsRequired : x.stampsRequired,
+      }));
+    } catch { /* sin almacenamiento */ }
+  }, []);
   useEffect(() => { api<{ plans: Plan[] }>('GET', '/admin/plans').then((r) => setPlans(r.plans)).catch(() => undefined); }, []);
   const plan = plans.find((p) => p.code === f.plan);
   const priceCents = f.price.trim() === '' ? plan?.priceCents ?? 0 : Math.round(Number(f.price) * 100);
@@ -204,6 +223,16 @@ function CreatedView({ c, name, ownerName }: { c: Created; name: string; ownerNa
           <CopyButton dark text={c.registrationUrl} />
         </section>
       </div>
+      {c.access && (
+        <section className="mt-4 cc-panel p-5" data-testid="created-access" aria-label="Accesos del negocio">
+          <div className="cc-label">Accesos del negocio · el dueño los verá también en su panel (pestaña Accesos)</div>
+          <dl className="mt-3 grid gap-3 text-[13px]">
+            {([['Clientes (QR del mostrador)', c.access.customerUrl], ['Caja (empleados, con contraseña)', c.access.cashierUrl], ['Panel del dueño (con contraseña)', c.access.ownerUrl]] as const).map(([k, v]) => (
+              <div key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1"><dt className="cc-faint w-[220px] shrink-0">{k}</dt><dd className="cc-code flex-1 min-w-0 break-all">{v}</dd><CopyButton dark text={v} /></div>
+            ))}
+          </dl>
+        </section>
+      )}
       <div className="mt-6 flex flex-wrap gap-2">
         <CButton variant="primary" onClick={() => navigate(`/vlux-admin/negocios/${c.businessId}`)}>Abrir ficha del negocio</CButton>
         <CButton onClick={() => navigate('/vlux-admin/negocios')}>Volver al directorio</CButton>

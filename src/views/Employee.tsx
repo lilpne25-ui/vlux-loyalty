@@ -1,5 +1,6 @@
 // Caja (empleado y dueño): identificar tarjeta, registrar compra, canjear premio e historial.
 // V0.2: toda operación la autoriza el servidor con la sesión del empleado; la interfaz solo la solicita.
+import { InstallAppButton, useStaffAppHead } from '../components/InstallApp';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScanLine, Keyboard, Users, Search, Gift, CheckCircle2, Camera, ImageUp, History, ChevronRight, ShoppingBag, Minus, Plus, CameraOff, ShieldCheck, Link2 } from 'lucide-react';
 import { api, ApiError, HistoryItem, newIdempotencyKey, Program, StaffCard } from '../lib/api';
@@ -13,7 +14,8 @@ import { ErrorBox } from '../components/Brand';
 
 const CARD_POLL_MS = 5000;
 
-export function EmployeeView({ businessName, initialCode }: { businessName: string; initialCode: string | null }) {
+export function EmployeeView({ businessName, businessSlug, initialCode }: { businessName: string; businessSlug?: string; initialCode: string | null }) {
+  useStaffAppHead(businessSlug, 'caja', businessName);
   const [cardId, setCardId] = useState<string | null>(null);
   const [mode, setMode] = useState<'scan' | 'manual' | 'list'>('scan');
   const toast = useToast();
@@ -47,7 +49,7 @@ export function EmployeeView({ businessName, initialCode }: { businessName: stri
             <div className="text-[12px] uppercase tracking-[0.14em] text-slate2 truncate">{businessName} · Caja</div>
             <h1 className="text-[24px] sm:text-[28px] font-semibold tracking-tight text-ink">Panel del empleado</h1>
           </div>
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-[#067647]"><ShieldCheck size={14} /> Operaciones validadas por el servidor</span>
+          <div className="flex flex-wrap items-center gap-3"><span className="inline-flex items-center gap-1.5 text-[12px] text-[#067647]"><ShieldCheck size={14} /> Operaciones validadas por el servidor</span><InstallAppButton app="caja" /></div>
         </header>
 
         <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)] items-start">

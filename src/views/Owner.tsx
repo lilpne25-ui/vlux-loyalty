@@ -8,10 +8,12 @@ import { usePolling } from '../lib/usePolling';
 import { VERTICAL_LABEL } from '../lib/vertical';
 import { Badge, Button, Field, inputCls, useToast, cx, Modal, QRCode, BusinessLogo, VluxMark, CopyButton } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
+import { AccessCenter, Links } from '../components/AccessCenter';
+import { InstallAppButton, useStaffAppHead } from '../components/InstallApp';
 import { HistoryTable } from './Employee';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
 
-type Tab = 'resumen' | 'clientes' | 'config' | 'equipo' | 'qr';
+type Tab = 'resumen' | 'clientes' | 'config' | 'equipo' | 'accesos';
 interface Dashboard {
   kpis: { customers: number; newCustomers7d: number; visits: number; purchases: number; stamps: number; recurring: number; rewardsUnlocked: number; redemptions: number; rewardsPending: number; reviewPrompts: number; reviewClicks: number };
   series: { day: string; visits: number; purchases: number }[];
@@ -25,6 +27,7 @@ type FullBusiness = BusinessInfo & { program: Program & { ruleId: string; versio
 export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void }) {
   const [tab, setTab] = useState<Tab>('resumen');
   const biz = usePolling(() => api<FullBusiness>('GET', '/staff/business'), 60_000, []);
+  useStaffAppHead(biz.data?.slug, 'panel', biz.data?.name);
   if (biz.error && !biz.data) return <div className="gutter py-10"><ErrorBox message={biz.error.message} onRetry={biz.refresh} /></div>;
   if (!biz.data) return <Loading />;
   const b = biz.data;
@@ -42,6 +45,7 @@ export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void
               <span>{b.program.stampsRequired} sellos = {b.program.rewardDescription.toLowerCase()}</span>
             </div>
           </div>
+          <InstallAppButton app="panel" />
         </header>
 
         <nav className="flex gap-1 border-b border-line -mb-1 overflow-x-auto no-scrollbar" role="tablist" aria-label="Secciones del panel">
@@ -50,7 +54,7 @@ export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void
             ['clientes', 'Clientes', <ListChecks size={15} key="b" />],
             ['config', 'Programa', <Settings2 size={15} key="c" />],
             ['equipo', 'Equipo', <Users size={15} key="d" />],
-            ['qr', 'QR del mostrador', <QrCode size={15} key="e" />],
+            ['accesos', 'Accesos', <QrCode size={15} key="e" />],
           ] as const).map(([k, label, icon]) => (
             <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx('h-10 px-3 -mb-px inline-flex items-center gap-1.5 text-[13.5px] font-medium border-b-2 whitespace-nowrap transition shrink-0', tab === k ? 'border-ink text-ink' : 'border-transparent text-slate2 hover:text-ink')}>
               {icon} {label}
@@ -62,7 +66,7 @@ export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void
         {tab === 'clientes' && <Customers />}
         {tab === 'config' && <Settings business={b} onSaved={() => { biz.refresh(); onBusinessChanged(); }} />}
         {tab === 'equipo' && <Team />}
-        {tab === 'qr' && <CounterQr business={b} />}
+        {tab === 'accesos' && <AccessTab business={b} />}
       </div>
     </div>
   );
@@ -414,7 +418,7 @@ function Settings({ business: b, onSaved }: { business: FullBusiness; onSaved: (
       <aside className="flex flex-col gap-3 lg:sticky lg:top-[84px]" data-vertical={form.vertical}>
         <div className="text-[12px] uppercase tracking-[0.14em] text-slate2">Así lo verá el cliente</div>
         <div style={brandVars(form.primaryColor, form.accentColor)}>
-          <LoyaltyCardFace businessName={form.name || 'Tu negocio'} customerName="Cliente de ejemplo" cardId="XXXX-XXXX" total={Math.min(15, Math.max(3, Number(form.stampsRequired) || 8))} filled={3} compact />
+          <LoyaltyCardFace logoUrl={b.logoUrl} businessName={form.name || 'Tu negocio'} customerName="Cliente de ejemplo" cardId="XXXX-XXXX" total={Math.min(15, Math.max(3, Number(form.stampsRequired) || 8))} filled={3} compact />
         </div>
         <p className="text-[12px] text-slate2">Vista previa sin guardar. Al guardar se aplica en todas las tarjetas.</p>
       </aside>
@@ -545,12 +549,27 @@ function Team() {
   );
 }
 
+function AccessTab({ business: b }: { business: FullBusiness }) {
+  const [links, setLinks] = useState<Links | null>(null);
+  useEffect(() => { api<Links>('GET', `/public/businesses/${b.slug}/access`).then(setLinks).catch(() => setLinks(null)); }, [b.slug]);
+  return (
+    <div className="flex flex-col gap-8">
+      {links && <AccessCenter businessName={b.name} slug={b.slug} links={links} />}
+      <div>
+        <h2 className="text-[18px] font-semibold text-ink mb-1">Cartel para el mostrador</h2>
+        <p className="text-[13.5px] text-slate2 mb-4">El QR de clientes listo para imprimir.</p>
+        <CounterQr business={b} />
+      </div>
+    </div>
+  );
+}
+
 function CounterQr({ business: b }: { business: FullBusiness }) {
   const url = businessQrValue(b.slug);
   return (
     <section className="flex flex-col items-center gap-4">
       <div className="print-area w-full max-w-[420px] rounded-[28px] p-8 text-center text-[color:var(--cream)] shadow-xl" data-vertical={b.vertical} style={{ ...brandVars(b.primaryColor, b.accentColor), background: 'var(--brand)' }}>
-        <div className="flex justify-center"><BusinessLogo name={b.name} size={56} /></div>
+        <div className="flex justify-center"><BusinessLogo name={b.name} size={56} src={b.logoUrl} /></div>
         <div className="mt-3 font-display text-[24px] leading-tight">{b.name}</div>
         <div className="mt-1 text-[14px] opacity-80">Escanea y obtén tu tarjeta de recompensas</div>
         <div className="mt-5 mx-auto w-[240px] max-w-full rounded-2xl bg-white p-3"><QRCode value={url} size={216} label={`QR de registro de ${b.name}`} /></div>

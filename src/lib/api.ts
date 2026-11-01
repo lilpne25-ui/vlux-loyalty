@@ -31,7 +31,7 @@ export const newIdempotencyKey = () => (crypto.randomUUID ? crypto.randomUUID() 
 
 // ---------- Tipos de respuesta ----------
 export interface Program { stampsRequired: number; stampMode: 'per_purchase' | 'per_item'; maxStampsPerPurchase: number; visitWindowMinutes?: number; rewardDescription: string }
-export interface BusinessInfo { slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; reviewUrl?: string | null; isDemo: boolean }
+export interface BusinessInfo { slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; reviewUrl?: string | null; isDemo: boolean; logoUrl?: string | null }
 export type Vertical = 'cafeteria' | 'barberia' | 'salon' | 'restaurante' | 'otro';
 export interface RewardInfo { id?: string; code: string; description: string; stampsCost: number; unlockedAt: string }
 export interface HistoryItem { kind: 'card_created' | 'purchase' | 'purchase_voided' | 'reward_unlocked' | 'reward_redeemed'; at: string; stamps: number; items?: number; purchaseId?: string; voided?: boolean; customerName?: string; publicCode?: string; staffName?: string | null }

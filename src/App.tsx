@@ -109,7 +109,7 @@ function Shell() {
           ) : wantsPanel ? (
             <OwnerView onBusinessChanged={loadSession} />
           ) : (
-            <EmployeeView businessName={session.business.name} initialCode={code} />
+            <EmployeeView businessName={session.business.name} businessSlug={session.business.slug} initialCode={code} />
           )}
         </div>
       </main>

@@ -75,7 +75,7 @@ function Welcome({ business: b, program, onStart }: { business: BusinessInfo; pr
     <div className="screen-in pt-6 sm:pt-10 flex flex-col">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <BusinessLogo name={b.name} size={38} />
+          <BusinessLogo name={b.name} size={38} src={b.logoUrl} />
           <div className="min-w-0">
             <div className="font-display text-[16px] text-cafe-ink leading-tight line-clamp-2">{b.name}</div>
             <div className="text-[11.5px] text-cafe-muted">{b.city.split(',')[0]}</div>
@@ -91,7 +91,7 @@ function Welcome({ business: b, program, onStart }: { business: BusinessInfo; pr
         {b.vertical === 'cafeteria' ? (
           <CupIllustration className="relative w-full h-auto px-6 pt-6 -mb-2" />
         ) : (
-          <div className="relative flex justify-center pt-10 pb-4"><BusinessLogo name={b.name} size={132} /></div>
+          <div className="relative flex justify-center pt-10 pb-4"><BusinessLogo name={b.name} size={132} src={b.logoUrl} /></div>
         )}
         <div className="relative px-6 pb-6 text-[color:var(--cream)]">
           <div className="text-[11px] uppercase tracking-[0.18em] opacity-60">{b.name}</div>
@@ -153,7 +153,7 @@ function Register({ business: b, slug, onBack, onDone }: { business: BusinessInf
     <form onSubmit={submit} className="screen-in pt-6 sm:pt-10 flex flex-col gap-5" noValidate>
       <button type="button" onClick={onBack} className="self-start text-[13px] text-cafe-muted hover:text-cafe-ink">← Regresar</button>
       <div className="flex items-center gap-3">
-        <BusinessLogo name={b.name} size={44} />
+        <BusinessLogo name={b.name} size={44} src={b.logoUrl} />
         <div>
           <h1 className="font-display text-[26px] leading-tight text-cafe-ink">Crea tu tarjeta</h1>
           <p className="text-[14px] text-cafe-muted">Toma menos de un minuto. Sin contraseñas.</p>
@@ -267,7 +267,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
         </section>
       )}
 
-      <LoyaltyCardFace businessName={b.name} customerName={card.customerName} cardId={card.publicCode} total={goal} filled={shown} rewardReady={!!reward} animateFrom={animateFrom} footer={<span className="opacity-70">Ciclo {card.cycle}</span>} />
+      <LoyaltyCardFace businessName={b.name} customerName={card.customerName} cardId={card.publicCode} total={goal} filled={shown} rewardReady={!!reward} animateFrom={animateFrom} logoUrl={b.logoUrl} footer={<span className="opacity-70">Ciclo {card.cycle}</span>} />
 
       <div className="flex flex-col gap-2 -mt-1">
         <p className="text-[15px] font-medium text-cafe-ink" data-testid="progress-message">{message}</p>

@@ -141,7 +141,7 @@ async function resetAdminsIfAsked() {
   await owner.click('button:has-text("Guardar cambios")');
   await owner.waitForSelector('text=/Programa actualizado/');
   ok('C1 el dueño cambia el programa desde su panel', true);
-  await owner.click('button[role=tab]:has-text("QR")');
+  await owner.click('button[role=tab]:has-text("Accesos")');
   await owner.waitForSelector('text=Escanea y obtén tu tarjeta');
   ok('C2 el dueño ve el QR de su mostrador', true);
   await shot(owner, 'C2-qr-mostrador');

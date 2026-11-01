@@ -9,7 +9,7 @@
 //   /vlux-admin/bitacora         bitácora global
 //   /vlux-admin/aceptar#token    alta de un administrador invitado
 import React, { useCallback, useEffect, useState } from 'react';
-import { Activity, Building2, CreditCard, LayoutGrid, LogOut, Plus, ScrollText, ShieldCheck, Users } from 'lucide-react';
+import { Activity, Building2, CreditCard, LayoutGrid, LogOut, Palette, Plus, ScrollText, ShieldCheck, Users } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { navigate, useLocation } from '../lib/router';
 import { QRCode, CopyButton } from '../components/ui';
@@ -17,6 +17,7 @@ import { CButton, CField, ErrorLine, cx } from './kit';
 import { Dashboard } from './Dashboard';
 import { BusinessDetail, Directory } from './Businesses';
 import { Wizard } from './Wizard';
+import { Studio } from './Studio';
 import { AuditLog, Plans, Team } from './Settings';
 
 type Me = { email: string; displayName: string; mfaVerified: boolean; totpEnabled: boolean; sessionId: string } | null;
@@ -237,6 +238,7 @@ function AcceptAdminInvite({ onDone }: { onDone: () => void }) {
 const NAV: [string, string, React.ReactNode][] = [
   ['/vlux-admin', 'Resumen', <LayoutGrid size={16} key="r" />],
   ['/vlux-admin/negocios', 'Negocios', <Building2 size={16} key="n" />],
+  ['/vlux-admin/estudio', 'Estudio de marca', <Palette size={16} key="s" />],
   ['/vlux-admin/planes', 'Planes', <CreditCard size={16} key="p" />],
   ['/vlux-admin/equipo', 'Equipo y sesiones', <Users size={16} key="e" />],
   ['/vlux-admin/bitacora', 'Bitácora', <ScrollText size={16} key="b" />],
@@ -249,6 +251,7 @@ function Workspace({ me, path, onLogout }: { me: NonNullable<Me>; path: string; 
   if (path === '/vlux-admin/negocios/nuevo') view = <Wizard />;
   else if (detail) view = <BusinessDetail id={detail[1]} />;
   else if (path.startsWith('/vlux-admin/negocios')) view = <Directory />;
+  else if (path.startsWith('/vlux-admin/estudio')) view = <Studio />;
   else if (path.startsWith('/vlux-admin/planes')) view = <Plans />;
   else if (path.startsWith('/vlux-admin/equipo')) view = <Team me={me} />;
   else if (path.startsWith('/vlux-admin/bitacora')) view = <AuditLog />;

@@ -39,6 +39,37 @@ export function buildManifest(b: Pick<PublicBusiness, 'slug' | 'name' | 'primary
   };
 }
 
+/**
+ * V0.4 · Manifiesto del personal: "Panel" (dueño) o "Caja" (empleado) como app en la pantalla de inicio.
+ * Usa los colores e inicial del negocio. El acceso sigue protegido por el inicio de sesión propio
+ * (cookie HttpOnly vlx_staff): el manifiesto no da permisos, solo un acceso directo.
+ */
+export function buildStaffManifest(b: Pick<PublicBusiness, 'slug' | 'name' | 'primaryColor' | 'accentColor'>, app: 'panel' | 'caja') {
+  const base = `/api/pwa/${b.slug}/icon`;
+  const label = app === 'panel' ? 'Panel' : 'Caja';
+  return {
+    id: `/${app}?negocio=${b.slug}`,
+    name: `${b.name} · ${label}`,
+    short_name: `${label} ${shortName(b.name)}`.slice(0, 12),
+    description: app === 'panel' ? `Panel del dueño de ${b.name}: clientes, métricas y programa.` : `Caja de ${b.name}: escanea tarjetas y registra visitas.`,
+    lang: 'es-MX',
+    dir: 'ltr',
+    start_url: `/${app}?fuente=app`,
+    scope: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: '#0E1013',
+    theme_color: '#0E1013',
+    categories: ['business', 'productivity'],
+    prefer_related_applications: false,
+    icons: [
+      { src: `${base}/192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `${base}/512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: `${base}/maskable-512.png`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+  };
+}
+
 // ---------- Dibujo del ícono ----------
 type RGB = [number, number, number];
 function hex(c: string): RGB {

@@ -1,6 +1,7 @@
 // V0.3 · API del VLUX Control Center (/api/admin). Separada del personal de los negocios:
 // cookie propia (vlx_admin, path /api/admin, SameSite=Strict), segundo factor obligatorio y bitácora global.
 // Si CONTROL_CENTER_ENABLED no está activo en el despliegue, toda la ruta responde 404.
+import { accessLinks } from './access-links';
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { config } from './config';
@@ -21,13 +22,13 @@ import { z } from 'zod';
 type AdminEnv = { Variables: { admin: AdminSession } };
 export const ADMIN_COOKIE = 'vlx_admin';
 
-type Helpers = { clientIp: (c: Context) => string; publicBaseUrl: (c: Context) => string; jsonBody: (c: Context) => Promise<unknown> };
+type Helpers = { clientIp: (c: Context) => string; publicBaseUrl: (c: Context) => string; appLinkBase: (c: Context) => string; jsonBody: (c: Context) => Promise<unknown> };
 
 function setAdminCookie(c: Context, token: string) {
   setCookie(c, ADMIN_COOKIE, token, { httpOnly: true, secure: config.isProduction, sameSite: 'Strict', path: '/api/admin', maxAge: config.adminSessionHours * 3600 });
 }
 
-export function buildAdminRoutes({ clientIp, publicBaseUrl, jsonBody }: Helpers) {
+export function buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBody }: Helpers) {
   const admin = new Hono<AdminEnv>();
 
   admin.use('*', async (c, next) => {
@@ -43,7 +44,7 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, jsonBody }: Helpers)
     if (c.req.method !== 'GET') await rateLimit(`admin-write:${c.get('admin').adminId}`, 120, 60_000);
     await next();
   };
-  const inviteLink = (c: Context, token: string) => `${publicBaseUrl(c)}/invitacion#${token}`;
+  const inviteLink = (c: Context, token: string) => `${appLinkBase(c)}/invitacion#${token}`;
 
   // ---------- Sin sesión completa ----------
   admin.get('/bootstrap', async (c) => c.json({ needsBootstrap: await needsBootstrap() }));
@@ -107,12 +108,12 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, jsonBody }: Helpers)
   p.get('/businesses', async (c) => c.json({ businesses: await listBusinesses() }));
   p.post('/businesses', async (c) => {
     const r = await createBusinessFromWizard(c.get('admin'), await jsonBody(c));
-    return c.json({ businessId: r.businessId, slug: r.slug, registrationUrl: `${publicBaseUrl(c)}/n/${r.slug}`,
+    return c.json({ businessId: r.businessId, slug: r.slug, registrationUrl: `${appLinkBase(c)}/n/${r.slug}`, access: accessLinks(appLinkBase(c), r.slug),
       ownerInvitation: { link: inviteLink(c, r.invitation.token), expiresAt: r.invitation.expiresAt, delivery: 'manual' } }, 201);
   });
   p.get('/businesses/:id', async (c) => {
     const d = await businessDetail(uuidSchema.parse(c.req.param('id')));
-    return c.json({ ...d, registrationUrl: `${publicBaseUrl(c)}/n/${d.slug}` });
+    return c.json({ ...d, registrationUrl: `${appLinkBase(c)}/n/${d.slug}`, access: accessLinks(appLinkBase(c), d.slug) });
   });
   p.patch('/businesses/:id', async (c) => c.json(await updateBusiness(c.get('admin'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
   p.post('/businesses/:id/status', async (c) => c.json(await setBusinessStatus(c.get('admin'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));

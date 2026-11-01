@@ -52,6 +52,8 @@ export interface PublicBusiness {
   accentColor: string;
   reviewUrl: string | null;
   isDemo: boolean;
+  /** URL versionada del logotipo (o null). El logotipo se sirve aparte para no inflar el JSON que se consulta cada pocos segundos. */
+  logoUrl: string | null;
   program: { stampsRequired: number; stampMode: string; maxStampsPerPurchase: number; visitWindowMinutes: number; rewardDescription: string; ruleId: string; version: number };
 }
 
@@ -65,6 +67,7 @@ export async function getBusinessById(id: string): Promise<PublicBusiness> {
   return withTenant(id, async (tx) => {
     const row = (await tx.query(
       `SELECT b.id, b.slug, b.name, b.city, b.vertical, b.primary_color, b.accent_color, b.review_url, b.is_demo,
+              CASE WHEN b.logo_data_url IS NULL THEN NULL ELSE substr(md5(b.logo_data_url), 1, 12) END AS logo_v,
               r.id AS rule_id, r.version, r.stamps_required, r.stamp_mode, r.max_stamps_per_purchase, r.visit_window_minutes, r.reward_description
          FROM businesses b JOIN reward_rules r ON r.business_id = b.id AND r.active
         WHERE b.id = $1`,
@@ -74,10 +77,22 @@ export async function getBusinessById(id: string): Promise<PublicBusiness> {
     return {
       id: row.id, slug: row.slug, name: row.name, city: row.city, vertical: row.vertical,
       primaryColor: row.primary_color, accentColor: row.accent_color, reviewUrl: row.review_url, isDemo: row.is_demo,
+      logoUrl: row.logo_v ? `/api/public/businesses/${row.slug}/logo?v=${row.logo_v}` : null,
       program: {
         ruleId: row.rule_id, version: row.version, stampsRequired: row.stamps_required, stampMode: row.stamp_mode,
         maxStampsPerPurchase: row.max_stamps_per_purchase, visitWindowMinutes: row.visit_window_minutes, rewardDescription: row.reward_description,
       },
     };
+  });
+}
+
+/** Logotipo del negocio activo (data URL validada al guardarla: solo PNG, JPEG o WebP; nunca SVG). */
+export async function getBusinessLogo(slug: string): Promise<{ mime: string; bytes: Buffer; version: string } | null> {
+  const b = (await getPool().query("SELECT id FROM businesses WHERE slug = $1 AND status = 'active'", [slug])).rows[0];
+  if (!b) return null;
+  return withTenant(b.id, async (tx) => {
+    const row = (await tx.query('SELECT logo_data_url, substr(md5(logo_data_url), 1, 12) AS v FROM businesses WHERE id = $1', [b.id])).rows[0];
+    const m = row?.logo_data_url ? /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(row.logo_data_url) : null;
+    return m ? { mime: m[1], bytes: Buffer.from(m[2], 'base64'), version: row.v } : null;
   });
 }
