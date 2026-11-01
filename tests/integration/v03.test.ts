@@ -481,3 +481,84 @@ test('el original conservado también valida bytes reales (no acepta SVG disfraz
   const r = await A.post('/api/admin/businesses', wizard({ name: 'Original Falso Toluca', logoDataUrl: PNG1, logoOriginalDataUrl: falso }));
   assert.equal(r.status, 422);
 });
+
+// ---- V0.4.4 · Brand Activation Draft: transferencia pública → Control Center ----
+const draftBody = (over: Record<string, unknown> = {}) => ({ name: 'Café Borrador Toluca', logoDataUrl: PNG1, logoFit: FIT, primaryColor: '#0B3D2E', accentColor: '#E8B04B', cardFinish: 'silver', stampsRequired: 8, rewardDescription: 'Una bebida gratis', vertical: 'cafeteria', ...over });
+const visitor = () => new Device('visitante');
+
+test('T03 un visitante sin sesión puede preparar un borrador (solo guarda un diseño)', async () => {
+  await resetRateLimits();
+  const r = await visitor().post('/api/public/activation-drafts', draftBody());
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.match(r.json.ref, /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(r.json.controlCenterUrl.includes(`activar=${r.json.ref}`));
+  const row = (await db.query('SELECT ref_hash, data FROM activation_drafts ORDER BY created_at DESC LIMIT 1')).rows[0];
+  assert.ok(!JSON.stringify(row).includes(r.json.ref), 'la referencia en claro no se guarda');
+  assert.equal((await db.query('SELECT count(*)::int n FROM businesses WHERE name = $1', ['Café Borrador Toluca'])).rows[0].n, 0, 'preparar un borrador no crea negocios');
+});
+
+test('borrador: rechaza basura, campos extra, imágenes falsas y exceso de tasa', async () => {
+  await resetRateLimits();
+  const v = visitor();
+  assert.equal((await v.post('/api/public/activation-drafts', draftBody({ isAdmin: true }))).status, 422);
+  assert.equal((await v.post('/api/public/activation-drafts', draftBody({ primaryColor: 'rojo' }))).status, 422);
+  const falso = 'data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>padding-padding').toString('base64');
+  assert.equal((await v.post('/api/public/activation-drafts', draftBody({ logoDataUrl: falso }))).status, 422);
+  assert.equal((await v.post('/api/public/activation-drafts', draftBody({ stampsRequired: 99 }))).status, 422);
+  await resetRateLimits();
+  let last = 0;
+  for (let i = 0; i < 12; i++) last = (await v.post('/api/public/activation-drafts', draftBody())).status;
+  assert.equal(last, 429, 'después de 10 por hora se limita');
+  await resetRateLimits();
+});
+
+test('T05/T19 sin sesión de administrador no se lee ni se crea nada con un borrador', async () => {
+  await resetRateLimits();
+  const v = visitor();
+  const d = await v.post('/api/public/activation-drafts', draftBody());
+  assert.ok([401, 403].includes((await v.get(`/api/admin/activation-drafts/${d.json.ref}`)).status));
+  const c = await v.post('/api/admin/businesses', wizard({ name: 'Intruso Toluca', draftRef: d.json.ref }));
+  assert.ok([401, 403].includes(c.status));
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = 'Intruso Toluca'")).rows[0].n, 0);
+  // la referencia no da permisos ni siquiera con otra sesión no administrativa
+  assert.ok([401, 403, 404].includes((await visitor().get('/api/admin/overview')).status));
+});
+
+test('T06/T09/T10/T22 el administrador recupera el borrador, crea UN negocio y no puede repetirlo', async () => {
+  await resetRateLimits();
+  const U = `Café Único ${randomUUID().slice(0, 6)} Toluca`, R = `Café Repetido ${randomUUID().slice(0, 6)} Toluca`;
+  const d = await visitor().post('/api/public/activation-drafts', draftBody({ name: U }));
+  const got = await A.get(`/api/admin/activation-drafts/${d.json.ref}`);
+  assert.equal(got.status, 200, JSON.stringify(got.json));
+  assert.equal(got.json.draft.name, U); assert.equal(got.json.draft.logoFit.plate, 'dark'); assert.equal(got.json.draft.stampsRequired, 8);
+  assert.equal((await A.get('/api/admin/activation-drafts/no-existe')).status, 404);
+  assert.equal((await A.get(`/api/admin/activation-drafts/${'a'.repeat(43)}`)).status, 404);
+  // doble clic simultáneo: exactamente un 201 y un 409
+  const body = wizard({ name: U, logoDataUrl: PNG1, logoFit: FIT, cardFinish: 'silver', draftRef: d.json.ref });
+  const [x, y] = await Promise.all([A.post('/api/admin/businesses', body), A.post('/api/admin/businesses', body)]);
+  assert.deepEqual([x.status, y.status].sort(), [201, 409], JSON.stringify([x.json, y.json]));
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = $1", [U])).rows[0].n, 1);
+  // ya consumido: ni se lee ni se repite
+  assert.equal((await A.get(`/api/admin/activation-drafts/${d.json.ref}`)).status, 410);
+  assert.equal((await A.post('/api/admin/businesses', wizard({ name: R, draftRef: d.json.ref }))).status, 409);
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = $1", [R])).rows[0].n, 0);
+  // T14: el logo y el acabado quedaron en el negocio
+  const biz = (x.status === 201 ? x : y).json;
+  const det = (await A.get(`/api/admin/businesses/${biz.businessId}`)).json;
+  assert.equal(det.cardFinish, 'silver'); assert.ok(det.logoDataUrl); assert.equal(det.logoFit.plate, 'dark');
+});
+
+test('T21 un borrador vencido no se puede leer ni activar', async () => {
+  await resetRateLimits();
+  const d = await visitor().post('/api/public/activation-drafts', draftBody({ name: 'Café Vencido Toluca' }));
+  await db.query("UPDATE activation_drafts SET created_at = now() - interval '3 days', expires_at = now() - interval '1 day' WHERE data->>'name' = 'Café Vencido Toluca'");
+  assert.equal((await A.get(`/api/admin/activation-drafts/${d.json.ref}`)).status, 410);
+  assert.equal((await A.post('/api/admin/businesses', wizard({ name: 'Café Vencido Toluca', draftRef: d.json.ref }))).status, 410);
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = 'Café Vencido Toluca'")).rows[0].n, 0);
+});
+
+test('el alta con un borrador falso no crea negocio (la transacción se revierte)', async () => {
+  const r = await A.post('/api/admin/businesses', wizard({ name: 'Falso Borrador Toluca', draftRef: 'x'.repeat(43) }));
+  assert.ok([404, 409, 410, 422].includes(r.status));
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = 'Falso Borrador Toluca'")).rows[0].n, 0);
+});

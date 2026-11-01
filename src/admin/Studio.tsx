@@ -13,6 +13,7 @@ import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { QRCode, BusinessLogo } from '../components/ui';
 import { brandVars } from '../components/Brand';
 import { FINISHES, type CardFinish } from '../lib/finish';
+import { ActivatePanel, handToWizard, type DesignDraft } from './Activation';
 import { analyzeLogo, removeLogoBackground } from './logoEngine';
 import { LogoControls, FinishCompare, BeforeAfter } from './LogoControls';
 import { defaultFit, type LogoAnalysis, type LogoFit } from '../lib/logoFit';
@@ -110,18 +111,23 @@ export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
     } catch (e) { setErr((e as Error).message); }
   };
 
-  const useInWizard = () => {
-    try { sessionStorage.setItem('vlux:studio', JSON.stringify({ name: b.name, logoDataUrl: b.logoOrig ?? b.logo, logoFit: b.fit, primaryColor: b.primary, accentColor: b.accent, cardFinish: b.finish ?? 'silver', rewardDescription: b.reward, stampsRequired: b.stamps })); } catch { /* sin almacenamiento */ }
-    navigate('/vlux-admin/negocios/nuevo');
-  };
+  const [activating, setActivating] = useState(false);
+  const design = (): DesignDraft => ({
+    name: b.name.trim() || 'Tu negocio', logoDataUrl: b.logo, logoOriginalDataUrl: b.logoOrig ?? null, logoFit: b.fit ?? null,
+    primaryColor: b.primary, accentColor: b.accent, cardFinish: b.finish ?? 'silver', stampsRequired: b.stamps, rewardDescription: b.reward.trim() || 'Un beneficio de cortesía',
+    ...(preset === 'cafe' ? { vertical: 'cafeteria' } : preset === 'barberia' ? { vertical: 'barberia' } : {}),
+  });
+  const useInWizard = () => handToWizard(design(), null);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Estudio de marca"
-        sub={publicMode ? 'Sube tu logo y mira al instante cómo quedaría tu tarjeta. Todo ocurre en tu navegador: no se sube ni se guarda nada, y no se crea ningún negocio.' : 'Sube el logo de un prospecto y mira al instante cómo quedaría su tarjeta. Todo se calcula en este navegador; nada se guarda.'}
-        actions={<>{publicMode ? <CButton onClick={() => navigate('/#solicitar')} data-testid="studio-request">Quiero esto con mi marca</CButton> : <CButton onClick={useInWizard} data-testid="studio-use">Crear negocio con esta marca</CButton>}<CButton variant="primary" onClick={() => setPresent(true)} data-testid="studio-present"><PresentationIcon size={15} /> Presentar</CButton></>}
+        sub={publicMode ? 'Sube tu logo y mira al instante cómo quedaría tu tarjeta. Todo ocurre en tu navegador hasta que pidas activarla; activar siempre lo hace el equipo de VLUX.' : 'Sube el logo de un prospecto y mira al instante cómo quedaría su tarjeta. Todo se calcula en este navegador; nada se guarda.'}
+        actions={<>{publicMode ? <CButton onClick={() => setActivating(true)} data-testid="studio-request">Solicitar activar mi tarjeta</CButton> : <CButton onClick={useInWizard} data-testid="studio-use">Continuar con alta de negocio</CButton>}<CButton variant="primary" onClick={() => setPresent(true)} data-testid="studio-present"><PresentationIcon size={15} /> Presentar</CButton></>}
       />
+
+      {publicMode && activating && <ActivatePanel design={design()} onClose={() => setActivating(false)} />}
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Casos de demostración">
         {PRESETS.map((p) => (
@@ -215,7 +221,7 @@ export function Studio({ publicMode = false }: { publicMode?: boolean } = {}) {
           </div>
         </section>
       </div>
-      {present && <Presentation3 brand={b} onClose={() => setPresent(false)} />}
+      {present && <Presentation3 brand={b} onClose={() => setPresent(false)} onRequest={publicMode ? () => { setPresent(false); setActivating(true); } : undefined} />}
     </div>
   );
 }
@@ -229,7 +235,7 @@ function SlideCard({ b, big }: { b: Brand; big?: boolean }) {
   );
 }
 
-function Presentation3({ brand: b, onClose }: { brand: Brand; onClose: () => void }) {
+function Presentation3({ brand: b, onClose, onRequest }: { brand: Brand; onClose: () => void; onRequest?: () => void }) {
   const [i, setI] = useState(0);
   const [stamped, setStamped] = useState(false);
   const slides = useMemo(() => [
@@ -283,7 +289,7 @@ function Presentation3({ brand: b, onClose }: { brand: Brand; onClose: () => voi
     },
     {
       kicker: 'Cómo empezamos', title: 'Piloto con acompañamiento', body: 'Configuramos tu marca, imprimimos tu QR y capacitamos a tu equipo. Medimos juntos cuántos clientes regresan.',
-      art: <div className="flex flex-col items-center gap-4"><SlideCard b={b} /><span className="rounded-2xl bg-[#0E1013] p-3 inline-flex"><img src="/brand/vlux-logo-full.png" alt="VLUX" width="1060" height="300" className="w-[220px] h-auto" /></span><div className="inline-flex items-center gap-2 text-[14px] opacity-90"><Sparkles size={16} /> Empezamos esta semana</div></div>,
+      art: <div className="flex flex-col items-center gap-4"><SlideCard b={b} /><span className="rounded-2xl bg-[#0E1013] p-3 inline-flex"><img src="/brand/vlux-logo-full.png" alt="VLUX" width="1060" height="300" className="w-[220px] h-auto" /></span><div className="inline-flex items-center gap-2 text-[14px] opacity-90"><Sparkles size={16} /> Empezamos esta semana</div>{onRequest && <button className="studio-stampbtn" onClick={onRequest} data-testid="deck-request" style={brandVars(b.primary, b.accent, b.finish ?? 'silver')}>Solicitar activación</button>}</div>,
     },
   ], [b, stamped]);
 

@@ -1,7 +1,7 @@
 // Asistente "+ Nuevo negocio": 4 pasos. El servidor crea todo en una sola transacción
 // (negocio, programa, suscripción e invitación del dueño). No crea proyectos ni despliegues nuevos.
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Download, ExternalLink } from 'lucide-react';
 import { api, ApiError, type Vertical } from '../lib/api';
 import { navigate } from '../lib/router';
 import { VERTICAL_LABEL } from '../lib/vertical';
@@ -12,6 +12,7 @@ import { LIMITS } from '../../shared/rules';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { brandVars } from '../components/Brand';
 import { sanitizeFit, type LogoFit } from '../lib/logoFit';
+import { forgetRef, pendingRef, safeRef } from './Activation';
 
 type Plan = { code: 'piloto' | 'inicio' | 'crecimiento'; name: string; priceCents: number; currency: string };
 type Created = { businessId: string; slug: string; registrationUrl: string; access?: { customerUrl: string; cashierUrl: string; ownerUrl: string }; ownerInvitation: { link: string; expiresAt: string } };
@@ -39,26 +40,49 @@ export function Wizard() {
     rewardDescription: PRESETS.cafeteria.reward, reviewUrl: '',
     plan: 'piloto' as Plan['code'], price: '', pilotDays: 30, isDemo: false,
   });
+  // Brand Activation Draft del que viene el diseño (se consume en la creación; evita duplicados por reintento).
+  const [draftRef, setDraftRef] = useState<string | null>(null);
+  const [fromDesign, setFromDesign] = useState(false);
+  const [draftNote, setDraftNote] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
   // Marca preparada en el Estudio de marca (solo sesión del navegador; se consume una vez).
   useEffect(() => {
+    let handed = false;
     try {
       const raw = sessionStorage.getItem('vlux:studio');
-      if (!raw) return;
-      sessionStorage.removeItem('vlux:studio');
-      const v = JSON.parse(raw);
-      const hex = /^#[0-9a-f]{6}$/i;
-      setF((x) => ({
-        ...x,
-        name: typeof v.name === 'string' ? v.name.slice(0, 60) : x.name,
-        logoDataUrl: typeof v.logoDataUrl === 'string' && v.logoDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoDataUrl) ? v.logoDataUrl : x.logoDataUrl,
-        logoFit: sanitizeFit(v.logoFit) ?? x.logoFit,
-        primaryColor: hex.test(v.primaryColor) ? v.primaryColor : x.primaryColor,
-        accentColor: hex.test(v.accentColor) ? v.accentColor : x.accentColor,
-        cardFinish: v.cardFinish === 'signature' || v.cardFinish === 'black' ? v.cardFinish : 'silver',
-        rewardDescription: typeof v.rewardDescription === 'string' ? v.rewardDescription.slice(0, 80) : x.rewardDescription,
-        stampsRequired: Number.isInteger(v.stampsRequired) && v.stampsRequired >= 3 && v.stampsRequired <= 15 ? v.stampsRequired : x.stampsRequired,
-      }));
+      if (raw) {
+        handed = true;
+        sessionStorage.removeItem('vlux:studio');
+        const v = JSON.parse(raw);
+        setDraftRef(safeRef(v.draftRef)); setFromDesign(true);
+        setDraftNote({ tone: 'ok', text: 'Diseño recuperado. Revisa los datos y completa lo que falta; puedes cambiar cualquier cosa antes de crear el negocio.' });
+        const hex = /^#[0-9a-f]{6}$/i;
+        setF((x) => ({
+          ...x,
+          name: typeof v.name === 'string' ? v.name.slice(0, 60) : x.name,
+          logoDataUrl: typeof v.logoDataUrl === 'string' && v.logoDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoDataUrl) ? v.logoDataUrl : x.logoDataUrl,
+          logoOriginalDataUrl: typeof v.logoOriginalDataUrl === 'string' && v.logoOriginalDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoOriginalDataUrl) ? v.logoOriginalDataUrl : null,
+          vertical: (['cafeteria', 'barberia', 'salon', 'restaurante', 'otro'] as const).includes(v.vertical) ? v.vertical : x.vertical,
+          logoFit: sanitizeFit(v.logoFit) ?? x.logoFit,
+          primaryColor: hex.test(v.primaryColor) ? v.primaryColor : x.primaryColor,
+          accentColor: hex.test(v.accentColor) ? v.accentColor : x.accentColor,
+          cardFinish: v.cardFinish === 'signature' || v.cardFinish === 'black' ? v.cardFinish : 'silver',
+          rewardDescription: typeof v.rewardDescription === 'string' ? v.rewardDescription.slice(0, 80) : x.rewardDescription,
+          stampsRequired: Number.isInteger(v.stampsRequired) && v.stampsRequired >= 3 && v.stampsRequired <= 15 ? v.stampsRequired : x.stampsRequired,
+        }));
+      }
     } catch { /* sin almacenamiento */ }
+    // Si se recargó la página en medio del alta, el diseño se recupera de nuevo desde el servidor con la misma referencia.
+    const ref = pendingRef();
+    if (handed || !ref) return;
+    api<{ draft: any }>('GET', `/admin/activation-drafts/${ref}`).then(({ draft: v }) => {
+      setDraftRef(ref); setFromDesign(true);
+      setDraftNote({ tone: 'ok', text: 'Diseño recuperado. Revisa los datos y completa lo que falta; puedes cambiar cualquier cosa antes de crear el negocio.' });
+      setF((x) => x.name ? x : ({ ...x, name: v.name, logoDataUrl: v.logoDataUrl, logoOriginalDataUrl: v.logoOriginalDataUrl, logoFit: sanitizeFit(v.logoFit), primaryColor: v.primaryColor, accentColor: v.accentColor, cardFinish: v.cardFinish, rewardDescription: v.rewardDescription, stampsRequired: v.stampsRequired, vertical: v.vertical ?? x.vertical }));
+    }).catch((x) => {
+      forgetRef();
+      const code = (x as ApiError).code;
+      setDraftNote({ tone: 'warn', text: code === 'draft_expired' ? 'El diseño venció (dura 24 horas). Puedes dar de alta el negocio con los datos de aquí, o volver a prepararlo desde la página pública.' : code === 'draft_consumed' ? 'Ese diseño ya se usó para crear un negocio. Revisa el directorio antes de crear otro.' : 'No se pudo recuperar el diseño. Captura los datos aquí o vuelve a prepararlo desde la página pública.' });
+    });
   }, []);
   useEffect(() => { api<{ plans: Plan[] }>('GET', '/admin/plans').then((r) => setPlans(r.plans)).catch(() => undefined); }, []);
   const plan = plans.find((p) => p.code === f.plan);
@@ -86,19 +110,29 @@ export function Wizard() {
     try {
       const r = await api<Created>('POST', '/admin/businesses', {
         name: f.name.trim(), vertical: f.vertical, city: f.city.trim(), ownerName: f.ownerName.trim(), ownerEmail: f.ownerEmail.trim(),
-        logoDataUrl: f.logoDataUrl, logoFit: f.logoFit, logoOriginalDataUrl: f.logoOriginalDataUrl, primaryColor: f.primaryColor, accentColor: f.accentColor, cardFinish: f.cardFinish,
+        logoDataUrl: f.logoDataUrl, logoFit: f.logoFit, logoOriginalDataUrl: f.logoOriginalDataUrl, draftRef: draftRef ?? undefined, primaryColor: f.primaryColor, accentColor: f.accentColor, cardFinish: f.cardFinish,
         rules: { stampsRequired: f.stampsRequired, stampMode: f.stampMode, maxStampsPerPurchase: f.stampMode === 'per_item' ? f.maxStampsPerPurchase : 1, visitWindowMinutes: f.visitWindowMinutes, rewardDescription: f.rewardDescription.trim() },
         reviewUrl: f.reviewUrl.trim() || null, plan: f.plan, priceCents, pilotDays: f.pilotDays, isDemo: f.isDemo,
       });
+      forgetRef();
       setCreated(r);
     } catch (x) {
-      setErr((x as ApiError).message);
+      const e = x as ApiError;
+      if (e.code === 'draft_expired') {
+        // El diseño venció, pero los datos siguen en pantalla: se puede crear sin la referencia.
+        setDraftRef(null); forgetRef();
+        setDraftNote({ tone: 'warn', text: 'El diseño venció, pero tus datos siguen aquí. Pulsa de nuevo para crear el negocio con lo que ves en pantalla.' });
+        setErr(null);
+      } else if (e.code === 'draft_consumed') {
+        setDraftRef(null); forgetRef();
+        setErr('Este diseño ya se usó (otra solicitud lo consumió). Revisa el directorio de negocios antes de intentar otra vez para no duplicar.');
+      } else setErr(e.message);
     } finally {
       setBusy(false);
     }
   };
 
-  if (created) return <CreatedView c={created} name={f.name} ownerName={f.ownerName} />;
+  if (created) return <CreatedView c={created} f={f} />;
 
   return (
     <>
@@ -112,6 +146,7 @@ export function Wizard() {
         ))}
       </ol>
 
+      {draftNote && <div role="status" data-testid="draft-note" data-tone={draftNote.tone} className={`mb-5 rounded-lg border px-4 py-3 text-[13px] ${draftNote.tone === 'ok' ? 'border-[#47CD89]/30 text-[#9BE3BC]' : 'border-[#F5B544]/40 text-[#F5C971]'}`}>{draftNote.text}{fromDesign && draftNote.tone === 'ok' && <span className="cc-faint"> Todavía no se ha creado nada.</span>}</div>}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px] items-start">
         <section className="cc-panel cc-sheen p-5 sm:p-6">
           {step === 0 && (
@@ -198,40 +233,95 @@ export function Wizard() {
 
 const Item = ({ k, v }: { k: string; v: string }) => <div><dt className="cc-faint text-[12px]">{k}</dt><dd className="mt-0.5 break-words">{v}</dd></div>;
 
-function CreatedView({ c, name, ownerName }: { c: Created; name: string; ownerName: string }) {
+/** Descarga un QR (SVG renderizado en pantalla) como PNG de 1024 px. */
+async function downloadQr(host: HTMLElement | null, filename: string) {
+  const svg = host?.querySelector('svg');
+  if (!svg) return;
+  const xml = new XMLSerializer().serializeToString(svg);
+  const img = new Image();
+  await new Promise<void>((ok, bad) => { img.onload = () => ok(); img.onerror = () => bad(new Error('qr')); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml); });
+  const c = document.createElement('canvas'); c.width = c.height = 1024;
+  const g = c.getContext('2d')!; g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, 1024, 1024);
+  const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = filename; a.click();
+}
+
+function QrBlock({ value, label, file }: { value: string; label: string; file: string }) {
+  const ref = React.useRef<HTMLDivElement>(null);
   return (
-    <div className="max-w-[760px]">
-      <div className="inline-flex items-center gap-2 text-[12.5px] text-[#47CD89]"><Check size={15} /> Negocio creado</div>
-      <h1 className="mt-2 text-[24px] font-medium tracking-[-0.01em]" data-testid="created-name">{name}</h1>
-      <p className="mt-1.5 text-[13.5px] cc-muted">Siguiente paso: envía la invitación a {ownerName}. <strong className="text-white">No se envió ningún correo</strong> (no hay proveedor configurado); compártela tú por un canal seguro.</p>
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <section className="cc-panel p-5 flex flex-col items-center gap-3 text-center">
-          <div className="cc-label self-start">Invitación del dueño · un solo uso · 72 h</div>
-          <div className="rounded-lg bg-white p-2"><QRCode value={c.ownerInvitation.link} size={150} label="QR de la invitación del dueño" /></div>
-          <div className="cc-code w-full text-left select-all" data-testid="owner-invite-link">{c.ownerInvitation.link}</div>
-          <CopyButton dark text={c.ownerInvitation.link} />
-        </section>
-        <section className="cc-panel p-5 flex flex-col items-center gap-3 text-center">
-          <div className="cc-label self-start">Registro de clientes (QR del mostrador)</div>
-          <div className="rounded-lg bg-white p-2"><QRCode value={c.registrationUrl} size={150} label="QR de registro de clientes" /></div>
-          <div className="cc-code w-full text-left" data-testid="created-registration-url">{c.registrationUrl}</div>
-          <CopyButton dark text={c.registrationUrl} />
-        </section>
+    <div className="flex flex-col items-start gap-2">
+      <div ref={ref} className="rounded-lg bg-white p-2 self-start"><QRCode value={value} size={132} label={label} /></div>
+      <CButton small onClick={() => downloadQr(ref.current, file)} data-testid={`qr-download-${file.replace(/\.png$/, '')}`}><Download size={13} /> Descargar QR</CButton>
+    </div>
+  );
+}
+
+function Row({ k, v, testid }: { k: string; v: string; testid?: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="cc-faint text-[12px] mb-1">{k}</div>
+      <div className="flex items-start gap-2">
+        <div className="cc-code flex-1 min-w-0 break-all" data-testid={testid}>{v}</div>
+        <CopyButton dark text={v} />
       </div>
-      {c.access && (
-        <section className="mt-4 cc-panel p-5" data-testid="created-access" aria-label="Accesos del negocio">
-          <div className="cc-label">Accesos del negocio · el dueño los verá también en su panel (pestaña Accesos)</div>
-          <dl className="mt-3 grid gap-3 text-[13px]">
-            {([['Clientes (QR del mostrador)', c.access.customerUrl], ['Caja (empleados, con contraseña)', c.access.cashierUrl], ['Panel del dueño (con contraseña)', c.access.ownerUrl]] as const).map(([k, v]) => (
-              <div key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1"><dt className="cc-faint w-[220px] shrink-0">{k}</dt><dd className="cc-code flex-1 min-w-0 break-all">{v}</dd><CopyButton dark text={v} /></div>
-            ))}
-          </dl>
-        </section>
-      )}
-      <div className="mt-6 flex flex-wrap gap-2">
-        <CButton variant="primary" onClick={() => navigate(`/vlux-admin/negocios/${c.businessId}`)}>Abrir ficha del negocio</CButton>
-        <CButton onClick={() => navigate('/vlux-admin/negocios')}>Volver al directorio</CButton>
+    </div>
+  );
+}
+
+/** Pantalla posterior al alta. Solo dice lo que es verdad: se generaron enlaces e invitación manual; no se envió ningún correo ni el negocio está operando todavía. */
+function CreatedView({ c, f }: { c: Created; f: { name: string; ownerName: string; ownerEmail: string; primaryColor: string; accentColor: string; cardFinish: 'signature' | 'silver' | 'black'; logoDataUrl: string | null; logoFit: LogoFit | null; stampsRequired: number } }) {
+  const access = c.access ?? { customerUrl: c.registrationUrl, cashierUrl: '', ownerUrl: '' };
+  const ficha = `/vlux-admin/negocios/${c.businessId}`;
+  return (
+    <div className="max-w-[980px]" data-testid="activation-screen">
+      <div className="inline-flex items-center gap-2 text-[12.5px] text-[#47CD89]"><Check size={15} /> Configuración creada</div>
+      <h1 className="mt-2 text-[26px] font-medium tracking-[-0.015em]">Tu negocio está configurado</h1>
+      <p className="mt-1 text-[14px] font-medium" data-testid="created-name">{f.name}</p>
+      <p className="mt-1.5 text-[13.5px] cc-muted max-w-[68ch]">Estado: <strong className="text-white">configuración creada</strong>. Todavía no opera: falta que {f.ownerName} acepte su invitación y que definas el acceso de caja. <strong className="text-white">No se envió ningún correo</strong> (no hay proveedor configurado); comparte los enlaces por un canal seguro.</p>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,380px)_1fr] items-start">
+        <div style={brandVars(f.primaryColor, f.accentColor, f.cardFinish)} data-testid="activation-card">
+          <LoyaltyCardFace businessName={f.name} customerName="Mariana López" cardId="VX-4F7K-92" total={f.stampsRequired} filled={0} logoUrl={f.logoDataUrl} logoFit={f.logoFit} footer={<span className="opacity-70">Vista previa</span>} />
+        </div>
+        <div className="flex flex-col gap-4" data-testid="created-access">
+          <section className="cc-panel p-5" aria-label="Cliente" data-testid="activation-customer">
+            <div className="cc-label">Cliente · QR del mostrador</div>
+            <div className="mt-3 flex flex-wrap gap-5">
+              <QrBlock value={access.customerUrl} label="QR de registro de clientes" file={`${c.slug}-clientes.png`} />
+              <div className="flex-1 min-w-[220px] flex flex-col gap-3">
+                <Row k="Enlace público" v={access.customerUrl} testid="created-registration-url" />
+                <div className="flex flex-wrap gap-2"><a className="cc-btn cc-btn-primary" href={access.customerUrl} target="_blank" rel="noopener noreferrer" data-testid="open-customer">Abrir experiencia del cliente <ExternalLink size={14} /></a></div>
+              </div>
+            </div>
+          </section>
+          <section className="cc-panel p-5" aria-label="Propietario" data-testid="activation-owner">
+            <div className="cc-label">Propietario · invitación de un solo uso · 72 h · entrega manual</div>
+            <div className="mt-3 flex flex-wrap gap-5">
+              <QrBlock value={c.ownerInvitation.link} label="QR de la invitación del dueño" file={`${c.slug}-invitacion-dueno.png`} />
+              <div className="flex-1 min-w-[220px] flex flex-col gap-3">
+                <Row k={`Para ${f.ownerName}`} v={c.ownerInvitation.link} testid="owner-invite-link" />
+                {access.ownerUrl && <Row k="Panel del dueño" v={access.ownerUrl} />}
+                {access.ownerUrl && <div className="flex flex-wrap gap-2"><a className="cc-btn" href={access.ownerUrl} target="_blank" rel="noopener noreferrer" data-testid="open-owner-panel">Abrir panel del dueño <ExternalLink size={14} /></a></div>}
+                <p className="text-[12px] cc-faint">El panel del dueño pide la contraseña que se crea al aceptar la invitación.</p>
+              </div>
+            </div>
+          </section>
+          <section className="cc-panel p-5" aria-label="Empleados" data-testid="activation-staff">
+            <div className="cc-label">Empleados · caja</div>
+            <div className="mt-3 flex flex-col gap-3">
+              {access.cashierUrl && <Row k="Acceso de caja" v={access.cashierUrl} testid="created-cashier-url" />}
+              <div className="flex flex-wrap gap-2"><CButton onClick={() => navigate(ficha)} data-testid="invite-employee">Invitar empleado</CButton></div>
+              <p className="text-[12px] cc-faint">Cada empleado entra con su propia invitación; se crean desde la ficha del negocio.</p>
+            </div>
+          </section>
+        </div>
       </div>
+
+      <section className="mt-6 flex flex-wrap gap-2" aria-label="VLUX" data-testid="activation-vlux">
+        <CButton variant="primary" onClick={() => navigate(ficha)} data-testid="view-access">Ver accesos del negocio</CButton>
+        <CButton onClick={() => navigate(ficha)}>Ver ficha del negocio</CButton>
+        <CButton onClick={() => navigate(ficha)}>Editar configuración</CButton>
+        <CButton variant="ghost" onClick={() => navigate('/vlux-admin/negocios')}>Volver a Control Center</CButton>
+      </section>
     </div>
   );
 }

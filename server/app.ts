@@ -19,6 +19,7 @@ import { changePassword, ownerIssueEmployeeReset, platformIssueReset, reissueCar
 import { ensureSafeRole } from './db';
 import { registerCustomer, resolveCardToken } from './services/customers';
 import { issuePairCode, redeemPairCode } from './services/pairing';
+import { createDraft, DRAFT_TTL_HOURS } from './services/drafts';
 import { accessLinks } from './access-links';
 import { buildManifest, buildStaffManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
@@ -153,10 +154,10 @@ export function buildApp() {
   // 16 KB en general; el Control Center admite hasta 128 KB porque el alta/edición lleva el logotipo (máx. ~64 KB).
   const tooLarge = () => { throw new AppError(400, 'body_too_large', 'La solicitud es demasiado grande.'); };
   const smallBody = bodyLimit({ maxSize: 16 * 1024, onError: tooLarge });
-  const adminBody = bodyLimit({ maxSize: 128 * 1024, onError: tooLarge });
+  const adminBody = bodyLimit({ maxSize: 256 * 1024, onError: tooLarge });
   // Solo el alta y la edición de negocios llevan logotipo; el resto del Control Center (login, 2FA...) queda en 16 KB.
   const bigBody = (c: { req: { method: string; path: string } }) =>
-    (c.req.method === 'POST' && c.req.path === '/api/admin/businesses') || (c.req.method === 'PATCH' && /^\/api\/admin\/businesses\/[0-9a-f-]{36}$/.test(c.req.path));
+    (c.req.method === 'POST' && (c.req.path === '/api/admin/businesses' || c.req.path === '/api/public/activation-drafts')) || (c.req.method === 'PATCH' && /^\/api\/admin\/businesses\/[0-9a-f-]{36}$/.test(c.req.path));
   api.use('*', (c, next) => (bigBody(c) ? adminBody(c, next) : smallBody(c, next)));
   api.use('*', csrfGuard);
   api.use('*', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next(); });
@@ -317,6 +318,14 @@ export function buildApp() {
   api.post('/staff/password-reset', async (c) => {
     await rateLimit(`reset:${clientIp(c)}`, 10, 15 * 60_000);
     return c.json(await resetPasswordWithToken(await jsonBody(c)));
+  });
+
+  // V0.4.4 · Brand Activation Draft: guarda un DISEÑO (no crea negocios ni permisos). La referencia no da acceso a nada:
+  // solo un administrador con sesión y 2FA puede leerla y usarla (en /api/admin). Respuesta: referencia + dirección del Control Center.
+  api.post('/public/activation-drafts', async (c) => {
+    const r = await createDraft(await jsonBody(c), clientIp(c));
+    const target = config.adminAppUrl || '';
+    return c.json({ ref: r.ref, expiresAt: r.expiresAt, ttlHours: DRAFT_TTL_HOURS, controlCenterUrl: `${target}/vlux-admin/negocios/desde-diseno?activar=${r.ref}`, controlCenterConfigured: !!target }, 201);
   });
 
   // Acceso de demostración: sin credenciales publicadas; solo con DEMO_ACCESS=1 y sobre el negocio sintético.

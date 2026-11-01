@@ -12,6 +12,7 @@ import { platformAudit, type AdminSession } from './platform-auth';
 import { GoogleWalletProvider } from '../wallet/google';
 import { AppleWalletProvider } from '../wallet/apple';
 import { logoBytesMatch } from '../image-check';
+import { consumeDraft, lockDraft } from './drafts';
 import { sanitizeFit } from '../../src/lib/logoFit';
 import { emailSchema, rulesSchema, slugSchema, verticals } from '../validation';
 
@@ -44,6 +45,8 @@ export const wizardSchema = z.object({
   priceCents: z.number().int().min(0).max(100_000_000).optional(),
   pilotDays: z.number().int().min(1).max(180).default(30),
   isDemo: z.boolean().default(false),
+  /** Referencia del Brand Activation Draft del que viene el diseño (se consume en la misma transacción). */
+  draftRef: z.string().max(60).optional(),
 });
 
 export const businessEditSchema = z.object({
@@ -92,6 +95,7 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
   const plan = (await getPool().query('SELECT code, price_cents, currency FROM plans WHERE code = $1', [input.plan])).rows[0];
   if (!plan) throw new AppError(422, 'validation', 'Plan inválido.');
   const result = await withTx(async (tx) => {
+    const draftId = input.draftRef ? await lockDraft(tx, input.draftRef) : null;
     // Identificador único: el sugerido o el derivado del nombre, con sufijo si ya existe.
     const base = input.slug ?? slugify(input.name);
     let slug = base;
@@ -104,6 +108,7 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
       [slug, input.name, input.city, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl, input.isDemo, input.logoDataUrl, input.cardFinish, input.logoFit ? JSON.stringify(input.logoFit) : null, input.logoDataUrl ? input.logoOriginalDataUrl : null],
     )).rows[0].id as string;
+    if (draftId) await consumeDraft(tx, draftId, biz);
     await tx.query("SELECT set_config('app.business_id', $1, true)", [biz]);
     const r = input.rules;
     await tx.query(
@@ -121,7 +126,7 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
     );
     const inv = await createInvitation(tx, { businessId: biz, email: input.ownerEmail, displayName: input.ownerName, role: 'OWNER', by: { type: 'platform', id: admin.adminId } });
     await audit(tx, biz, { type: 'platform', id: null }, 'business.created', 'business', biz, { slug, plan: input.plan, via: 'control_center' });
-    await platformAudit(tx, admin.adminId, 'business.created', { businessId: biz, entityType: 'business', entityId: biz, details: { slug, plan: input.plan, isDemo: input.isDemo } });
+    await platformAudit(tx, admin.adminId, 'business.created', { businessId: biz, entityType: 'business', entityId: biz, details: { slug, plan: input.plan, isDemo: input.isDemo, fromDraft: !!input.draftRef } });
     return { businessId: biz, slug, invitation: inv };
   });
   return result;

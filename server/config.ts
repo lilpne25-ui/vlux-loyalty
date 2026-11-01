@@ -22,6 +22,13 @@ export const config = {
     if (process.env.NODE_ENV === 'production' && v.startsWith('http://') && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v)) return '';
     return v;
   })(),
+  // V0.4.4 · Origen del Control Center al que la parte pública envía a VLUX para activar un diseño (otro proyecto de Vercel).
+  adminAppUrl: (() => {
+    const v = (process.env.ADMIN_APP_URL || '').replace(/\/$/, '');
+    if (!/^https?:\/\/[a-z0-9.:-]+$/i.test(v)) return '';
+    if (process.env.NODE_ENV === 'production' && v.startsWith('http://') && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v)) return '';
+    return v;
+  })(),
   onVercel: process.env.VERCEL === '1',
   poolMax: Math.max(1, Math.min(20, Number(process.env.PG_POOL_MAX) || (process.env.VERCEL === '1' ? 3 : 10))),
   allowUnsafeDbRole: process.env.ALLOW_UNSAFE_DB_ROLE === '1',

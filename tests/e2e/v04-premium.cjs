@@ -166,7 +166,7 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   await vlux.click('button.cc-choice:has-text("Piloto")');
   await vlux.click('button:has-text("Siguiente")');
   await vlux.waitForSelector('[data-testid=wizard-summary]');
-  await vlux.click('button:has-text("Crear negocio")');
+  await vlux.click('main button:text-is("Crear negocio")');
   await vlux.waitForSelector('[data-testid=owner-invite-link]');
   const invite = (await vlux.textContent('[data-testid=owner-invite-link]')).trim();
   const regUrl = (await vlux.textContent('[data-testid=created-registration-url]')).trim();

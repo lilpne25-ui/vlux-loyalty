@@ -1,6 +1,7 @@
 // V0.3 · API del VLUX Control Center (/api/admin). Separada del personal de los negocios:
 // cookie propia (vlx_admin, path /api/admin, SameSite=Strict), segundo factor obligatorio y bitácora global.
 // Si CONTROL_CENTER_ENABLED no está activo en el despliegue, toda la ruta responde 404.
+import { readDraft } from './services/drafts';
 import { accessLinks } from './access-links';
 import { Hono, type Context, type Next } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
@@ -111,6 +112,7 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBod
     return c.json({ businessId: r.businessId, slug: r.slug, registrationUrl: `${appLinkBase(c)}/n/${r.slug}`, access: accessLinks(appLinkBase(c), r.slug),
       ownerInvitation: { link: inviteLink(c, r.invitation.token), expiresAt: r.invitation.expiresAt, delivery: 'manual' } }, 201);
   });
+  p.get('/activation-drafts/:ref', async (c) => c.json(await readDraft(c.req.param('ref'), c.get('admin').adminId)));
   p.get('/businesses/:id', async (c) => {
     const d = await businessDetail(uuidSchema.parse(c.req.param('id')));
     return c.json({ ...d, registrationUrl: `${appLinkBase(c)}/n/${d.slug}`, access: accessLinks(appLinkBase(c), d.slug) });
