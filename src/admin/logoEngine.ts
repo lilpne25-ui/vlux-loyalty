@@ -3,6 +3,7 @@
 import { analyzePixels, defaultFit, removeBackground, type LogoAnalysis, type LogoFit } from '../lib/logoFit';
 
 const MAX_CHARS = 90_000;
+const MAX_PIXELS = 1024 * 1024;
 
 async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((ok, bad) => {
@@ -17,6 +18,8 @@ async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
 async function pixels(dataUrl: string) {
   const img = await loadImage(dataUrl);
   const w = img.naturalWidth, h = img.naturalHeight;
+  // Tope duro: el logo guardado ya viene reducido a 256 px, pero un archivo viejo o manipulado podría declarar miles de píxeles por lado.
+  if (!w || !h || w * h > MAX_PIXELS) throw new Error('La imagen es demasiado grande para analizarla.');
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true })!;

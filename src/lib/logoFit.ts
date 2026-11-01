@@ -51,6 +51,7 @@ function borderBackground(d: Px, w: number, h: number): { rgb: RGB; confident: b
 }
 
 export function analyzePixels(d: Px, w: number, h: number): LogoAnalysis {
+  if (!(w > 0 && h > 0)) throw new Error('Imagen vacía.');
   const warnings: string[] = [];
   const total = w * h;
   let transparent = 0;
@@ -98,6 +99,7 @@ export function analyzePixels(d: Px, w: number, h: number): LogoAnalysis {
  * no es confiable (fondo no uniforme, o se come casi todo / casi nada). Pensada para ser opcional y reversible.
  */
 export function removeBackground(d: Px, w: number, h: number, bgRgb: RGB, tol = 34): { data: Uint8ClampedArray; removed: number } | null {
+  if (!(w > 0 && h > 0) || w * h > 4_000_000) return null; // tope de memoria/tiempo
   const out = new Uint8ClampedArray(d.length);
   for (let i = 0; i < d.length; i++) out[i] = d[i];
   const total = w * h;

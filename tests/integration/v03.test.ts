@@ -436,3 +436,48 @@ test('logotipo: el servidor valida los bytes reales, no solo el prefijo del nave
   const svg = await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', name: 'Logo Svg Toluca' }));
   assert.equal(svg.status, 422);
 });
+
+// ---- V0.4.3 · Intelligent Logo Engine: persistencia, validación y aislamiento ----
+const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const FIT = { v: 1, iw: 1, ih: 1, bounds: { x: 0, y: 0, w: 1, h: 1 }, plate: 'dark', scale: 1.2, dx: 0.05, dy: 0, pad: 0.1, align: 'left' };
+
+test('T21 el Estudio/asistente guarda acabado, ajuste del logo y original; el original no se expone', async () => {
+  const r = await A.post('/api/admin/businesses', wizard({ name: 'Logo Ajuste Toluca', logoDataUrl: PNG1, logoFit: FIT, logoOriginalDataUrl: PNG1, cardFinish: 'black' }));
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  const d = (await A.get(`/api/admin/businesses/${r.json.businessId}`)).json;
+  assert.equal(d.cardFinish, 'black');
+  assert.equal(d.logoFit.plate, 'dark'); assert.equal(d.logoFit.align, 'left'); assert.equal(d.logoOriginalDataUrl, PNG1);
+  const pub = await new Device('anon').get(`/api/public/businesses/${r.json.slug}`);
+  const txt = JSON.stringify(pub.json);
+  assert.equal(pub.json.business.logoFit.plate, 'dark');
+  assert.ok(!txt.includes('logoOriginal') && !txt.includes(PNG1.slice(30, 60)), 'el original no sale en la API pública');
+});
+
+test('logo_fit se sanea: valores fuera de rango se acotan y la basura se descarta', async () => {
+  const r = await A.post('/api/admin/businesses', wizard({ name: 'Logo Basura Metepec', logoFit: { v: 1, iw: 99999, ih: 5, bounds: { x: 0, y: 0, w: 1, h: 1 }, scale: 50 } }));
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.equal((await A.get(`/api/admin/businesses/${r.json.businessId}`)).json.logoFit.iw, 4096);
+  const r2 = await A.post('/api/admin/businesses', wizard({ name: 'Logo Basura Dos Metepec', logoFit: '<script>alert(1)</script>' }));
+  assert.equal(r2.status, 201);
+  assert.equal((await A.get(`/api/admin/businesses/${r2.json.businessId}`)).json.logoFit, null);
+});
+
+test('T22 el ajuste de un negocio no afecta a otro y se puede restaurar (editar sin ajuste)', async () => {
+  const a = await A.post('/api/admin/businesses', wizard({ name: 'Aislado Uno Toluca', logoDataUrl: PNG1, logoFit: FIT }));
+  const b = await A.post('/api/admin/businesses', wizard({ name: 'Aislado Dos Toluca', logoDataUrl: PNG1 }));
+  const bd = (await A.get(`/api/admin/businesses/${b.json.businessId}`)).json;
+  assert.equal(bd.logoFit, null);
+  const d1 = (await A.get(`/api/admin/businesses/${a.json.businessId}`)).json;
+  const ed = await A.req('PATCH', `/api/admin/businesses/${a.json.businessId}`, { name: d1.name, vertical: d1.vertical, city: d1.city, primaryColor: d1.primaryColor, accentColor: d1.accentColor, reviewUrl: d1.reviewUrl, logoDataUrl: PNG1, cardFinish: d1.cardFinish, logoFit: null });
+  assert.equal(ed.status, 200, JSON.stringify(ed.json));
+  assert.equal((await A.get(`/api/admin/businesses/${a.json.businessId}`)).json.logoFit, null);
+  // quitar el logo borra también el original conservado
+  const rm = await A.req('PATCH', `/api/admin/businesses/${a.json.businessId}`, { name: d1.name, vertical: d1.vertical, city: d1.city, primaryColor: d1.primaryColor, accentColor: d1.accentColor, reviewUrl: d1.reviewUrl, logoDataUrl: null, cardFinish: d1.cardFinish, logoOriginalDataUrl: PNG1 });
+  assert.equal((await A.get(`/api/admin/businesses/${a.json.businessId}`)).json.logoOriginalDataUrl, null);
+});
+
+test('el original conservado también valida bytes reales (no acepta SVG disfrazado)', async () => {
+  const falso = 'data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>padding-padding').toString('base64');
+  const r = await A.post('/api/admin/businesses', wizard({ name: 'Original Falso Toluca', logoDataUrl: PNG1, logoOriginalDataUrl: falso }));
+  assert.equal(r.status, 422);
+});

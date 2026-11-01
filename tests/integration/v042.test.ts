@@ -91,9 +91,11 @@ test('acceso de demostración: apagado por omisión; encendido solo abre cuentas
 
 test('el login normal no abre las cuentas reservadas de demostración (contraseña desconocida)', async () => {
   await resetRateLimits();
+  // El bloqueo por intentos fallidos persiste entre corridas: se limpia para que la prueba sea repetible.
+  await admin.query("UPDATE staff_users SET failed_logins = 0, locked_until = NULL WHERE email LIKE '%@demo.vlux.invalid'");
   const d = new Device('x');
   const r = await d.post('/api/staff/login', { email: 'dueno@demo.vlux.invalid', password: 'cualquiera-123456' });
-  assert.equal(r.status, 401);
+  assert.equal(r.status, 401, JSON.stringify(r.json));
 });
 
 test('el Control Center sigue apagado sin CONTROL_CENTER_ENABLED en producción y /api/admin no existe en el público', async () => {
