@@ -1,10 +1,12 @@
-# VLUX Loyalty · V0.2.2 (tarjeta instalable en el teléfono)
+# VLUX Loyalty · V0.3 (VLUX Control Center)
 
 > Haz que tus clientes tengan una razón más para regresar.
 
 Tarjeta de recompensas web para pequeños negocios (cafeterías, barberías, salones…). El cliente no instala nada: escanea el QR del mostrador y obtiene su tarjeta en el navegador. El personal registra compras desde su teléfono y el dueño ve los resultados en su panel. Un solo despliegue atiende a muchos negocios, con los datos aislados entre ellos.
 
 **Estado:** V0.2.2 en Vercel (solo Preview) + Supabase. El cliente puede guardar su tarjeta en la pantalla de inicio del iPhone o Android (PWA, sin tienda de apps). Demo pública para clientes sin cuenta de Vercel y entorno interno protegido (ver `docs/ACCESO_VERCEL_V022.md`). **No hay despliegue en Production.** La PWA **no es** Apple Wallet ni Google Wallet; esas siguen como fase futura (`docs/PROPUESTA_V03_WALLET.md`). Pruebas en teléfonos físicos: pendientes.
+
+**V0.3 · Control Center** (rama `v0.3`, solo Preview): consola `/vlux-admin` para el equipo VLUX con contraseña + 2FA obligatorio; alta de negocios con asistente de 4 pasos; invitaciones de un solo uso para dueños y empleados; selector de negocio; suscripciones manuales; bitácora global. Google Wallet: preparado pero **bloqueado** sin cuenta de emisor. Apple Wallet: solo evaluación. Respaldos: **no operativos** todavía. Ver `docs/V03_CONTROL_CENTER.md`.
 
 ## Qué hace
 - Registro del cliente desde el QR del negocio (`/n/<negocio>`), sin contraseña; enlace personal para abrir su tarjeta en otro teléfono.
@@ -63,6 +65,13 @@ docs/                      informes, manuales, evidencia
 `npm run build:vercel` genera `.vercel/output` (Build Output API v3): estáticos + una Function Node 22 con Hono. Base: Supabase vía Transaction Pooler con el rol `vlux_app` (sin privilegios de dueño). Production está bloqueado a propósito. Paso a paso, variables y recuperación en `docs/DESPLIEGUE_VERCEL_SUPABASE.md`.
 
 ## Documentación
+- `docs/V03_CONTROL_CENTER.md` · instalación y uso del Control Center
+- `docs/V03_SEGURIDAD.md` · informe de seguridad V0.3
+- `docs/V03_AUDITORIA.md` · auditoría inicial
+- `docs/calidad/atomos-v03.md` · átomos V0.3 y estado
+- `docs/V03_GOOGLE_WALLET.md` · preparación Google Wallet
+- `docs/V03_APPLE_WALLET.md` · evaluación Apple Wallet
+- `docs/V03_PLAN_PILOTO_COMERCIAL.md` · plan de piloto comercial
 - `docs/INFORME_TECNICO.md` · arquitectura y decisiones
 - `docs/INFORME_SEGURIDAD.md` · controles y pendientes (V0.2)
 - `docs/INFORME_SEGURIDAD_V021.md` · seguridad en Vercel + Supabase

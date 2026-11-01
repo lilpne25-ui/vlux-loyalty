@@ -6,7 +6,7 @@
 name: PWA en navegadores
 on:
   push:
-    branches: ['v0.2.2', 'main']
+    branches: ['v0.2.2', 'v0.3', 'main']
   workflow_dispatch:
     inputs:
       base_url:

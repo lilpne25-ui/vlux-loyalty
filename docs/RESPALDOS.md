@@ -6,6 +6,16 @@
 | Preview (`vlux-loyalty-preview`) | Free | **No incluido** (Free no tiene respaldos automáticos y pausa el proyecto tras 1 semana sin actividad) | Flujo diario en GitHub Actions, **NO OPERATIVO** (ver estado verificado V0.2.2) |
 | Piloto con datos reales | Pro (requerido) | Diario, 7 días de retención | Además, el flujo diario (copia externa, 30 días) |
 
+## Estado verificado (V0.3, 2026-11-01)
+**Sigue NO OPERATIVO.** Nada cambió en lo que falta: el workflow no está en `main` y no hay constancia de los secretos en GitHub. No se fusionó nada en `main` (requiere autorización de Vlux).
+
+Mejoras de V0.3 en la rama `v0.3`:
+- Integridad del archivo cifrado: se descifra y se compara el SHA-256 con el del respaldo original antes de borrarlo; se publica el SHA-256 del `.gpg`.
+- Aviso de falla: si el job falla, abre (o comenta) un issue `Respaldo diario FALLÓ` en el repositorio, sin datos ni secretos.
+- La verificación ahora también cuenta `business_subscriptions` y `platform_audit_events` (tablas de V0.3).
+- Retención: 30 días (artefactos de Actions).
+- Prueba local repetida con el esquema V0.3: **VERIFICADO en local** (`docs/evidencia/v03-respaldo-restauracion-local.txt`). No es una prueba contra Supabase.
+
 ## Estado verificado (V0.2.2, 2026-10-31)
 | Punto | Estado real | Cómo se comprobó |
 | :- | :- | :- |
