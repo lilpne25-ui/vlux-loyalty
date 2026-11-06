@@ -8,6 +8,7 @@ import { AppError, notFound } from '../errors';
 import { audit } from './audit';
 import { getBusinessById } from './businesses';
 import { createInvitation, listInvitations } from './invitations';
+import { emailState } from './email-invitations';
 import { platformAudit, type AdminSession } from './platform-auth';
 import { GoogleWalletProvider } from '../wallet/google';
 import { AppleWalletProvider } from '../wallet/apple';
@@ -198,7 +199,7 @@ export async function overview() {
       region: process.env.VERCEL_REGION || 'local',
       node: process.version,
       database: { ok: true, latencyMs: dbMs, schema: 'V0.4.5 (0011_business_lifecycle)' },
-      emailProvider: 'no configurado (las invitaciones se entregan por enlace)',
+      emailProvider: (() => { const e = emailState(); return e.state === 'configured' ? `Resend configurado (${e.from}); webhook ${e.webhook ? 'firmado activo' : 'sin configurar: no se sabrá la entrega final'}` : e.state === 'mock' ? 'simulado (solo pruebas)' : 'no configurado (las invitaciones se entregan copiando el enlace)'; })(),
       wallet: {
         google: walletLabel(GoogleWalletProvider.fromEnv().status()),
         apple: new AppleWalletProvider().status().state === 'configured' ? 'configurado' : 'no disponible (sin certificados de Apple)',

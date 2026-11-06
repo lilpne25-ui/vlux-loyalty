@@ -18,6 +18,7 @@ import {
   updateBusiness, updatePlan, updateSubscription,
 } from './services/platform';
 import { archiveBusiness, declareSynthetic, deleteBusiness, deletionPreview, exportBusiness, listDeletions, restoreBusiness } from './services/lifecycle';
+import { emailState, sendInvitationEmail } from './services/email-invitations';
 import { inviteSchema, inviteStaff, resendInvitation, revokeInvitation } from './services/invitations';
 import { z } from 'zod';
 
@@ -111,7 +112,7 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBod
   p.post('/businesses', async (c) => {
     const r = await createBusinessFromWizard(c.get('admin'), await jsonBody(c));
     return c.json({ businessId: r.businessId, slug: r.slug, registrationUrl: `${appLinkBase(c)}/n/${r.slug}`, access: accessLinks(appLinkBase(c), r.slug),
-      ownerInvitation: { link: inviteLink(c, r.invitation.token), expiresAt: r.invitation.expiresAt, delivery: 'manual' } }, 201);
+      ownerInvitation: { invitationId: r.invitation.invitationId, link: inviteLink(c, r.invitation.token), expiresAt: r.invitation.expiresAt, delivery: 'manual' }, email: emailState() }, 201);
   });
   p.get('/activation-drafts/:ref', async (c) => c.json(await readDraft(c.req.param('ref'), c.get('admin').adminId)));
   p.get('/businesses/:id', async (c) => {
@@ -150,11 +151,21 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBod
     const body = await jsonBody(c);
     const input = inviteSchema.and(roleSchema).parse(body);
     const r = await inviteStaff({ businessId: id, email: input.email, displayName: input.displayName, role: input.role, by: { type: 'platform', id: c.get('admin').adminId } });
-    return c.json({ invitationId: r.invitationId, link: inviteLink(c, r.token), expiresAt: r.expiresAt, delivery: 'manual' }, 201);
+    return c.json({ invitationId: r.invitationId, link: inviteLink(c, r.token), expiresAt: r.expiresAt, delivery: 'manual', email: emailState() }, 201);
   });
   p.post('/businesses/:id/invitations/:invId/resend', async (c) => {
     const r = await resendInvitation(uuidSchema.parse(c.req.param('id')), uuidSchema.parse(c.req.param('invId')), { type: 'platform', id: c.get('admin').adminId });
     return c.json({ invitationId: r.invitationId, link: inviteLink(c, r.token), expiresAt: r.expiresAt, delivery: 'manual' });
+  });
+  // V0.4.5 · Envío por correo (después del commit), con límites por administrador, negocio e invitación.
+  p.get('/email/status', (c) => c.json(emailState()));
+  p.post('/businesses/:id/invitations/:invId/send-email', async (c) => {
+    const a = c.get('admin');
+    const id = uuidSchema.parse(c.req.param('id'));
+    await rateLimit(`email-admin:${a.adminId}`, 30, 60 * 60_000);
+    await rateLimit(`email-business:${id}`, 20, 24 * 60 * 60_000);
+    const r = await sendInvitationEmail({ adminId: a.adminId, businessId: id, invitationId: uuidSchema.parse(c.req.param('invId')), linkBase: appLinkBase(c), assetBase: appLinkBase(c) });
+    return c.json(r);
   });
   p.post('/businesses/:id/invitations/:invId/revoke', async (c) =>
     c.json(await revokeInvitation(uuidSchema.parse(c.req.param('id')), uuidSchema.parse(c.req.param('invId')), { type: 'platform', id: c.get('admin').adminId })));

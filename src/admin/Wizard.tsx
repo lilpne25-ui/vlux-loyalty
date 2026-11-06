@@ -1,5 +1,6 @@
 // Asistente "+ Nuevo negocio": 4 pasos. El servidor crea todo en una sola transacción
 // (negocio, programa, suscripción e invitación del dueño). No crea proyectos ni despliegues nuevos.
+import { EmailInviteBlock } from './EmailInvite';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, ExternalLink } from 'lucide-react';
 import { api, ApiError, type Vertical } from '../lib/api';
@@ -15,7 +16,7 @@ import { sanitizeFit, type LogoFit } from '../lib/logoFit';
 import { forgetRef, pendingRef, safeRef } from './Activation';
 
 type Plan = { code: 'piloto' | 'inicio' | 'crecimiento'; name: string; priceCents: number; currency: string };
-type Created = { businessId: string; slug: string; registrationUrl: string; access?: { customerUrl: string; cashierUrl: string; ownerUrl: string }; ownerInvitation: { link: string; expiresAt: string } };
+type Created = { businessId: string; slug: string; registrationUrl: string; access?: { customerUrl: string; cashierUrl: string; ownerUrl: string }; ownerInvitation: { invitationId?: string; link: string; expiresAt: string }; email?: { state: 'configured' | 'mock' | 'not_configured' } };
 
 const PRESETS: Record<Vertical, { primary: string; accent: string; reward: string }> = {
   cafeteria: { primary: '#2B1B14', accent: '#C9A15B', reward: 'Una bebida de cortesía' },
@@ -276,7 +277,7 @@ function CreatedView({ c, f }: { c: Created; f: { name: string; ownerName: strin
       <div className="inline-flex items-center gap-2 text-[12.5px] text-[#47CD89]"><Check size={15} /> Configuración creada</div>
       <h1 className="mt-2 text-[26px] font-medium tracking-[-0.015em]">Tu negocio está configurado</h1>
       <p className="mt-1 text-[14px] font-medium" data-testid="created-name">{f.name}</p>
-      <p className="mt-1.5 text-[13.5px] cc-muted max-w-[68ch]">Estado: <strong className="text-white">configuración creada</strong>. Todavía no opera: falta que {f.ownerName} acepte su invitación y que definas el acceso de caja. <strong className="text-white">No se envió ningún correo</strong> (no hay proveedor configurado); comparte los enlaces por un canal seguro.</p>
+      <p className="mt-1.5 text-[13.5px] cc-muted max-w-[68ch]">Estado: <strong className="text-white">configuración creada</strong>. Todavía no opera: falta que {f.ownerName} acepte su invitación y que definas el acceso de caja. <strong className="text-white">No se envió ningún correo</strong> todavía: {c.email?.state === 'not_configured' || !c.email ? 'no hay proveedor de correo configurado, comparte los enlaces por un canal seguro.' : 'usa «Enviar invitación» o comparte el enlace por un canal seguro.'}</p>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,380px)_1fr] items-start">
         <div style={brandVars(f.primaryColor, f.accentColor, f.cardFinish)} data-testid="activation-card">
@@ -294,7 +295,10 @@ function CreatedView({ c, f }: { c: Created; f: { name: string; ownerName: strin
             </div>
           </section>
           <section className="cc-panel p-5" aria-label="Propietario" data-testid="activation-owner">
-            <div className="cc-label">Propietario · invitación de un solo uso · 72 h · entrega manual</div>
+            <div className="cc-label">Propietario · invitación de un solo uso · 72 h</div>
+            {c.ownerInvitation.invitationId && c.email?.state !== 'not_configured' && c.email && (
+              <div className="mt-3 pb-4 border-b border-[color:var(--cc-line)]"><EmailInviteBlock businessId={c.businessId} invitationId={c.ownerInvitation.invitationId} email={f.ownerEmail} initial={{ status: 'pending', attempts: 0, sendsAccepted: 0, acceptedAt: null, deliveredAt: null, error: null, canSend: true }} /></div>
+            )}
             <div className="mt-3 flex flex-wrap gap-5">
               <QrBlock value={c.ownerInvitation.link} label="QR de la invitación del dueño" file={`${c.slug}-invitacion-dueno.png`} />
               <div className="flex-1 min-w-[220px] flex flex-col gap-3">

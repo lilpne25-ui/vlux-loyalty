@@ -13,6 +13,7 @@ import { loginSchema, reviewEventSchema, slugSchema, uuidSchema } from './valida
 import { demoStatus, startDemoSession, DEMO_SESSION_HOURS } from './services/demo';
 import { getStaffSession, listMyBusinesses, login, logout, switchBusiness, type Role, type StaffSession } from './services/auth';
 import { acceptInvitation, inspectInvitation, inviteSchema, inviteStaff, listInvitations, resendInvitation, revokeInvitation } from './services/invitations';
+import { handleEmailWebhook } from './services/email-invitations';
 import { buildAdminRoutes } from './admin-routes';
 import { createBusiness, getBusinessBySlug, getBusinessLogo } from './services/businesses';
 import { changePassword, ownerIssueEmployeeReset, platformIssueReset, reissueCardLink, resetPasswordWithToken, voidPurchase } from './services/operations';
@@ -326,6 +327,14 @@ export function buildApp() {
     const r = await createDraft(await jsonBody(c), clientIp(c));
     const target = config.adminAppUrl || '';
     return c.json({ ref: r.ref, expiresAt: r.expiresAt, ttlHours: DRAFT_TTL_HOURS, controlCenterUrl: `${target}/vlux-admin/negocios/desde-diseno?activar=${r.ref}`, controlCenterConfigured: !!target }, 201);
+  });
+
+  // V0.4.5 · Avisos firmados del proveedor de correo (entregado, rebotado...). Sin secreto configurado: 404.
+  api.post('/webhooks/email', async (c) => {
+    await rateLimit(`email-webhook:${clientIp(c)}`, 600, 60_000);
+    const raw = await c.req.text();
+    if (raw.length > 64_000) throw new AppError(422, 'validation', 'Cuerpo demasiado grande.');
+    return c.json(await handleEmailWebhook({ id: c.req.header('svix-id'), timestamp: c.req.header('svix-timestamp'), signature: c.req.header('svix-signature') }, raw));
   });
 
   // Acceso de demostración: sin credenciales publicadas; solo con DEMO_ACCESS=1 y sobre el negocio sintético.

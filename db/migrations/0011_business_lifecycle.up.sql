@@ -92,12 +92,16 @@ BEGIN
   DELETE FROM customers WHERE business_id = p_business;           GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('customers', k);
   DELETE FROM reward_rules WHERE business_id = p_business;        GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('rewardRules', k);
   DELETE FROM audit_events WHERE business_id = p_business;        GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('auditEvents', k);
-  DELETE FROM staff_sessions WHERE business_id = p_business;      GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('staffSessions', k);
-  DELETE FROM staff_invitations WHERE business_id = p_business;   GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('invitations', k);
-  DELETE FROM staff_memberships WHERE business_id = p_business;   GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('memberships', k);
+  -- Correos de invitación (tabla de V0.4.5, migración 0012): se borran antes que las invitaciones.
+  IF to_regclass('public.email_events') IS NOT NULL THEN
+    EXECUTE 'DELETE FROM email_events WHERE business_id = $1' USING p_business;
+  END IF;
   IF to_regclass('public.email_outbox') IS NOT NULL THEN
     EXECUTE 'DELETE FROM email_outbox WHERE business_id = $1' USING p_business;
   END IF;
+  DELETE FROM staff_sessions WHERE business_id = p_business;      GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('staffSessions', k);
+  DELETE FROM staff_invitations WHERE business_id = p_business;   GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('invitations', k);
+  DELETE FROM staff_memberships WHERE business_id = p_business;   GET DIAGNOSTICS k = ROW_COUNT; c := c || jsonb_build_object('memberships', k);
   DELETE FROM business_subscriptions WHERE business_id = p_business;
   DELETE FROM businesses WHERE id = p_business;
 

@@ -11,6 +11,7 @@ import { emailSchema, passwordSchema } from '../validation';
 import { audit } from './audit';
 import { createStaffSession, type Role } from './auth';
 import { platformAudit } from './platform-auth';
+import { attachOutbox, forgetToken } from './email-invitations';
 
 const MAX_ATTEMPTS = 5;
 
@@ -49,6 +50,9 @@ export async function createInvitation(tx: Tx, p: { businessId: string; email: s
      VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(hours => $8)) RETURNING id, expires_at`,
     [sha256(token), p.businessId, p.email, p.displayName, p.role, p.by.type, p.by.id, config.invitationHours],
   )).rows[0];
+  // V0.4.5: el correo se prepara en la misma transacción (outbox) y se envía después del commit.
+  await forgetToken(tx, { businessId: p.businessId, email: p.email });
+  await attachOutbox(tx, { invitationId: id.id, businessId: p.businessId, email: p.email, token });
   return { token, invitationId: id.id as string, expiresAt: id.expires_at as Date };
 }
 
@@ -65,11 +69,15 @@ export async function inviteStaff(p: { businessId: string; email: string; displa
 
 export async function listInvitations(businessId: string, role?: Role) {
   const rows = (await getPool().query(
-    `SELECT id, email, display_name, role, expires_at, accepted_at, revoked_at, created_at, invited_by_type
-       FROM staff_invitations WHERE business_id = $1 AND ($2::text IS NULL OR role = $2) ORDER BY created_at DESC LIMIT 50`,
+    `SELECT i.id, i.email, i.display_name, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.created_at, i.invited_by_type,
+            o.status AS email_status, o.attempts AS email_attempts, o.sends_accepted, o.accepted_at AS email_accepted_at, o.delivered_at AS email_delivered_at,
+            o.last_error AS email_error, (o.link_enc IS NOT NULL) AS can_email
+       FROM staff_invitations i LEFT JOIN email_outbox o ON o.invitation_id = i.id
+      WHERE i.business_id = $1 AND ($2::text IS NULL OR i.role = $2) ORDER BY i.created_at DESC LIMIT 50`,
     [businessId, role ?? null],
   )).rows;
-  return rows.map((r) => ({ id: r.id, email: r.email, displayName: r.display_name, role: r.role, status: statusOf(r), expiresAt: r.expires_at, acceptedAt: r.accepted_at, createdAt: r.created_at, invitedBy: r.invited_by_type }));
+  return rows.map((r) => ({ id: r.id, email: r.email, displayName: r.display_name, role: r.role, status: statusOf(r), expiresAt: r.expires_at, acceptedAt: r.accepted_at, createdAt: r.created_at, invitedBy: r.invited_by_type,
+    emailDelivery: r.email_status ? { status: r.email_status, attempts: r.email_attempts, sendsAccepted: r.sends_accepted, acceptedAt: r.email_accepted_at, deliveredAt: r.email_delivered_at, error: r.email_error, canSend: r.can_email && statusOf(r) === 'pendiente' } : null }));
 }
 
 export async function revokeInvitation(businessId: string, invitationId: string, by: Inviter, role?: Role) {
@@ -79,6 +87,7 @@ export async function revokeInvitation(businessId: string, invitationId: string,
     [invitationId, businessId, role ?? null],
   );
   if (!r.rowCount) throw new AppError(404, 'not_found', 'La invitación no existe o ya no está pendiente.');
+  await forgetToken(getPool(), { invitationId });
   await auditInvitation(businessId, by, 'invitation.revoked', invitationId);
   return { ok: true };
 }
@@ -177,6 +186,7 @@ export async function acceptInvitation(raw: unknown) {
       membershipId = (await tx.query('INSERT INTO staff_memberships (business_id, user_id, role) VALUES ($1, $2, $3) RETURNING id', [inv.business_id, userId, inv.role])).rows[0].id;
     }
     await tx.query('UPDATE staff_invitations SET accepted_user_id = $2 WHERE id = $1', [inv.id, userId]);
+    await forgetToken(tx, { invitationId: inv.id });
     const session = await createStaffSession(tx, userId, membershipId, inv.business_id);
     return { userId, membershipId, token: session.token, linkedExisting: !!inv.user_id };
   });

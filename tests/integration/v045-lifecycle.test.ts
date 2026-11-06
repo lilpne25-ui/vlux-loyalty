@@ -6,41 +6,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { closePool } from '../../server/db';
 import { resetRateLimits } from '../../server/ratelimit';
-import { hashPassword } from '../../server/security';
-import { currentStep, encryptSecret, newTotpSecret, totpAt } from '../../server/totp';
+import { adminWithMfa, closeAdminHelpers, freshCode as fc } from './admin-helpers';
 import { Device, PASSWORD, identify, key, loggedIn, registerCustomer, withEmployee } from './helpers';
 
 const db = new pg.Pool({ connectionString: process.env.DATABASE_ADMIN_URL });
-after(async () => { await closePool(); await db.end(); });
+after(async () => { await closePool(); await db.end(); await closeAdminHelpers(); });
 
-export const LC_EMAIL = `lc-${randomUUID().slice(0, 6)}@vlux.test`;
+const LC_EMAIL = `lc-${randomUUID().slice(0, 6)}@vlux.test`;
 const LC_PASSWORD = 'clave-admin-ciclo-de-vida-2026';
 let secret = '';
 let A: Device;
-
-/** Código TOTP fresco: se reinicia el último paso usado (solo en pruebas) para no esperar 30 s entre operaciones. */
-export async function freshCode(email = LC_EMAIL, s = secret) {
-  await db.query('UPDATE platform_admins SET totp_last_step = 0, mfa_failures = 0, locked_until = NULL WHERE email = $1', [email]);
-  return totpAt(s, currentStep());
-}
-
-/** Crea un administrador con 2FA directamente en BD y abre su sesión verificada. */
-export async function adminWithMfa(email: string, password: string) {
-  const sec = newTotpSecret();
-  await db.query(
-    `INSERT INTO platform_admins (email, display_name, password_hash, totp_secret_enc, totp_enabled_at) VALUES ($1, 'Admin Pruebas', $2, $3, now())
-     ON CONFLICT (email) DO UPDATE SET totp_secret_enc = EXCLUDED.totp_secret_enc, password_hash = EXCLUDED.password_hash, disabled_at = NULL`,
-    [email, await hashPassword(password), encryptSecret(sec)],
-  );
-  await resetRateLimits();
-  const d = new Device('admin');
-  const r = await d.post('/api/admin/auth/login', { email, password });
-  assert.equal(r.status, 200, JSON.stringify(r.json));
-  await db.query('UPDATE platform_admins SET totp_last_step = 0 WHERE email = $1', [email]);
-  const v = await d.post('/api/admin/auth/totp', { code: totpAt(sec, currentStep()) });
-  assert.equal(v.status, 200, JSON.stringify(v.json));
-  return { d, secret: sec };
-}
+const freshCode = () => fc(LC_EMAIL, secret);
 
 before(async () => {
   const r = await adminWithMfa(LC_EMAIL, LC_PASSWORD);

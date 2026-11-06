@@ -1,6 +1,7 @@
 // Directorio de negocios y ficha de cada negocio (acceso, suscripción, configuración, estado, bitácora).
 import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, ArrowLeft, Ban, ExternalLink, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { EmailInviteBlock, EmailStatusPill, type EmailDelivery } from './EmailInvite';
 import { ArchiveModal, DeleteModal, RestoreModal } from './Lifecycle';
 import { api, ApiError, type Vertical } from '../lib/api';
 import { navigate } from '../lib/router';
@@ -86,7 +87,7 @@ function StatusPills({ row }: { row: { status: string; commercialStatus: string 
 }
 
 // ---------- Ficha ----------
-type Invitation = { id: string; email: string; displayName: string; role: 'OWNER' | 'EMPLOYEE'; status: 'pendiente' | 'aceptada' | 'revocada' | 'vencida'; expiresAt: string; createdAt: string };
+type Invitation = { id: string; email: string; displayName: string; role: 'OWNER' | 'EMPLOYEE'; status: 'pendiente' | 'aceptada' | 'revocada' | 'vencida'; expiresAt: string; createdAt: string; emailDelivery?: EmailDelivery };
 type Detail = {
   id: string; slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; cardFinish?: 'signature' | 'silver' | 'black'; reviewUrl: string | null; isDemo: boolean;
   program: { stampsRequired: number; stampMode: string; maxStampsPerPurchase: number; visitWindowMinutes: number; rewardDescription: string; version: number };
@@ -162,7 +163,7 @@ export function BusinessDetail({ id }: { id: string }) {
       <CModal open={!!link} onClose={() => setLink(null)} title={link?.title} labelledBy="cc-link-title">
         {link && (
           <div className="flex flex-col items-center gap-4">
-            <p className="text-[13px] cc-muted self-start">No hay proveedor de correo configurado: <strong className="text-white">VLUX no envió ningún correo</strong>. Comparte este enlace por un canal seguro (WhatsApp directo, en persona). Sirve una sola vez{link.expiresAt ? ` y vence el ${new Date(link.expiresAt).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}.</p>
+            <p className="text-[13px] cc-muted self-start"><strong className="text-white">VLUX no envió ningún correo</strong> con este paso. Envíalo desde la lista de invitaciones (si hay proveedor configurado) o comparte este enlace por un canal seguro (WhatsApp directo, en persona). Sirve una sola vez{link.expiresAt ? ` y vence el ${new Date(link.expiresAt).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}.</p>
             <div className="rounded-lg bg-white p-2"><QRCode value={link.url} size={168} label="Código QR del enlace de invitación" /></div>
             <div className="cc-code w-full select-all" data-testid="invite-link">{link.url}</div>
             <CopyButton dark text={link.url} />
@@ -237,6 +238,8 @@ function Access({ d, onLink, refresh }: { d: Detail; onLink: (l: { title: string
     } catch (x) { toast('bad', (x as ApiError).message); }
   };
   const tone = { pendiente: 'cyan', aceptada: 'green', revocada: 'silver', vencida: 'amber' } as const;
+  const [emailOn, setEmailOn] = useState(false);
+  useEffect(() => { api<{ state: string }>('GET', '/admin/email/status').then((r) => setEmailOn(r.state !== 'not_configured')).catch(() => setEmailOn(false)); }, []);
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] items-start">
       <div className="flex flex-col gap-4">
@@ -257,7 +260,8 @@ function Access({ d, onLink, refresh }: { d: Detail; onLink: (l: { title: string
           <ul data-testid="invitations">
             {d.invitations.map((inv) => (
               <li key={inv.id} className="px-5 py-3 flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--cc-line)] last:border-0 text-[13px]">
-                <div className="min-w-0"><div>{inv.displayName} · <span className="cc-muted">{inv.role === 'OWNER' ? 'Dueño' : 'Empleado'}</span> <span className="ml-1"><Pill tone={tone[inv.status]}>{inv.status}</Pill></span></div><div className="cc-faint text-[12px] break-all">{inv.email} · creada {relativeTime(inv.createdAt)}</div></div>
+                <div className="min-w-0"><div>{inv.displayName} · <span className="cc-muted">{inv.role === 'OWNER' ? 'Dueño' : 'Empleado'}</span> <span className="ml-1"><Pill tone={tone[inv.status]}>{inv.status}</Pill></span> {inv.emailDelivery && inv.emailDelivery.status !== 'pending' && <EmailStatusPill d={inv.emailDelivery} />}</div><div className="cc-faint text-[12px] break-all">{inv.email} · creada {relativeTime(inv.createdAt)}</div>
+                  {inv.status === 'pendiente' && inv.emailDelivery?.canSend && emailOn && <div className="mt-2"><EmailInviteBlock businessId={d.id} invitationId={inv.id} email={inv.email} title="Correo de invitación" initial={inv.emailDelivery} onSent={refresh} /></div>}</div>
                 {(inv.status === 'pendiente' || inv.status === 'vencida') && (
                   <div className="flex gap-1.5">
                     <CButton small onClick={() => act(inv, 'resend')}><RefreshCw size={13} /> Nuevo enlace</CButton>
