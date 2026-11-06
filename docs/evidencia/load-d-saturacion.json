@@ -1,0 +1,69 @@
+{
+  "config": {
+    "base": "http://127.0.0.1:8787",
+    "negocios": 100,
+    "segundos": 60,
+    "opIntervalMs": 1200,
+    "dashIntervalMs": 1000,
+    "customerIntervalMs": 400
+  },
+  "resultados": [
+    {
+      "tipo": "caja.ver_tarjeta",
+      "n": 4851,
+      "rps": 78.7,
+      "p50": 9.9,
+      "p95": 32.3,
+      "p99": 48.9,
+      "max": 116,
+      "errores": 0
+    },
+    {
+      "tipo": "cliente.tarjeta",
+      "n": 14260,
+      "rps": 231.2,
+      "p50": 15.2,
+      "p95": 54.2,
+      "p99": 82.4,
+      "max": 154,
+      "errores": 0
+    },
+    {
+      "tipo": "panel.tablero",
+      "n": 5818,
+      "rps": 94.3,
+      "p50": 26.7,
+      "p95": 53.5,
+      "p99": 71.3,
+      "max": 121,
+      "errores": 0
+    },
+    {
+      "tipo": "caja.registrar",
+      "n": 4851,
+      "rps": 78.7,
+      "p50": 21.3,
+      "p95": 55,
+      "p99": 77.6,
+      "max": 146,
+      "errores": 0
+    },
+    {
+      "tipo": "TOTAL",
+      "n": 29780,
+      "rps": 482.9,
+      "p50": 17.7,
+      "p95": 52,
+      "p99": 76.7,
+      "max": 154,
+      "errores": 0
+    }
+  ],
+  "codigos": {},
+  "servidor": {
+    "cpuMaxPct": 44.3,
+    "cpuMedPct": 42.1,
+    "rssMaxMb": 140,
+    "pgConnsMax": 12
+  }
+}
