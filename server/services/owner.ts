@@ -6,6 +6,7 @@ import { createEmployeeSchema, updateProgramSchema } from '../validation';
 import { audit } from './audit';
 import { loadHistory } from './cards';
 import { unlockIfEligible } from './loyalty';
+import { insertRule, loadActiveRule, publicProgram, ruleChanged } from './rules-store';
 import type { StaffSession } from './auth';
 
 const TZ = 'America/Mexico_City';
@@ -34,7 +35,8 @@ export async function dashboard(session: StaffSession, days = 14) {
         ORDER BY d`,
       [days, TZ],
     )).rows.map((r) => ({ day: r.day.toISOString().slice(0, 10), visits: r.visits, purchases: r.purchases }));
-    const rule = (await tx.query('SELECT stamps_required, reward_description FROM reward_rules WHERE active')).rows[0];
+    const ruleFull = await loadActiveRule(tx);
+    const rule = { stamps_required: ruleFull.stampsRequired, reward_description: ruleFull.rewardDescription };
     const visitCounts = (await tx.query(
       `SELECT coalesce(v.n, 0)::int AS n FROM cards c LEFT JOIN (SELECT card_id, count(*) AS n FROM visits GROUP BY card_id) v ON v.card_id = c.id WHERE c.status = 'active'`,
     )).rows.map((r) => r.n as number);
@@ -47,9 +49,9 @@ export async function dashboard(session: StaffSession, days = 14) {
     ];
     const near = (await tx.query(
       `SELECT cu.display_name FROM cards c JOIN customers cu ON cu.id = c.customer_id
-        WHERE c.status = 'active' AND c.stamp_balance > 0 AND c.stamp_balance >= $1 - 2 AND c.stamp_balance < $1
+        WHERE c.status = 'active' AND c.stamp_balance > 0 AND c.stamp_balance >= $2 AND c.stamp_balance < $1
           AND NOT EXISTS (SELECT 1 FROM rewards r WHERE r.card_id = c.id AND r.status = 'available') ORDER BY c.stamp_balance DESC LIMIT 20`,
-      [req],
+      [req, ruleFull.programType === 'points' ? Math.floor(req * 0.8) : Math.max(1, req - 2)],
     )).rows.map((r) => r.display_name as string);
     const pending = (await tx.query(
       "SELECT cu.display_name FROM rewards r JOIN cards c ON c.id = r.card_id JOIN customers cu ON cu.id = c.customer_id WHERE r.status = 'available' ORDER BY r.unlocked_at LIMIT 20",
@@ -59,7 +61,7 @@ export async function dashboard(session: StaffSession, days = 14) {
         customers: k.customers, newCustomers7d: k.new_customers_7d, visits: k.visits, purchases: k.purchases, stamps: k.stamps, recurring: k.recurring,
         rewardsUnlocked: k.rewards_unlocked, redemptions: k.redemptions, rewardsPending: k.rewards_pending, reviewPrompts: k.review_prompts, reviewClicks: k.review_clicks,
       },
-      series, recurrence, program: { stampsRequired: req, rewardDescription: rule.reward_description }, nearReward: near, pendingRewards: pending,
+      series, recurrence, program: publicProgram(ruleFull), nearReward: near, pendingRewards: pending,
     };
   });
 }
@@ -92,20 +94,22 @@ export async function updateProgram(session: StaffSession, raw: unknown) {
   return withTenant(session.businessId, async (tx) => {
     await tx.query('UPDATE businesses SET name = $2, vertical = $3, primary_color = $4, accent_color = $5, review_url = $6 WHERE id = $1',
       [session.businessId, input.name, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl]);
-    const cur = (await tx.query('SELECT id, version, stamps_required, stamp_mode, max_stamps_per_purchase, visit_window_minutes, reward_description FROM reward_rules WHERE active FOR UPDATE')).rows[0];
+    const cur = await loadActiveRule(tx, true);
     const r = input.rules;
-    const changed = cur.stamps_required !== r.stampsRequired || cur.stamp_mode !== r.stampMode || cur.max_stamps_per_purchase !== r.maxStampsPerPurchase
-      || cur.visit_window_minutes !== r.visitWindowMinutes || cur.reward_description !== r.rewardDescription;
+    const changed = ruleChanged(cur, r);
     let unlocked = 0;
     if (changed) {
-      // Nueva versión de la regla; la anterior queda como historial. Las recompensas ya ganadas conservan su costo y descripción.
+      // Cambiar de familia (sellos ↔ puntos) cambiaría el significado de los saldos acumulados: se bloquea mientras
+      // haya tarjetas con progreso. Los premios ya desbloqueados nunca se tocan (conservan costo y descripción).
+      const fam = (t: string) => (t === 'points' ? 'points' : 'stamps');
+      if (fam(cur.programType) !== fam(r.programType)) {
+        const n = (await tx.query("SELECT count(*)::int AS n FROM cards WHERE status = 'active' AND stamp_balance > 0")).rows[0].n;
+        if (n > 0) throw new AppError(409, 'program_family_change', `Hay ${n} tarjetas con progreso. Cambiar entre sellos y puntos lo invalidaría. Mantén el tipo de programa o pide a VLUX una conversión asistida.`);
+      }
+      // Nueva versión de la regla; la anterior queda como historial.
       await tx.query('UPDATE reward_rules SET active = false WHERE id = $1', [cur.id]);
-      const ruleId = (await tx.query(
-        `INSERT INTO reward_rules (business_id, version, stamps_required, stamp_mode, max_stamps_per_purchase, visit_window_minutes, reward_description, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [session.businessId, cur.version + 1, r.stampsRequired, r.stampMode, r.maxStampsPerPurchase, r.visitWindowMinutes, r.rewardDescription, session.userId],
-      )).rows[0].id;
-      const rule = { id: ruleId, ...r };
+      const ruleId = await insertRule(tx, session.businessId, cur.version + 1, r, session.userId);
+      const rule = { id: ruleId, stampsRequired: r.stampsRequired, rewardDescription: r.rewardDescription };
       const eligible = (await tx.query(
         "SELECT id FROM cards c WHERE status = 'active' AND stamp_balance >= $1 AND NOT EXISTS (SELECT 1 FROM rewards r WHERE r.card_id = c.id AND r.status = 'available') ORDER BY id FOR UPDATE",
         [r.stampsRequired],

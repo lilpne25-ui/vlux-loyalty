@@ -9,6 +9,7 @@ import { audit } from './audit';
 import { getBusinessById } from './businesses';
 import { createInvitation, listInvitations } from './invitations';
 import { emailState } from './email-invitations';
+import { insertRule } from './rules-store';
 import { platformAudit, type AdminSession } from './platform-auth';
 import { GoogleWalletProvider } from '../wallet/google';
 import { AppleWalletProvider } from '../wallet/apple';
@@ -111,12 +112,7 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
     )).rows[0].id as string;
     if (draftId) await consumeDraft(tx, draftId, biz);
     await tx.query("SELECT set_config('app.business_id', $1, true)", [biz]);
-    const r = input.rules;
-    await tx.query(
-      `INSERT INTO reward_rules (business_id, version, stamps_required, stamp_mode, max_stamps_per_purchase, visit_window_minutes, reward_description)
-       VALUES ($1, 1, $2, $3, $4, $5, $6)`,
-      [biz, r.stampsRequired, r.stampMode, r.maxStampsPerPurchase, r.visitWindowMinutes, r.rewardDescription],
-    );
+    await insertRule(tx, biz, 1, input.rules, null);
     const today = new Date();
     const pilotEnd = input.plan === 'piloto' ? isoDate(new Date(today.getTime() + input.pilotDays * 86400_000)) : null;
     await tx.query(

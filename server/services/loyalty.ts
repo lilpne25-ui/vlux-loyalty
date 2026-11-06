@@ -4,7 +4,8 @@
 import { Tx, withTenant } from '../db';
 import { AppError, notFound } from '../errors';
 import { newRewardCode, parseScannedCode } from '../security';
-import { isSameVisit, ProgramRules, shouldUnlockReward, stampsForPurchase, balanceAfterRedemption } from '../../shared/rules';
+import { isSameVisit, shouldUnlockReward, unitsForOperation, balanceAfterRedemption } from '../../shared/rules';
+import { loadActiveRule, publicProgram, type StoredRule } from './rules-store';
 import { purchaseSchema } from '../validation';
 import { audit } from './audit';
 import { loadCardSummary, loadHistory } from './cards';
@@ -13,13 +14,9 @@ import type { StaffSession } from './auth';
 /** Ventana en la que una segunda compra (con otra llave) se considera posible doble registro. */
 export const DUPLICATE_GUARD_SECONDS = 20;
 
-interface ActiveRule extends ProgramRules { id: string; rewardDescription: string }
-
-async function activeRule(tx: Tx): Promise<ActiveRule> {
-  const r = (await tx.query('SELECT id, stamps_required, stamp_mode, max_stamps_per_purchase, visit_window_minutes, reward_description FROM reward_rules WHERE active')).rows[0];
-  if (!r) throw new Error('El negocio no tiene una regla activa');
-  return { id: r.id, stampsRequired: r.stamps_required, stampMode: r.stamp_mode, maxStampsPerPurchase: r.max_stamps_per_purchase, visitWindowMinutes: r.visit_window_minutes, rewardDescription: r.reward_description };
-}
+type ActiveRule = Pick<StoredRule, 'id' | 'stampsRequired' | 'rewardDescription'>;
+const activeRule = (tx: Tx) => loadActiveRule(tx);
+const TZ = 'America/Mexico_City';
 
 /** Desbloquea una recompensa si el saldo alcanza la meta y no hay otra pendiente. Requiere la tarjeta bloqueada. */
 export async function unlockIfEligible(tx: Tx, businessId: string, cardId: string, rule: ActiveRule): Promise<{ id: string; code: string } | null> {
@@ -77,7 +74,7 @@ export async function staffCardView(session: StaffSession, cardId: string) {
     if (!card) throw notFound('Tarjeta');
     const rule = await activeRule(tx);
     const history = await loadHistory(tx, cardId, 10, true);
-    return { card, program: { stampsRequired: rule.stampsRequired, stampMode: rule.stampMode, maxStampsPerPurchase: rule.maxStampsPerPurchase, rewardDescription: rule.rewardDescription }, history };
+    return { card, program: publicProgram(rule), history };
   });
 }
 
@@ -101,26 +98,42 @@ export async function registerPurchase(session: StaffSession, cardId: string, ra
     }
 
     const rule = await activeRule(tx);
-    const stamps = stampsForPurchase(rule, input.itemCount);
+    if (rule.validUntil && (await tx.query('SELECT (now() AT TIME ZONE $1)::date > $2::date AS ended', [TZ, rule.validUntil])).rows[0].ended) {
+      throw new AppError(409, 'program_ended', 'El programa de recompensas terminó su vigencia. El dueño puede renovarlo en su panel.');
+    }
     const now = new Date((await tx.query('SELECT now() AS t')).rows[0].t);
     const openVisit = (await tx.query('SELECT id, started_at FROM visits WHERE card_id = $1 ORDER BY started_at DESC LIMIT 1', [cardId])).rows[0];
-    const sameVisit = openVisit && isSameVisit(new Date(openVisit.started_at), now, rule.visitWindowMinutes);
+    const sameVisit = !!openVisit && isSameVisit(new Date(openVisit.started_at), now, rule.visitWindowMinutes);
+    const op = unitsForOperation(rule, { itemCount: input.itemCount, amountCents: input.amountCents ?? null, service: input.service ?? null, isNewVisit: !sameVisit });
+    if (op.error === 'amount_required') throw new AppError(422, 'amount_required', 'Escribe el monto de la cuenta para calcular los puntos.');
+    if (op.error === 'service_required') throw new AppError(422, 'service_required', 'Elige el servicio realizado.');
+    if (op.error === 'service_not_eligible') throw new AppError(422, 'service_not_eligible', 'Ese servicio no participa en el programa.');
+    let stamps = op.units;
+    // Límite por periodo: como máximo N operaciones con premio por tarjeta y día (hora del centro de México).
+    let limitReached = false;
+    if (stamps > 0 && rule.maxAwardsPerDay) {
+      const today = (await tx.query(
+        `SELECT count(*)::int AS n FROM purchases WHERE card_id = $1 AND stamps_awarded > 0 AND voided_at IS NULL AND (created_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date`, [cardId, TZ],
+      )).rows[0].n;
+      if (today >= rule.maxAwardsPerDay) { stamps = 0; limitReached = true; }
+    }
     const visitId = sameVisit
       ? openVisit.id
       : (await tx.query('INSERT INTO visits (business_id, card_id, created_by) VALUES ($1, $2, $3) RETURNING id', [session.businessId, cardId, session.userId])).rows[0].id;
 
     const purchaseId = (await tx.query(
-      `INSERT INTO purchases (business_id, card_id, visit_id, rule_id, item_count, stamps_awarded, idempotency_key, staff_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [session.businessId, cardId, visitId, rule.id, input.itemCount, stamps, input.idempotencyKey, session.userId],
+      `INSERT INTO purchases (business_id, card_id, visit_id, rule_id, item_count, stamps_awarded, idempotency_key, staff_user_id, amount_cents, service_label)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [session.businessId, cardId, visitId, rule.id, input.itemCount, stamps, input.idempotencyKey, session.userId, input.amountCents ?? null, input.service ?? null],
     )).rows[0].id as string;
     const balance = card.stamp_balance + stamps;
-    await tx.query('INSERT INTO stamp_events (business_id, card_id, delta, reason, purchase_id, balance_after, staff_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    // El libro mayor solo registra movimientos reales (una compra sin unidades no inserta un "+0").
+    if (stamps > 0) await tx.query('INSERT INTO stamp_events (business_id, card_id, delta, reason, purchase_id, balance_after, staff_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       [session.businessId, cardId, stamps, 'purchase', purchaseId, balance, session.userId]);
     await tx.query(`UPDATE cards SET stamp_balance = $2, last_purchase_at = now(), last_visit_at = CASE WHEN $3 THEN last_visit_at ELSE now() END WHERE id = $1`, [cardId, balance, !!sameVisit]);
-    await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'purchase.registered', 'purchase', purchaseId, { cardId, itemCount: input.itemCount, stamps, newVisit: !sameVisit });
+    await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'purchase.registered', 'purchase', purchaseId, { cardId, itemCount: input.itemCount, stamps, newVisit: !sameVisit, programType: rule.programType, limitReached });
     const rewardUnlocked = await unlockIfEligible(tx, session.businessId, cardId, rule);
-    return { replayed: false, purchaseId, stampsAwarded: stamps, newVisit: !sameVisit, rewardUnlocked, card: await loadCardSummary(tx, cardId) };
+    return { replayed: false, purchaseId, stampsAwarded: stamps, newVisit: !sameVisit, limitReached, programType: rule.programType, rewardUnlocked, card: await loadCardSummary(tx, cardId) };
   });
 }
 

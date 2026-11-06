@@ -6,6 +6,8 @@ import { logoBytesMatch } from '../image-check';
 import { hashPassword } from '../security';
 import { createBusinessSchema } from '../validation';
 import { audit } from './audit';
+import { RULE_COLUMNS, publicProgram, ruleFromRow } from './rules-store';
+import { insertRule } from './rules-store';
 import { getPool } from '../db';
 
 export type CreateBusinessInput = z.input<typeof createBusinessSchema>;
@@ -27,12 +29,7 @@ export async function createBusiness(raw: CreateBusinessInput) {
       : (await tx.query('INSERT INTO staff_users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id', [input.owner.email, passwordHash, input.owner.displayName])).rows[0].id;
     await tx.query("INSERT INTO staff_memberships (business_id, user_id, role) VALUES ($1, $2, 'OWNER')", [biz, userId]);
     await tx.query("SELECT set_config('app.business_id', $1, true)", [biz]);
-    const r = input.rules;
-    await tx.query(
-      `INSERT INTO reward_rules (business_id, version, stamps_required, stamp_mode, max_stamps_per_purchase, visit_window_minutes, reward_description, created_by)
-       VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
-      [biz, r.stampsRequired, r.stampMode, r.maxStampsPerPurchase, r.visitWindowMinutes, r.rewardDescription, userId],
-    );
+    await insertRule(tx, biz, 1, input.rules, userId);
     // V0.3: todo negocio nace con registro comercial (piloto sin costo) para que el Control Center lo cuente.
     await tx.query(
       `INSERT INTO business_subscriptions (business_id, plan_code, commercial_status, start_date, price_cents, currency)
@@ -58,7 +55,7 @@ export interface PublicBusiness {
   logoUrl: string | null;
   /** Ajuste del logotipo (autoajuste + cambios manuales); null = autoajuste en el cliente. */
   logoFit: unknown | null;
-  program: { stampsRequired: number; stampMode: string; maxStampsPerPurchase: number; visitWindowMinutes: number; rewardDescription: string; ruleId: string; version: number };
+  program: ReturnType<typeof publicProgram>;
 }
 
 export async function getBusinessBySlug(slug: string): Promise<PublicBusiness> {
@@ -71,22 +68,19 @@ export async function getBusinessById(id: string): Promise<PublicBusiness> {
   return withTenant(id, async (tx) => {
     const row = (await tx.query(
       `SELECT b.id, b.slug, b.name, b.city, b.vertical, b.primary_color, b.accent_color, b.card_finish, b.review_url, b.is_demo,
-              b.logo_hash AS logo_v, b.logo_fit,
-              r.id AS rule_id, r.version, r.stamps_required, r.stamp_mode, r.max_stamps_per_purchase, r.visit_window_minutes, r.reward_description
-         FROM businesses b JOIN reward_rules r ON r.business_id = b.id AND r.active
-        WHERE b.id = $1`,
+              b.logo_hash AS logo_v, b.logo_fit
+         FROM businesses b WHERE b.id = $1`,
       [id],
     )).rows[0];
     if (!row) throw notFound('Negocio');
+    const rule = (await tx.query(`SELECT ${RULE_COLUMNS} FROM reward_rules WHERE business_id = $1 AND active`, [id])).rows[0];
+    if (!rule) throw notFound('Negocio');
     return {
       id: row.id, slug: row.slug, name: row.name, city: row.city, vertical: row.vertical,
       primaryColor: row.primary_color, accentColor: row.accent_color, cardFinish: row.card_finish, reviewUrl: row.review_url, isDemo: row.is_demo,
       logoFit: row.logo_fit ?? null,
       logoUrl: row.logo_v ? `/api/public/businesses/${row.slug}/logo?v=${row.logo_v}` : null,
-      program: {
-        ruleId: row.rule_id, version: row.version, stampsRequired: row.stamps_required, stampMode: row.stamp_mode,
-        maxStampsPerPurchase: row.max_stamps_per_purchase, visitWindowMinutes: row.visit_window_minutes, rewardDescription: row.reward_description,
-      },
+      program: publicProgram(ruleFromRow(rule)),
     };
   });
 }

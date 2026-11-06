@@ -8,6 +8,7 @@
 //  - Recompensa (reward): beneficio desbloqueado al juntar los sellos requeridos.
 //  - Recurrencia: el cliente tiene 2 o más visitas distintas.
 
+import type { ProgramType } from './catalog';
 export type StampMode = 'per_purchase' | 'per_item';
 
 export interface ProgramRules {
@@ -15,10 +16,20 @@ export interface ProgramRules {
   stampMode: StampMode;
   maxStampsPerPurchase: number;
   visitWindowMinutes: number;
+  /** V0.4.5: tipo de programa del motor común (por omisión, sellos por compra = comportamiento V0.2–V0.4.4). */
+  programType?: ProgramType;
+  /** Puntos: centavos de consumo que equivalen a 1 punto (1000 = 1 punto por cada $10). */
+  amountPerPointCents?: number | null;
+  /** Servicios: lista de servicios participantes (vacía = cualquier servicio). */
+  eligibleServices?: string[] | null;
 }
 
 export const LIMITS = {
-  stampsRequired: { min: 3, max: 15 },
+  stampsRequired: { min: 3, max: 20 },
+  pointsRequired: { min: 10, max: 100000 },
+  maxPointsPerPurchase: { min: 1, max: 100000 },
+  amountPerPointCents: { min: 100, max: 100000 },
+  amountCents: { min: 1, max: 10_000_000 },
   maxStampsPerPurchase: { min: 1, max: 10 },
   visitWindowMinutes: { min: 15, max: 720 },
   itemCount: { min: 1, max: 50 },
@@ -38,6 +49,38 @@ export function stampsForPurchase(rules: ProgramRules, itemCount: number): numbe
   }
   if (rules.stampMode === 'per_purchase') return 1;
   return Math.min(itemCount, rules.maxStampsPerPurchase);
+}
+
+export type OperationInput = { itemCount: number; amountCents?: number | null; service?: string | null; isNewVisit: boolean };
+export type OperationResult = { units: number; error?: 'amount_required' | 'service_required' | 'service_not_eligible' };
+
+/**
+ * V0.4.5 · Motor común: cuántas unidades (sellos, visitas, servicios o puntos) genera una operación de caja.
+ * Un solo libro mayor y un solo flujo de canje para todos los tipos; solo cambia esta función.
+ */
+export function unitsForOperation(rules: ProgramRules, op: OperationInput): OperationResult {
+  const type = rules.programType ?? 'stamps_purchase';
+  switch (type) {
+    case 'stamps_purchase':
+    case 'custom':
+      return { units: stampsForPurchase(rules, op.itemCount) };
+    case 'stamps_visit':
+      // Varias compras dentro de la ventana de visita = una sola visita.
+      return { units: op.isNewVisit ? 1 : 0 };
+    case 'stamps_service': {
+      const list = (rules.eligibleServices ?? []).filter(Boolean);
+      if (list.length) {
+        if (!op.service) return { units: 0, error: 'service_required' };
+        if (!list.some((s) => s.toLowerCase() === op.service!.trim().toLowerCase())) return { units: 0, error: 'service_not_eligible' };
+      }
+      return { units: Math.min(op.itemCount, rules.maxStampsPerPurchase) };
+    }
+    case 'points': {
+      if (!op.amountCents || !Number.isInteger(op.amountCents) || op.amountCents < LIMITS.amountCents.min) return { units: 0, error: 'amount_required' };
+      const per = rules.amountPerPointCents && rules.amountPerPointCents > 0 ? rules.amountPerPointCents : 1000;
+      return { units: Math.min(Math.floor(op.amountCents / per), rules.maxStampsPerPurchase) };
+    }
+  }
 }
 
 /** Una compra pertenece a la visita abierta si ocurre dentro de la ventana desde que inició esa visita. */
