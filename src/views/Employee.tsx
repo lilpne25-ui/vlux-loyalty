@@ -373,7 +373,7 @@ function CardPanel({ cardId }: { cardId: string }) {
             </Button>
             <p className="text-[11.5px] text-slate2 leading-snug">
               {type === 'stamps_visit' ? `1 ${units(program, 1)} por visita. Varias compras dentro de ${program.visitWindowMinutes ?? 120} min cuentan como una sola.`
-                : type === 'stamps_service' ? `1 ${units(program, 1)} por servicio participante${program.maxStampsPerPurchase > 1 ? `, hasta ${program.maxStampsPerPurchase} por visita` : ''}.`
+                : type === 'stamps_service' ? `Suma 1 por cada servicio participante${program.maxStampsPerPurchase > 1 ? `, hasta ${program.maxStampsPerPurchase} por visita` : ''}.`
                 : isPoints(program) ? `Los puntos se calculan con el monto que escribes, hasta ${program.maxStampsPerPurchase} por operación.`
                 : perItem ? `1 ${units(program, 1)} por artículo válido, hasta ${program.maxStampsPerPurchase} por compra.` : `1 ${units(program, 1)} por compra válida, sin importar cuántos artículos lleve.`}
               {program.maxAwardsPerDay ? ` Máximo ${program.maxAwardsPerDay} por día.` : ''}
