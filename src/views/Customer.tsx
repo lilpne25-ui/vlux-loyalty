@@ -6,9 +6,10 @@ import { api, ApiError, BusinessInfo, CustomerCardView, Program, Vertical } from
 import { formatDateTime, lowerFirst, cardQrValue, rewardQrValue, plural } from '../lib/format';
 import { usePolling } from '../lib/usePolling';
 import { getSeen, setSeen, getFlag, setFlag } from '../lib/seen';
-import { rewardSentence, stampRule, welcomeHeadline } from '../lib/vertical';
+import { isPoints, programHow, rewardSentence, stampRule, units, unitTitle, welcomeHeadline } from '../lib/vertical';
 import { Button, Modal, QRCode, CopyButton, Field, inputCls, BusinessLogo, CupIllustration, PoweredByVlux, useToast, cx, Badge } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
+import { VerticalIcon } from '../components/VerticalIcon';
 import { sanitizeFit } from '../lib/logoFit';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
 import { SaveCardPanel, PairScreen, OfflineNotice } from '../components/SaveCard';
@@ -16,8 +17,6 @@ import { applyBusinessAppHead, isStandalone, useOnline } from '../lib/pwa';
 
 const POLL_MS = 4000;
 
-const VerticalIcon = ({ v, size = 17 }: { v: Vertical; size?: number }) =>
-  v === 'cafeteria' ? <Coffee size={size} /> : v === 'barberia' ? <Scissors size={size} /> : v === 'salon' ? <Sparkles size={size} /> : v === 'restaurante' ? <UtensilsCrossed size={size} /> : <Store size={size} />;
 
 export function CustomerApp({ slug }: { slug: string }) {
   const [pub, setPub] = useState<{ business: BusinessInfo; program: Program; privacyNoticeVersion: string } | null>(null);
@@ -105,7 +104,7 @@ function Welcome({ business: b, program, onStart }: { business: BusinessInfo; pr
       <div className="mt-6 grid grid-cols-3 gap-2 text-center">
         {[
           { icon: <VerticalIcon v={b.vertical} />, t: rule.title, s: rule.sub },
-          { icon: <Gift size={17} />, t: `${program.stampsRequired} sellos`, s: '= premio' },
+          { icon: <Gift size={17} />, t: `${program.stampsRequired} ${units(program, program.stampsRequired)}`, s: '= premio' },
           { icon: <ShieldCheck size={17} />, t: 'Sin app', s: 'ni contraseña' },
         ].map((x) => (
           <div key={x.t} className="rounded-2xl bg-white/70 border border-cafe-line px-2 py-3">
@@ -219,7 +218,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
     const seen = getSeen(key);
     if (seen !== null && shown > seen) {
       setAnimateFrom(seen);
-      toast('good', shown - seen === 1 ? '¡Nuevo sello en tu tarjeta!' : `¡${shown - seen} sellos nuevos en tu tarjeta!`);
+      toast('good', shown - seen === 1 ? (units(program, 1) === 'sello' ? '¡Nuevo sello en tu tarjeta!' : `¡+1 ${units(program, 1)} en tu tarjeta!`) : `¡+${shown - seen} ${units(program, shown - seen)} en tu tarjeta!`);
     } else if (prevKey.current !== key) {
       setAnimateFrom(null);
     }
@@ -246,8 +245,8 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
   const message = reward
     ? 'Tu recompensa está lista. Muéstrala en caja cuando quieras usarla.'
     : card.balance === 0
-      ? card.cycle > 1 ? 'Nuevo ciclo. Tu siguiente compra suma el primer sello.' : 'Tu primera compra suma tu primer sello.'
-      : remaining === 1 ? '¡Te falta 1 sello para tu recompensa!' : `¡Solo te faltan ${remaining} sellos para tu recompensa!`;
+      ? card.cycle > 1 ? `Nuevo ciclo. ${programHow(program)}` : programHow(program)
+      : remaining === 1 ? `¡Te falta 1 ${units(program, 1)} para tu recompensa!` : `¡Solo te faltan ${remaining} ${units(program, remaining)} para tu recompensa!`;
 
   return (
     <div className="screen-in pt-5 flex flex-col gap-5">
@@ -268,7 +267,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
         </section>
       )}
 
-      <LoyaltyCardFace businessName={b.name} customerName={card.customerName} cardId={card.publicCode} total={goal} filled={shown} rewardReady={!!reward} animateFrom={animateFrom} logoUrl={b.logoUrl} logoFit={sanitizeFit(b.logoFit)} footer={<span className="opacity-70">Ciclo {card.cycle}</span>} />
+      <LoyaltyCardFace businessName={b.name} customerName={card.customerName} cardId={card.publicCode} total={goal} filled={shown} rewardReady={!!reward} animateFrom={animateFrom} logoUrl={b.logoUrl} logoFit={sanitizeFit(b.logoFit)} footer={<span className="opacity-70">Ciclo {card.cycle}</span>} mode={isPoints(program) ? 'points' : 'stamps'} unitLabel={unitTitle(program)} />
 
       <div className="flex flex-col gap-2 -mt-1">
         <p className="text-[15px] font-medium text-cafe-ink" data-testid="progress-message">{message}</p>
@@ -276,10 +275,10 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
           <div className="h-full rounded-full transition-[width] duration-700 ease-out" style={{ width: `${(shown / goal) * 100}%`, background: 'var(--accent)' }} />
         </div>
         <div className="flex flex-wrap justify-between gap-x-3 text-[12px] text-cafe-muted tabular-nums">
-          <span data-testid="stamp-count">{shown} de {goal} sellos</span>
+          <span data-testid="stamp-count">{shown} de {goal} {units(program, goal)}</span>
           <span className="min-w-0">Recompensa: {program.rewardDescription}</span>
         </div>
-        {extra > 0 && <p className="text-[12.5px] text-cafe-muted">Además llevas +{plural(extra, 'sello', 'sellos')} para tu siguiente ciclo.</p>}
+        {extra > 0 && <p className="text-[12.5px] text-cafe-muted">Además llevas +{extra} {units(program, extra)} para tu siguiente ciclo.</p>}
       </div>
 
       {reward && (
@@ -294,7 +293,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
       )}
 
       <section className="rounded-2xl bg-white border border-cafe-line p-5 flex flex-col items-center text-center gap-3">
-        <div className="text-[13px] font-medium text-cafe-ink">Muestra este código en caja para recibir tus sellos</div>
+        <div className="text-[13px] font-medium text-cafe-ink">Muestra este código en caja para recibir tus {units(program, 2)}</div>
         <div className="rounded-2xl border border-cafe-line p-2 bg-white">
           <QRCode value={cardQrValue(card.publicCode)} size={176} fg="#1E140F" label={`Código QR de la tarjeta ${card.publicCode}`} />
         </div>
@@ -302,7 +301,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
           <span className="font-mono text-[15px] tracking-[0.12em] text-cafe-ink select-all" data-testid="card-code">{card.publicCode}</span>
           <CopyButton text={card.publicCode} />
         </div>
-        <p className="text-[12px] text-cafe-muted max-w-[300px]">Si no se puede escanear, el personal puede escribir este código. El código solo identifica tu tarjeta: los sellos los autoriza el personal.</p>
+        <p className="text-[12px] text-cafe-muted max-w-[300px]">Si no se puede escanear, el personal puede escribir este código. El código solo identifica tu tarjeta: solo el personal puede sumar {units(program, 2)}.</p>
       </section>
 
       <SaveCardPanel slug={slug} businessName={b.name} />
@@ -338,7 +337,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
             <li key={o.kind + o.at + i} className="px-5 py-2.5 flex items-center justify-between gap-3 text-[13px]">
               <span className="inline-flex items-center gap-2 text-cafe-body min-w-0">
                 {o.kind === 'purchase' ? <VerticalIcon v={b.vertical} size={14} /> : o.kind === 'card_created' ? <Plus size={14} /> : o.kind === 'reward_redeemed' ? <Check size={14} /> : <Gift size={14} />}
-                <span className="truncate">{o.kind === 'purchase' ? `Compra · +${plural(o.stamps, 'sello', 'sellos')}` : o.kind === 'purchase_voided' ? `Compra anulada · ${o.stamps} ${Math.abs(o.stamps) === 1 ? 'sello' : 'sellos'}` : o.kind === 'card_created' ? 'Tarjeta creada' : o.kind === 'reward_redeemed' ? 'Recompensa canjeada' : 'Recompensa desbloqueada'}</span>
+                <span className="truncate">{o.kind === 'purchase' ? `Operación · +${o.stamps} ${units(program, o.stamps)}` : o.kind === 'purchase_voided' ? `Operación anulada · ${o.stamps} ${units(program, Math.abs(o.stamps))}` : o.kind === 'card_created' ? 'Tarjeta creada' : o.kind === 'reward_redeemed' ? 'Recompensa canjeada' : 'Recompensa desbloqueada'}</span>
               </span>
               <span className="shrink-0 text-cafe-muted tabular-nums text-[12px] inline-flex items-center gap-1"><Clock size={12} /> {formatDateTime(o.at)}</span>
             </li>
@@ -350,10 +349,12 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
       <details className="rounded-2xl border border-cafe-line bg-white/50 px-5 py-3 group">
         <summary className="cursor-pointer list-none flex items-center justify-between text-[13px] font-medium text-cafe-ink">Reglas del programa <ChevronDown size={16} className="transition group-open:rotate-180" /></summary>
         <ul className="mt-2 mb-1 flex flex-col gap-1.5 text-[12.5px] text-cafe-body list-disc pl-4">
-          <li>{program.stampMode === 'per_item' ? `Cada artículo válido suma 1 sello, hasta ${program.maxStampsPerPurchase} por compra.` : 'Cada compra válida suma 1 sello.'} Los sellos los autoriza el personal.</li>
-          <li>Al juntar {program.stampsRequired} sellos recibes: {lowerFirst(program.rewardDescription)}.</li>
+          <li>{programHow(program)} Solo el personal puede sumar {units(program, 2)}.</li>
+          <li>Al juntar {program.stampsRequired} {units(program, program.stampsRequired)} recibes: {lowerFirst(program.rewardDescription)}.</li>
+          {program.conditions && <li>{program.conditions}</li>}
+          {program.validUntil && <li>Programa vigente hasta el {new Date(program.validUntil + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}.</li>}
           <li>La recompensa se canjea en {b.name}. Después inicia un nuevo ciclo.</li>
-          <li>Los sellos son personales y no se otorgan por reseñas.</li>
+          <li>Tus {units(program, 2)} son personales y no se otorgan por reseñas.</li>
         </ul>
       </details>
 
@@ -431,7 +432,7 @@ function WalletPreview({ kind, onClose, view }: { kind: null | 'apple' | 'google
           <div className="w-[300px] max-w-full rounded-[18px] overflow-hidden shadow-xl text-[color:var(--cream)]" style={{ background: 'var(--brand)' }}>
             <div className="flex items-center justify-between px-4 pt-3.5">
               <div className="flex items-center gap-2 min-w-0"><BusinessLogo name={b.name} size={26} ring={false} /><span className="text-[13px] font-medium truncate">{b.name}</span></div>
-              <div className="text-right"><div className="text-[9px] uppercase opacity-60 tracking-wider">Sellos</div><div className="text-[16px] tabular-nums">{shown}/{goal}</div></div>
+              <div className="text-right"><div className="text-[9px] uppercase opacity-60 tracking-wider">{unitTitle(program)}</div><div className="text-[16px] tabular-nums">{shown}/{goal}</div></div>
             </div>
             <div className="mx-4 mt-3 rounded-lg h-[86px] flex items-center justify-center gap-1.5 flex-wrap px-3" style={{ background: 'color-mix(in srgb, var(--brand) 70%, #000)' }}>
               {Array.from({ length: goal }).map((_, i) => (<span key={i} className="h-[18px] w-[18px] rounded-full" style={i < shown ? { background: 'var(--accent)' } : { border: '1.5px dashed color-mix(in srgb, var(--cream) 40%, transparent)' }} />))}
@@ -449,7 +450,7 @@ function WalletPreview({ kind, onClose, view }: { kind: null | 'apple' | 'google
               <div className="flex items-center gap-2 min-w-0"><BusinessLogo name={b.name} size={28} ring={false} /><span className="text-[13px] truncate">{b.name}</span></div>
               <div className="mt-4 text-[20px] font-display truncate">{card.customerName}</div>
               <div className="mt-3 grid grid-cols-2 text-[11px]">
-                <div><div className="opacity-60">Sellos</div><div className="text-[15px] tabular-nums">{shown} de {goal}</div></div>
+                <div><div className="opacity-60">{unitTitle(program)}</div><div className="text-[15px] tabular-nums">{shown} de {goal}</div></div>
                 <div><div className="opacity-60">Recompensa</div><div className="text-[13px]">{card.reward ? 'Disponible' : program.rewardDescription}</div></div>
               </div>
             </div>

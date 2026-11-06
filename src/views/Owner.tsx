@@ -5,7 +5,9 @@ import { Users, Footprints, Repeat, Gift, Stamp, Star, Settings2, LayoutGrid, Li
 import { api, ApiError, BusinessInfo, HistoryItem, Program, Vertical } from '../lib/api';
 import { relativeTime, businessQrValue } from '../lib/format';
 import { usePolling } from '../lib/usePolling';
-import { VERTICAL_LABEL } from '../lib/vertical';
+import { VERTICAL_LABEL, isPoints, rewardSentence, stampRule, unitTitle, units } from '../lib/vertical';
+import { ProgramFields } from '../components/ProgramFields';
+import { formFromProgram, previewProgram, programError, rulesFromForm, type ProgramForm } from '../lib/program-form';
 import { Badge, Button, Field, inputCls, useToast, cx, Modal, QRCode, BusinessLogo, VluxMark, CopyButton } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { sanitizeFit } from '../lib/logoFit';
@@ -19,7 +21,7 @@ interface Dashboard {
   kpis: { customers: number; newCustomers7d: number; visits: number; purchases: number; stamps: number; recurring: number; rewardsUnlocked: number; redemptions: number; rewardsPending: number; reviewPrompts: number; reviewClicks: number };
   series: { day: string; visits: number; purchases: number }[];
   recurrence: { label: string; value: number }[];
-  program: { stampsRequired: number; rewardDescription: string };
+  program: Program;
   nearReward: string[];
   pendingRewards: string[];
 }
@@ -43,7 +45,7 @@ export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[12.5px] text-slate2">
               <Badge tone="good"><span className="h-1.5 w-1.5 rounded-full bg-[#12B76A]" /> Programa activo</Badge>
               {b.isDemo && <Badge tone="sample">Negocio de demostración</Badge>}
-              <span>{b.program.stampsRequired} sellos = {b.program.rewardDescription.toLowerCase()}</span>
+              <span>{b.program.stampsRequired} {units(b.program, b.program.stampsRequired)} = {b.program.rewardDescription.toLowerCase()}</span>
             </div>
           </div>
           <InstallAppButton app="panel" />
@@ -63,17 +65,60 @@ export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void
           ))}
         </nav>
 
-        {tab === 'resumen' && <Summary />}
+        {tab === 'resumen' && <Summary business={b} goTo={setTab} />}
         {tab === 'clientes' && <Customers />}
         {tab === 'config' && <Settings business={b} onSaved={() => { biz.refresh(); onBusinessChanged(); }} />}
         {tab === 'equipo' && <Team />}
-        {tab === 'accesos' && <AccessTab business={b} />}
+        {tab === 'accesos' && <AccessTab business={b} onSeen={() => markStep(b.slug, 'qr')} />}
       </div>
     </div>
   );
 }
 
-function Summary() {
+// V0.4.5 · Primeros pasos del dueño: corto, opcional y se puede ocultar. Se calcula con datos reales del negocio
+// (programa, compras) y con marcas locales de este navegador para pasos que no dejan rastro en el servidor.
+const ONB_KEY = (slug: string) => `vlux:onboarding:${slug}`;
+function readSteps(slug: string): Record<string, boolean> { try { return JSON.parse(localStorage.getItem(ONB_KEY(slug)) ?? '{}'); } catch { return {}; } }
+function markStep(slug: string, k: string) { try { localStorage.setItem(ONB_KEY(slug), JSON.stringify({ ...readSteps(slug), [k]: true })); } catch { /* sin almacenamiento */ } }
+
+function Onboarding({ business: b, purchases, goTo }: { business: FullBusiness; purchases: number; goTo: (t: Tab) => void }) {
+  const [st, setSt] = useState(() => readSteps(b.slug));
+  if (st.hidden) return null;
+  const steps: { k: string; t: string; d: string; done: boolean; go?: Tab; cta?: string }[] = [
+    { k: 'panel', t: 'Entra a tu panel', d: 'Ya estás aquí.', done: true },
+    { k: 'program', t: 'Revisa tu programa', d: `${b.program.stampsRequired} ${units(b.program, b.program.stampsRequired)} = ${b.program.rewardDescription.toLowerCase()}.`, done: !!st.program || (b.program.version ?? 1) > 1, go: 'config', cta: 'Revisar' },
+    { k: 'qr', t: 'Imprime tu QR del mostrador', d: 'Tus clientes lo escanean para crear su tarjeta.', done: !!st.qr, go: 'accesos', cta: 'Ver QR' },
+    { k: 'team', t: 'Prepara la caja', d: 'Invita a tu personal o instala la app de caja en el equipo del mostrador.', done: !!st.team, go: 'equipo', cta: 'Equipo' },
+    { k: 'test', t: 'Haz una operación de prueba', d: 'Registra una compra con tu propia tarjeta para ver el flujo completo.', done: purchases > 0 },
+  ];
+  const done = steps.filter((x) => x.done).length;
+  const open = (x: (typeof steps)[number]) => { if (x.k === 'program' || x.k === 'team') { markStep(b.slug, x.k); setSt(readSteps(b.slug)); } if (x.go) goTo(x.go); };
+  if (done === steps.length) return null;
+  return (
+    <section className="panel p-4 sm:p-5 flex flex-col gap-3" data-testid="owner-onboarding" aria-label="Primeros pasos">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-semibold text-ink">Primeros pasos <span className="text-slate2 font-normal text-[13px]">· {done} de {steps.length}</span></h2>
+          <p className="text-[12.5px] text-slate2">Cinco minutos para dejar todo listo. Es opcional.</p>
+        </div>
+        <button type="button" className="text-[12.5px] text-slate2 hover:text-ink" onClick={() => { markStep(b.slug, 'hidden'); setSt(readSteps(b.slug)); }} data-testid="onboarding-hide">Ocultar</button>
+      </div>
+      <div className="h-1.5 rounded-full bg-[#EEF0F3] overflow-hidden"><div className="h-full bg-ink transition-all" style={{ width: `${(done / steps.length) * 100}%` }} /></div>
+      <ol className="grid gap-2 sm:grid-cols-5">
+        {steps.map((x, i) => (
+          <li key={x.k} className={cx('rounded-xl border px-3 py-2.5 flex flex-col gap-1 min-w-0', x.done ? 'border-[#D1FADF] bg-[#F6FEF9]' : 'border-line')} data-done={x.done}>
+            <span className="text-[12px] text-slate2">{x.done ? '✓ Listo' : `Paso ${i + 1}`}</span>
+            <span className="text-[13px] font-medium text-ink leading-tight">{x.t}</span>
+            <span className="text-[12px] text-slate2 leading-snug">{x.d}</span>
+            {!x.done && x.go && <button type="button" className="mt-1 self-start text-[12.5px] font-medium text-[#0E6874] hover:underline" onClick={() => open(x)}>{x.cta}</button>}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function Summary({ business: b, goTo }: { business: FullBusiness; goTo: (t: Tab) => void }) {
   const { data, error, refresh } = usePolling(() => api<Dashboard>('GET', '/owner/dashboard'), 8000, []);
   if (error && !data) return <ErrorBox message={error.message} onRetry={refresh} />;
   if (!data) return <Loading />;
@@ -82,7 +127,7 @@ function Summary() {
     { id: 'customers', label: 'Clientes registrados', value: k.customers, icon: <Users size={16} />, hint: `${k.newCustomers7d} nuevos en 7 días` },
     { id: 'visits', label: 'Visitas', value: k.visits, icon: <Footprints size={16} />, hint: 'Ocasiones distintas en el negocio' },
     { id: 'purchases', label: 'Compras', value: k.purchases, icon: <ShoppingBag size={16} />, hint: 'Registradas por caja' },
-    { id: 'stamps', label: 'Sellos entregados', value: k.stamps, icon: <Stamp size={16} />, hint: 'Según la regla del programa' },
+    { id: 'stamps', label: `${unitTitle(data.program)} entregados`, value: k.stamps, icon: <Stamp size={16} />, hint: 'Según la regla del programa' },
     { id: 'recurring', label: 'Clientes recurrentes', value: k.recurring, icon: <Repeat size={16} />, hint: k.customers ? `${Math.round((k.recurring / k.customers) * 100)}% volvió en otra visita` : 'Con 2 visitas o más' },
     { id: 'unlocked', label: 'Recompensas desbloqueadas', value: k.rewardsUnlocked, icon: <Trophy size={16} />, hint: `${k.rewardsPending} por entregar` },
     { id: 'redemptions', label: 'Canjes', value: k.redemptions, icon: <Gift size={16} />, hint: 'Recompensas entregadas' },
@@ -91,6 +136,7 @@ function Summary() {
   const days = data.series.map((d) => ({ label: new Date(d.day + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }), visits: d.visits, purchases: d.purchases }));
   return (
     <div className="flex flex-col gap-5">
+      <Onboarding business={b} purchases={k.purchases} goTo={goTo} />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {kpis.map((x) => (
           <div key={x.id} className="panel p-4 sm:p-5 flex flex-col gap-2 min-w-0" data-testid={`kpi-${x.id}`}>
@@ -128,7 +174,7 @@ function Summary() {
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <div className="rounded-xl bg-[#F6F7F9] p-4">
             <div className="text-[12px] text-slate2">Regla vigente</div>
-            <div className="mt-1 text-[14px] text-ink font-medium">{data.program.stampsRequired} sellos = {data.program.rewardDescription.toLowerCase()}</div>
+            <div className="mt-1 text-[14px] text-ink font-medium">{data.program.stampsRequired} {units(data.program, data.program.stampsRequired)} = {data.program.rewardDescription.toLowerCase()}</div>
           </div>
           <div className="rounded-xl bg-[#FDF8EF] p-4 min-w-0">
             <div className="text-[12px] text-[#7A5A1F]">Premios por entregar</div>
@@ -136,7 +182,7 @@ function Summary() {
             <div className="mt-1 text-[12px] text-[#7A5A1F] break-words">{data.pendingRewards.join(', ') || 'Ninguno'}</div>
           </div>
           <div className="rounded-xl bg-[#EEF8FA] p-4 min-w-0">
-            <div className="text-[12px] text-[#0E6874]">A 1 o 2 sellos del premio</div>
+            <div className="text-[12px] text-[#0E6874]">Cerca de su recompensa</div>
             <div className="mt-1 text-[22px] font-semibold text-[#0B4F58] tabular-nums">{data.nearReward.length}</div>
             <div className="mt-1 text-[12px] text-[#0E6874] break-words">{data.nearReward.join(', ') || 'Ninguno'}</div>
           </div>
@@ -292,7 +338,7 @@ function Customers() {
       </section>
       <HistoryTable items={act.data?.items ?? []} title="Actividad reciente" showCustomer onVoid={(item) => { setToVoid(item); setVoidReason(''); }} />
       <Modal open={!!toVoid} onClose={() => setToVoid(null)} title="Anular compra" labelledBy="void-title">
-        <p className="text-[14px] text-[#475467]">Se quitarán {toVoid?.stamps ?? 0} sello(s) de <strong>{toVoid?.customerName}</strong>. La compra queda registrada como anulada con tu nombre y el motivo. Si esos sellos ya se usaron en un canje, no se puede anular.</p>
+        <p className="text-[14px] text-[#475467]">Se quitarán {toVoid?.stamps ?? 0} unidad(es) de <strong>{toVoid?.customerName}</strong>. La compra queda registrada como anulada con tu nombre y el motivo. Si ya se usaron en un canje, no se puede anular.</p>
         <div className="mt-4"><Field label="Motivo" htmlFor="void-reason"><input id="void-reason" className={inputCls} value={voidReason} maxLength={200} placeholder="Ej. se registró dos veces" onChange={(e) => setVoidReason(e.target.value)} /></Field></div>
         <div className="mt-5 grid grid-cols-2 gap-2">
           <Button variant="secondary" onClick={() => setToVoid(null)}>Cancelar</Button>
@@ -322,15 +368,17 @@ function Settings({ business: b, onSaved }: { business: FullBusiness; onSaved: (
   const toast = useToast();
   const initial = useMemo(() => ({
     name: b.name, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, reviewUrl: b.reviewUrl ?? '',
-    stampsRequired: b.program.stampsRequired, stampMode: b.program.stampMode, maxStampsPerPurchase: b.program.maxStampsPerPurchase,
-    visitWindowMinutes: b.program.visitWindowMinutes, rewardDescription: b.program.rewardDescription,
   }), [b]);
+  const initialProgram = useMemo(() => formFromProgram(b.program), [b]);
   const [form, setForm] = useState(initial);
+  const [prog, setProg] = useState<ProgramForm>(initialProgram);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => setForm(initial), [initial]);
+  useEffect(() => { setForm(initial); setProg(initialProgram); }, [initial, initialProgram]);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => { setForm((f) => ({ ...f, [k]: v })); setError(null); };
-  const dirty = (Object.keys(form) as (keyof typeof form)[]).some((k) => form[k] !== initial[k]);
+  const dirty = (Object.keys(form) as (keyof typeof form)[]).some((k) => form[k] !== initial[k]) || JSON.stringify(prog) !== JSON.stringify(initialProgram);
+  const progErr = programError(prog);
+  const preview = previewProgram(prog);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -338,7 +386,7 @@ function Settings({ business: b, onSaved }: { business: FullBusiness; onSaved: (
     try {
       const r = await api('PUT', '/owner/program', {
         name: form.name, vertical: form.vertical, primaryColor: form.primaryColor, accentColor: form.accentColor, reviewUrl: form.reviewUrl.trim() || null,
-        rules: { stampsRequired: Number(form.stampsRequired), stampMode: form.stampMode, maxStampsPerPurchase: form.stampMode === 'per_item' ? Number(form.maxStampsPerPurchase) : 1, visitWindowMinutes: Number(form.visitWindowMinutes), rewardDescription: form.rewardDescription },
+        rules: rulesFromForm(prog),
       });
       toast('good', r.rewardsUnlocked ? `Programa actualizado. ${r.rewardsUnlocked} tarjeta(s) desbloquearon su recompensa.` : 'Programa actualizado. Las tarjetas ya muestran los cambios.');
       onSaved();
@@ -355,39 +403,13 @@ function Settings({ business: b, onSaved }: { business: FullBusiness; onSaved: (
         <h2 className="text-[15px] font-semibold text-ink">Programa de recompensas</h2>
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Nombre comercial" htmlFor="set-name"><input id="set-name" className={inputCls} value={form.name} maxLength={60} onChange={(e) => set('name', e.target.value)} /></Field>
-          <Field label="Giro" htmlFor="set-vertical" hint="Ajusta los textos que ve el cliente.">
+          <Field label="Giro" htmlFor="set-vertical" hint="Ajusta textos y plantillas sugeridas. No cambia tu programa por sí solo.">
             <select id="set-vertical" className={inputCls} value={form.vertical} onChange={(e) => set('vertical', e.target.value as Vertical)}>
               {(Object.keys(VERTICAL_LABEL) as Vertical[]).map((v) => <option key={v} value={v}>{VERTICAL_LABEL[v]}</option>)}
             </select>
           </Field>
         </div>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="Sellos necesarios" htmlFor="set-stamps" hint="Entre 3 y 15. Los premios ya ganados se respetan.">
-            <div className="flex items-center gap-2">
-              <button type="button" className="h-11 w-11 rounded-xl border border-line bg-white text-[18px] hover:bg-[#F6F7F9]" onClick={() => set('stampsRequired', Math.max(3, Number(form.stampsRequired) - 1))} aria-label="Menos sellos">−</button>
-              <input id="set-stamps" type="number" min={3} max={15} className={cx(inputCls, 'text-center tabular-nums w-20')} value={form.stampsRequired} onChange={(e) => set('stampsRequired', Number(e.target.value))} />
-              <button type="button" className="h-11 w-11 rounded-xl border border-line bg-white text-[18px] hover:bg-[#F6F7F9]" onClick={() => set('stampsRequired', Math.min(15, Number(form.stampsRequired) + 1))} aria-label="Más sellos">+</button>
-            </div>
-          </Field>
-          <Field label="Recompensa" htmlFor="set-reward"><input id="set-reward" className={inputCls} value={form.rewardDescription} maxLength={80} onChange={(e) => set('rewardDescription', e.target.value)} /></Field>
-        </div>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="¿Cómo se ganan los sellos?" htmlFor="set-mode">
-            <select id="set-mode" className={inputCls} value={form.stampMode} onChange={(e) => set('stampMode', e.target.value as 'per_purchase' | 'per_item')}>
-              <option value="per_purchase">1 sello por compra</option>
-              <option value="per_item">1 sello por artículo (con tope)</option>
-            </select>
-          </Field>
-          {form.stampMode === 'per_item' ? (
-            <Field label="Tope de sellos por compra" htmlFor="set-max"><input id="set-max" type="number" min={1} max={10} className={cx(inputCls, 'tabular-nums w-24')} value={form.maxStampsPerPurchase} onChange={(e) => set('maxStampsPerPurchase', Number(e.target.value))} /></Field>
-          ) : (
-            <Field label="Una visita dura hasta" htmlFor="set-window" hint="Compras dentro de este tiempo cuentan como la misma visita.">
-              <select id="set-window" className={inputCls} value={form.visitWindowMinutes} onChange={(e) => set('visitWindowMinutes', Number(e.target.value))}>
-                {[30, 60, 120, 240].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutos` : `${m / 60} ${m === 60 ? 'hora' : 'horas'}`}</option>)}
-              </select>
-            </Field>
-          )}
-        </div>
+        <ProgramFields value={prog} onChange={(x) => { setProg(x); setError(null); }} vertical={form.vertical} idPrefix="set" />
         <div className="flex flex-col gap-2">
           <span className="text-[13px] font-medium text-ink">Colores de la marca</span>
           <div className="flex flex-wrap gap-2">
@@ -410,18 +432,22 @@ function Settings({ business: b, onSaved }: { business: FullBusiness; onSaved: (
           <Info size={15} className="shrink-0 mt-[1px]" />
           <span>La invitación a reseñar aparece igual para todos los clientes desde su segunda visita. No se filtran opiniones ni se premia dejar reseña, porque las políticas de Google lo prohíben.</span>
         </div>
-        {error && <p className="text-[13px] text-[#B42318]" role="alert">{error}</p>}
+        {(error || (dirty && progErr)) && <p className="text-[13px] text-[#B42318]" role="alert">{error ?? progErr}</p>}
         <div className="flex flex-wrap gap-2">
-          <Button type="submit" disabled={!dirty || busy}><Save size={16} /> {busy ? 'Guardando…' : 'Guardar cambios'}</Button>
-          <Button type="button" variant="ghost" disabled={!dirty} onClick={() => setForm(initial)}><RotateCcw size={15} /> Descartar</Button>
+          <Button type="submit" disabled={!dirty || busy || !!progErr}><Save size={16} /> {busy ? 'Guardando…' : 'Guardar cambios'}</Button>
+          <Button type="button" variant="ghost" disabled={!dirty} onClick={() => { setForm(initial); setProg(initialProgram); }}><RotateCcw size={15} /> Descartar</Button>
         </div>
       </section>
       <aside className="flex flex-col gap-3 lg:sticky lg:top-[84px]" data-vertical={form.vertical}>
         <div className="text-[12px] uppercase tracking-[0.14em] text-slate2">Así lo verá el cliente</div>
         <div style={brandVars(form.primaryColor, form.accentColor, b.cardFinish)}>
-          <LoyaltyCardFace logoUrl={b.logoUrl} logoFit={sanitizeFit(b.logoFit)} businessName={form.name || 'Tu negocio'} customerName="Cliente de ejemplo" cardId="XXXX-XXXX" total={Math.min(15, Math.max(3, Number(form.stampsRequired) || 8))} filled={3} compact />
+          <LoyaltyCardFace logoUrl={b.logoUrl} logoFit={sanitizeFit(b.logoFit)} businessName={form.name || 'Tu negocio'} customerName="Cliente de ejemplo" cardId="XXXX-XXXX" total={Math.max(1, preview.stampsRequired || 8)} filled={Math.min(3, preview.stampsRequired || 3)} compact mode={isPoints(preview) ? 'points' : 'stamps'} unitLabel={unitTitle(preview)} />
         </div>
-        <p className="text-[12px] text-slate2">Vista previa sin guardar. Al guardar se aplica en todas las tarjetas.</p>
+        <div className="panel p-3 text-[12.5px] text-[#475467] leading-snug flex flex-col gap-1" data-testid="program-summary">
+          <span className="text-ink font-medium">{stampRule(preview).title} {stampRule(preview).sub}</span>
+          <span>{rewardSentence(preview)}</span>
+        </div>
+        <p className="text-[12px] text-slate2">Vista previa sin guardar. Al guardar se crea una versión nueva del programa: lo ya acumulado y los premios ganados se respetan.</p>
       </aside>
     </form>
   );
@@ -550,7 +576,9 @@ function Team() {
   );
 }
 
-function AccessTab({ business: b }: { business: FullBusiness }) {
+function AccessTab({ business: b, onSeen }: { business: FullBusiness; onSeen?: () => void }) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onSeen?.(); }, []);
   const [links, setLinks] = useState<Links | null>(null);
   useEffect(() => { api<Links>('GET', `/public/businesses/${b.slug}/access`).then(setLinks).catch(() => setLinks(null)); }, [b.slug]);
   return (
@@ -574,7 +602,7 @@ function CounterQr({ business: b }: { business: FullBusiness }) {
         <div className="mt-3 font-display text-[24px] leading-tight">{b.name}</div>
         <div className="mt-1 text-[14px] opacity-80">Escanea y obtén tu tarjeta de recompensas</div>
         <div className="mt-5 mx-auto w-[240px] max-w-full rounded-2xl bg-white p-3"><QRCode value={url} size={216} label={`QR de registro de ${b.name}`} /></div>
-        <div className="mt-4 text-[13px] opacity-80">{b.program.stampsRequired} sellos = {b.program.rewardDescription.toLowerCase()}</div>
+        <div className="mt-4 text-[13px] opacity-80">{b.program.stampsRequired} {units(b.program, b.program.stampsRequired)} = {b.program.rewardDescription.toLowerCase()}</div>
         <div className="mt-1 text-[11px] opacity-60">Sin app · Sin contraseña</div>
         <div className="mt-5 flex justify-center"><VluxMark tone="chip" className="text-[color:var(--cream)] opacity-90" /></div>
       </div>

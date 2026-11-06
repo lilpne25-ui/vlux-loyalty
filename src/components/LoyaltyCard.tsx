@@ -42,6 +42,24 @@ export function StampGrid({ total, filled, animateFrom, size = 'md', onBrand = t
   );
 }
 
+/** V0.4.5 · Medidor de puntos grabado en el metal: barra con progreso y meta. */
+export function PointsMeter({ total, filled, unit = 'Puntos', compact }: { total: number; filled: number; unit?: string; compact?: boolean }) {
+  const pct = Math.max(0, Math.min(100, total > 0 ? (filled / total) * 100 : 0));
+  const left = Math.max(0, total - filled);
+  return (
+    <div role="img" aria-label={`${filled} de ${total} ${unit.toLowerCase()}`} data-testid="points-meter">
+      <div className={cx('flex items-baseline gap-2 card-emboss', compact ? 'text-[22px]' : 'text-[34px]')}>
+        <span className="font-display tabular-nums leading-none">{new Intl.NumberFormat('es-MX').format(filled)}</span>
+        <span className="text-[11px] uppercase tracking-[0.16em] card-ink2">{unit.toLowerCase()}</span>
+      </div>
+      <div className={cx('mt-3 rounded-full stamp-slot overflow-hidden', compact ? 'h-2' : 'h-2.5')}>
+        <div className="h-full rounded-full stamp-coin" style={{ width: `${pct}%`, transition: 'width .6s cubic-bezier(.2,.8,.2,1)' }} />
+      </div>
+      <div className="mt-1.5 text-[11px] card-ink2 tabular-nums">{left > 0 ? `Faltan ${new Intl.NumberFormat('es-MX').format(left)} para tu recompensa` : 'Meta alcanzada'}</div>
+    </div>
+  );
+}
+
 /** Inclinación 3D y reflejo que siguen al puntero. Escribe variables CSS (sin re-render de React). */
 export function useTilt<T extends HTMLElement>(enabled = true) {
   const ref = useRef<T | null>(null);
@@ -123,6 +141,8 @@ export function LoyaltyCardFace({
   rewardLabel,
   interactive = true,
   className,
+  mode = 'stamps',
+  unitLabel = 'Sellos',
 }: {
   businessName: string;
   customerName: string;
@@ -138,6 +158,10 @@ export function LoyaltyCardFace({
   rewardLabel?: string;
   interactive?: boolean;
   className?: string;
+  /** V0.4.5: el mismo motor visual se adapta al programa: círculos (sellos, visitas, servicios) o medidor (puntos). */
+  mode?: 'stamps' | 'points';
+  /** Nombre de la unidad en plural, con mayúscula inicial (Sellos, Visitas, Servicios, Puntos...). */
+  unitLabel?: string;
 }) {
   const tilt = useTilt<HTMLDivElement>(interactive);
   return (
@@ -168,7 +192,9 @@ export function LoyaltyCardFace({
         </div>
 
         <div className={cx('relative', compact ? 'mt-4' : 'mt-6')}>
-          <StampGrid total={total} filled={filled} animateFrom={animateFrom} size={compact ? 'sm' : 'md'} />
+          {mode === 'points' || total > 20
+            ? <PointsMeter total={total} filled={filled} unit={unitLabel} compact={compact} />
+            : <StampGrid total={total} filled={filled} animateFrom={animateFrom} size={compact ? 'sm' : 'md'} />}
         </div>
 
         <div className={cx('relative flex items-end justify-between gap-3', compact ? 'mt-4' : 'mt-6')}>
@@ -177,7 +203,7 @@ export function LoyaltyCardFace({
             <div className={cx('font-medium truncate card-emboss', compact ? 'text-[13px]' : 'text-[15px]')}>{rewardLabel ?? customerName}</div>
           </div>
           <div className="text-right shrink-0">
-            <div className="text-[10px] uppercase tracking-[0.16em] card-ink2">Sellos</div>
+            <div className="text-[10px] uppercase tracking-[0.16em] card-ink2">{unitLabel}</div>
             <div className={cx('font-display tabular-nums card-emboss', compact ? 'text-[15px]' : 'text-[20px]')}>
               {filled}<span className="card-ink2"> / {total}</span>
             </div>

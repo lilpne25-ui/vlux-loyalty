@@ -5,7 +5,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, ExternalLink } from 'lucide-react';
 import { api, ApiError, type Vertical } from '../lib/api';
 import { navigate } from '../lib/router';
-import { VERTICAL_LABEL } from '../lib/vertical';
+import { VERTICAL_LABEL, isPoints, rewardSentence, stampRule, unitTitle, units } from '../lib/vertical';
+import { ProgramFields } from '../components/ProgramFields';
+import { DEFAULT_PROGRAM, formFromTemplate, previewProgram, programError, rulesFromForm, type ProgramForm } from '../lib/program-form';
+import { VERTICALS, VERTICAL_IDS, verticalInfo } from '../../shared/catalog';
 import { CopyButton, QRCode } from '../components/ui';
 import { CButton, CField, PLAN_LABEL, PageHeader, cx, money } from './kit';
 import { ColorField, LogoField } from './Businesses';
@@ -18,13 +21,16 @@ import { forgetRef, pendingRef, safeRef } from './Activation';
 type Plan = { code: 'piloto' | 'inicio' | 'crecimiento'; name: string; priceCents: number; currency: string };
 type Created = { businessId: string; slug: string; registrationUrl: string; access?: { customerUrl: string; cashierUrl: string; ownerUrl: string }; ownerInvitation: { invitationId?: string; link: string; expiresAt: string }; email?: { state: 'configured' | 'mock' | 'not_configured' } };
 
-const PRESETS: Record<Vertical, { primary: string; accent: string; reward: string }> = {
-  cafeteria: { primary: '#2B1B14', accent: '#C9A15B', reward: 'Una bebida de cortesía' },
-  barberia: { primary: '#14181F', accent: '#B9C0C9', reward: 'Un corte de cortesía' },
-  salon: { primary: '#2A1626', accent: '#D8A7B1', reward: 'Un tratamiento de cortesía' },
-  restaurante: { primary: '#1B1F1A', accent: '#D9A441', reward: 'Un postre de cortesía' },
-  otro: { primary: '#111418', accent: '#67C7D3', reward: 'Un producto de cortesía' },
+const COLORS: Record<string, { primary: string; accent: string }> = {
+  cafeteria: { primary: '#2B1B14', accent: '#C9A15B' }, restaurante: { primary: '#1B1F1A', accent: '#D9A441' },
+  barberia: { primary: '#14181F', accent: '#B9C0C9' }, salon: { primary: '#2A1626', accent: '#D8A7B1' }, unas: { primary: '#2B1624', accent: '#E3A7C0' },
+  dentista: { primary: '#0F2230', accent: '#8FD3E8' }, consultorio: { primary: '#10232B', accent: '#7CC6C0' }, taller: { primary: '#17191C', accent: '#E0A43A' },
+  autolavado: { primary: '#0E1E33', accent: '#6FB7F2' }, gimnasio: { primary: '#141414', accent: '#C6F432' }, veterinaria: { primary: '#1C2A1E', accent: '#9ED39A' },
+  spa: { primary: '#22261F', accent: '#CDBA8E' }, optica: { primary: '#161B26', accent: '#B9C0C9' }, boutique: { primary: '#1D1518', accent: '#D9B26F' },
+  accesorios: { primary: '#191512', accent: '#D2B26B' }, otro: { primary: '#111418', accent: '#67C7D3' },
 };
+const PRESETS: Record<string, { primary: string; accent: string }> = Object.fromEntries(VERTICALS.map((v) => [v.id, COLORS[v.id] ?? COLORS.otro]));
+const programFor = (vertical: string, base: ProgramForm = DEFAULT_PROGRAM): ProgramForm => { const t = verticalInfo(vertical).templates[0]; return t ? formFromTemplate(t, base) : base; };
 
 const STEPS = ['Negocio', 'Programa', 'Plan', 'Resumen'];
 
@@ -37,10 +43,11 @@ export function Wizard() {
   const [f, setF] = useState({
     name: '', vertical: 'cafeteria' as Vertical, city: '', ownerName: '', ownerEmail: '', logoDataUrl: null as string | null, logoFit: null as LogoFit | null, logoOriginalDataUrl: null as string | null,
     primaryColor: PRESETS.cafeteria.primary, accentColor: PRESETS.cafeteria.accent, cardFinish: 'silver' as 'signature' | 'silver' | 'black',
-    stampsRequired: 8, stampMode: 'per_purchase' as 'per_purchase' | 'per_item', maxStampsPerPurchase: 3, visitWindowMinutes: 120,
-    rewardDescription: PRESETS.cafeteria.reward, reviewUrl: '',
+    reviewUrl: '',
     plan: 'piloto' as Plan['code'], price: '', pilotDays: 30, isDemo: false,
   });
+  const [prog, setProg] = useState<ProgramForm>(() => programFor('cafeteria'));
+  const [progTouched, setProgTouched] = useState(false);
   // Brand Activation Draft del que viene el diseño (se consume en la creación; evita duplicados por reintento).
   const [draftRef, setDraftRef] = useState<string | null>(null);
   const [fromDesign, setFromDesign] = useState(false);
@@ -62,14 +69,17 @@ export function Wizard() {
           name: typeof v.name === 'string' ? v.name.slice(0, 60) : x.name,
           logoDataUrl: typeof v.logoDataUrl === 'string' && v.logoDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoDataUrl) ? v.logoDataUrl : x.logoDataUrl,
           logoOriginalDataUrl: typeof v.logoOriginalDataUrl === 'string' && v.logoOriginalDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoOriginalDataUrl) ? v.logoOriginalDataUrl : null,
-          vertical: (['cafeteria', 'barberia', 'salon', 'restaurante', 'otro'] as const).includes(v.vertical) ? v.vertical : x.vertical,
+          vertical: VERTICAL_IDS.includes(v.vertical) ? v.vertical : x.vertical,
           logoFit: sanitizeFit(v.logoFit) ?? x.logoFit,
           primaryColor: hex.test(v.primaryColor) ? v.primaryColor : x.primaryColor,
           accentColor: hex.test(v.accentColor) ? v.accentColor : x.accentColor,
           cardFinish: v.cardFinish === 'signature' || v.cardFinish === 'black' ? v.cardFinish : 'silver',
-          rewardDescription: typeof v.rewardDescription === 'string' ? v.rewardDescription.slice(0, 80) : x.rewardDescription,
-          stampsRequired: Number.isInteger(v.stampsRequired) && v.stampsRequired >= 3 && v.stampsRequired <= 15 ? v.stampsRequired : x.stampsRequired,
         }));
+        const vv = VERTICAL_IDS.includes(v.vertical) ? v.vertical : 'cafeteria';
+        setProg((p) => ({ ...programFor(vv, p), programType: 'stamps_purchase', stampMode: 'per_purchase', maxStampsPerPurchase: 1,
+          rewardDescription: typeof v.rewardDescription === 'string' && v.rewardDescription.trim().length >= 3 ? v.rewardDescription.slice(0, 80) : p.rewardDescription,
+          stampsRequired: Number.isInteger(v.stampsRequired) && v.stampsRequired >= 3 && v.stampsRequired <= 20 ? v.stampsRequired : p.stampsRequired }));
+        setProgTouched(true);
       }
     } catch { /* sin almacenamiento */ }
     // Si se recargó la página en medio del alta, el diseño se recupera de nuevo desde el servidor con la misma referencia.
@@ -78,7 +88,9 @@ export function Wizard() {
     api<{ draft: any }>('GET', `/admin/activation-drafts/${ref}`).then(({ draft: v }) => {
       setDraftRef(ref); setFromDesign(true);
       setDraftNote({ tone: 'ok', text: 'Diseño recuperado. Revisa los datos y completa lo que falta; puedes cambiar cualquier cosa antes de crear el negocio.' });
-      setF((x) => x.name ? x : ({ ...x, name: v.name, logoDataUrl: v.logoDataUrl, logoOriginalDataUrl: v.logoOriginalDataUrl, logoFit: sanitizeFit(v.logoFit), primaryColor: v.primaryColor, accentColor: v.accentColor, cardFinish: v.cardFinish, rewardDescription: v.rewardDescription, stampsRequired: v.stampsRequired, vertical: v.vertical ?? x.vertical }));
+      setF((x) => x.name ? x : ({ ...x, name: v.name, logoDataUrl: v.logoDataUrl, logoOriginalDataUrl: v.logoOriginalDataUrl, logoFit: sanitizeFit(v.logoFit), primaryColor: v.primaryColor, accentColor: v.accentColor, cardFinish: v.cardFinish, vertical: VERTICAL_IDS.includes(v.vertical) ? v.vertical : x.vertical }));
+      setProg((p) => ({ ...p, programType: 'stamps_purchase', stampMode: 'per_purchase', maxStampsPerPurchase: 1, rewardDescription: v.rewardDescription ?? p.rewardDescription, stampsRequired: v.stampsRequired ?? p.stampsRequired }));
+      setProgTouched(true);
     }).catch((x) => {
       forgetRef();
       const code = (x as ApiError).code;
@@ -89,21 +101,25 @@ export function Wizard() {
   const plan = plans.find((p) => p.code === f.plan);
   const priceCents = f.price.trim() === '' ? plan?.priceCents ?? 0 : Math.round(Number(f.price) * 100);
 
-  const setVertical = (v: Vertical) => setF((x) => ({
-    ...x, vertical: v,
-    // Cambia los colores y el premio sugeridos solo si siguen siendo los sugeridos del giro anterior.
-    primaryColor: x.primaryColor === PRESETS[x.vertical].primary ? PRESETS[v].primary : x.primaryColor,
-    accentColor: x.accentColor === PRESETS[x.vertical].accent ? PRESETS[v].accent : x.accentColor,
-    rewardDescription: x.rewardDescription === PRESETS[x.vertical].reward ? PRESETS[v].reward : x.rewardDescription,
-  }));
+  const setVertical = (v: Vertical) => {
+    setF((x) => ({
+      ...x, vertical: v,
+      // Cambia los colores sugeridos solo si siguen siendo los sugeridos del giro anterior.
+      primaryColor: x.primaryColor === PRESETS[x.vertical]?.primary ? PRESETS[v].primary : x.primaryColor,
+      accentColor: x.accentColor === PRESETS[x.vertical]?.accent ? PRESETS[v].accent : x.accentColor,
+    }));
+    // La plantilla sugerida del giro reemplaza el programa solo si aún no se editó a mano.
+    if (!progTouched) setProg((p) => programFor(v, p));
+  };
+  const progErr = programError(prog);
+  const preview = previewProgram(prog);
 
   const stepValid = useMemo(() => [
     f.name.trim().length >= 2 && f.ownerName.trim().length >= 2 && /^\S+@\S+\.\S+$/.test(f.ownerEmail.trim()) && /^#[0-9A-F]{6}$/i.test(f.primaryColor) && /^#[0-9A-F]{6}$/i.test(f.accentColor),
-    f.stampsRequired >= LIMITS.stampsRequired.min && f.stampsRequired <= LIMITS.stampsRequired.max && f.visitWindowMinutes >= LIMITS.visitWindowMinutes.min && f.visitWindowMinutes <= LIMITS.visitWindowMinutes.max
-      && f.maxStampsPerPurchase >= 1 && f.maxStampsPerPurchase <= LIMITS.maxStampsPerPurchase.max && f.rewardDescription.trim().length >= 3 && f.rewardDescription.trim().length <= 80 && (!f.reviewUrl.trim() || /^https:\/\/\S+$/.test(f.reviewUrl.trim())),
+    !progErr && (!f.reviewUrl.trim() || /^https:\/\/\S+$/.test(f.reviewUrl.trim())),
     !!f.plan && Number.isFinite(priceCents) && priceCents >= 0,
     true,
-  ], [f, priceCents]);
+  ], [f, priceCents, progErr]);
 
   const create = async () => {
     setBusy(true);
@@ -112,7 +128,7 @@ export function Wizard() {
       const r = await api<Created>('POST', '/admin/businesses', {
         name: f.name.trim(), vertical: f.vertical, city: f.city.trim(), ownerName: f.ownerName.trim(), ownerEmail: f.ownerEmail.trim(),
         logoDataUrl: f.logoDataUrl, logoFit: f.logoFit, logoOriginalDataUrl: f.logoOriginalDataUrl, draftRef: draftRef ?? undefined, primaryColor: f.primaryColor, accentColor: f.accentColor, cardFinish: f.cardFinish,
-        rules: { stampsRequired: f.stampsRequired, stampMode: f.stampMode, maxStampsPerPurchase: f.stampMode === 'per_item' ? f.maxStampsPerPurchase : 1, visitWindowMinutes: f.visitWindowMinutes, rewardDescription: f.rewardDescription.trim() },
+        rules: rulesFromForm(prog),
         reviewUrl: f.reviewUrl.trim() || null, plan: f.plan, priceCents, pilotDays: f.pilotDays, isDemo: f.isDemo,
       });
       forgetRef();
@@ -133,7 +149,7 @@ export function Wizard() {
     }
   };
 
-  if (created) return <CreatedView c={created} f={f} />;
+  if (created) return <CreatedView c={created} f={{ ...f, stampsRequired: preview.stampsRequired, points: isPoints(preview), unit: unitTitle(preview) }} />;
 
   return (
     <>
@@ -168,19 +184,10 @@ export function Wizard() {
             </div>
           )}
           {step === 1 && (
-            <div className="grid sm:grid-cols-2 gap-4">
-              <CField label="Sellos para el premio" htmlFor="wz-stamps" hint={`Entre ${LIMITS.stampsRequired.min} y ${LIMITS.stampsRequired.max}.`}><input id="wz-stamps" type="number" min={LIMITS.stampsRequired.min} max={LIMITS.stampsRequired.max} className="cc-input tabular-nums" value={f.stampsRequired} onChange={(e) => setF({ ...f, stampsRequired: Number(e.target.value) })} /></CField>
-              <CField label="Ventana de visita (min)" htmlFor="wz-window" hint="Compras dentro de esta ventana cuentan como una visita."><input id="wz-window" type="number" min={15} max={720} className="cc-input tabular-nums" value={f.visitWindowMinutes} onChange={(e) => setF({ ...f, visitWindowMinutes: Number(e.target.value) })} /></CField>
-              <div className="sm:col-span-2">
-                <div className="text-[12.5px] font-medium text-[#C5CBD3] mb-2">Regla de acumulación</div>
-                <div className="grid sm:grid-cols-2 gap-2">
-                  <button type="button" className="cc-choice" aria-pressed={f.stampMode === 'per_purchase'} onClick={() => setF({ ...f, stampMode: 'per_purchase' })}><div className="text-[13.5px] font-medium">1 sello por compra</div><div className="mt-1 text-[12px] cc-muted">Sin importar cuántos artículos.</div></button>
-                  <button type="button" className="cc-choice" aria-pressed={f.stampMode === 'per_item'} onClick={() => setF({ ...f, stampMode: 'per_item' })}><div className="text-[13.5px] font-medium">1 sello por artículo</div><div className="mt-1 text-[12px] cc-muted">Con un tope por compra.</div></button>
-                </div>
-              </div>
-              {f.stampMode === 'per_item' && <CField label="Tope de sellos por compra" htmlFor="wz-max"><input id="wz-max" type="number" min={1} max={10} className="cc-input tabular-nums" value={f.maxStampsPerPurchase} onChange={(e) => setF({ ...f, maxStampsPerPurchase: Number(e.target.value) })} /></CField>}
-              <CField label="Premio" htmlFor="wz-reward" className="sm:col-span-2"><input id="wz-reward" className="cc-input" value={f.rewardDescription} onChange={(e) => setF({ ...f, rewardDescription: e.target.value })} /></CField>
-              <CField label="Enlace de reseñas de Google (opcional)" htmlFor="wz-review" className="sm:col-span-2" hint="Se invita a reseñar después de la visita; nunca se premia la reseña (política de Google)."><input id="wz-review" className="cc-input" value={f.reviewUrl} onChange={(e) => setF({ ...f, reviewUrl: e.target.value })} placeholder="https://g.page/r/…/review" /></CField>
+            <div className="flex flex-col gap-4">
+              <ProgramFields theme="cc" idPrefix="wz" value={prog} vertical={f.vertical} onChange={(x) => { setProg(x); setProgTouched(true); }} />
+              {progErr && <p className="text-[12px] text-[#FDA29B]" role="alert" data-testid="program-error">{progErr}</p>}
+              <CField label="Enlace de reseñas de Google (opcional)" htmlFor="wz-review" hint="Se invita a reseñar después de la visita; nunca se premia la reseña (política de Google)."><input id="wz-review" className="cc-input" value={f.reviewUrl} onChange={(e) => setF({ ...f, reviewUrl: e.target.value })} placeholder="https://g.page/r/…/review" /></CField>
             </div>
           )}
           {step === 2 && (
@@ -204,8 +211,8 @@ export function Wizard() {
             <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-4 text-[13px]" data-testid="wizard-summary">
               <Item k="Negocio" v={`${f.name} · ${VERTICAL_LABEL[f.vertical]}${f.city ? ` · ${f.city}` : ''}`} />
               <Item k="Dueño" v={`${f.ownerName} · ${f.ownerEmail}`} />
-              <Item k="Programa" v={`${f.stampsRequired} sellos → ${f.rewardDescription}`} />
-              <Item k="Regla" v={f.stampMode === 'per_item' ? `1 sello por artículo (máx. ${f.maxStampsPerPurchase})` : '1 sello por compra'} />
+              <Item k="Programa" v={`${preview.stampsRequired} ${units(preview, preview.stampsRequired)} → ${preview.rewardDescription}`} />
+              <Item k="Regla" v={`${stampRule(preview).title} ${stampRule(preview).sub}`} />
               <Item k="Plan" v={`${PLAN_LABEL[f.plan]} · ${money(priceCents, plan?.currency)}/mes${f.plan === 'piloto' ? ` · ${f.pilotDays} días` : ''}`} />
               <Item k="Reseñas" v={f.reviewUrl.trim() || 'Sin enlace'} />
               <Item k="Tipo" v={f.isDemo ? 'Demostración' : 'Negocio real'} />
@@ -223,8 +230,8 @@ export function Wizard() {
 
         <aside className="hidden lg:block">
           <div className="cc-label mb-2">Vista previa de la tarjeta</div>
-          <div style={brandVars(f.primaryColor, f.accentColor, f.cardFinish)} data-testid="wizard-card"><LoyaltyCardFace compact businessName={f.name.trim() || 'Tu negocio'} customerName="Mariana López" cardId="VX-4F7K-92" total={Math.min(Math.max(f.stampsRequired, LIMITS.stampsRequired.min), LIMITS.stampsRequired.max)} filled={2} logoUrl={f.logoDataUrl} logoFit={f.logoFit} footer={<span className="opacity-70">{f.city || 'Ejemplo'}</span>} interactive={false} /></div>
-          <p className="mt-2 text-[11.5px] cc-muted">Premio: {f.rewardDescription || '—'}</p>
+          <div style={brandVars(f.primaryColor, f.accentColor, f.cardFinish)} data-testid="wizard-card"><LoyaltyCardFace compact businessName={f.name.trim() || 'Tu negocio'} customerName="Mariana López" cardId="VX-4F7K-92" total={Math.max(1, preview.stampsRequired || LIMITS.stampsRequired.min)} filled={Math.min(2, preview.stampsRequired || 2)} logoUrl={f.logoDataUrl} logoFit={f.logoFit} footer={<span className="opacity-70">{f.city || 'Ejemplo'}</span>} interactive={false} mode={isPoints(preview) ? 'points' : 'stamps'} unitLabel={unitTitle(preview)} /></div>
+          <p className="mt-2 text-[11.5px] cc-muted">{rewardSentence(preview)}</p>
           
         </aside>
       </div>
@@ -269,7 +276,7 @@ function Row({ k, v, testid }: { k: string; v: string; testid?: string }) {
 }
 
 /** Pantalla posterior al alta. Solo dice lo que es verdad: se generaron enlaces e invitación manual; no se envió ningún correo ni el negocio está operando todavía. */
-function CreatedView({ c, f }: { c: Created; f: { name: string; ownerName: string; ownerEmail: string; primaryColor: string; accentColor: string; cardFinish: 'signature' | 'silver' | 'black'; logoDataUrl: string | null; logoFit: LogoFit | null; stampsRequired: number } }) {
+function CreatedView({ c, f }: { c: Created; f: { name: string; ownerName: string; ownerEmail: string; primaryColor: string; accentColor: string; cardFinish: 'signature' | 'silver' | 'black'; logoDataUrl: string | null; logoFit: LogoFit | null; stampsRequired: number; points?: boolean; unit?: string } }) {
   const access = c.access ?? { customerUrl: c.registrationUrl, cashierUrl: '', ownerUrl: '' };
   const ficha = `/vlux-admin/negocios/${c.businessId}`;
   return (
@@ -281,7 +288,7 @@ function CreatedView({ c, f }: { c: Created; f: { name: string; ownerName: strin
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,380px)_1fr] items-start">
         <div style={brandVars(f.primaryColor, f.accentColor, f.cardFinish)} data-testid="activation-card">
-          <LoyaltyCardFace businessName={f.name} customerName="Mariana López" cardId="VX-4F7K-92" total={f.stampsRequired} filled={0} logoUrl={f.logoDataUrl} logoFit={f.logoFit} footer={<span className="opacity-70">Vista previa</span>} />
+          <LoyaltyCardFace businessName={f.name} customerName="Mariana López" cardId="VX-4F7K-92" total={f.stampsRequired} filled={0} logoUrl={f.logoDataUrl} logoFit={f.logoFit} footer={<span className="opacity-70">Vista previa</span>} mode={f.points ? 'points' : 'stamps'} unitLabel={f.unit} />
         </div>
         <div className="flex flex-col gap-4" data-testid="created-access">
           <section className="cc-panel p-5" aria-label="Cliente" data-testid="activation-customer">

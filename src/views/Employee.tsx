@@ -9,7 +9,8 @@ import { usePolling } from '../lib/usePolling';
 import { cameraSupported, decodeQrFromFile, startCameraScanner } from '../lib/qr';
 import { navigate } from '../lib/router';
 import { Button, Badge, inputCls, useToast, cx, Modal, QRCode, CopyButton } from '../components/ui';
-import { StampGrid } from '../components/LoyaltyCard';
+import { PointsMeter, StampGrid } from '../components/LoyaltyCard';
+import { isPoints, units, unitTitle } from '../lib/vertical';
 import { ErrorBox } from '../components/Brand';
 
 const CARD_POLL_MS = 5000;
@@ -205,12 +206,14 @@ function ListPanel({ selectedId, onPick }: { selectedId: string | null; onPick: 
   );
 }
 
-type CardData = { card: StaffCard; program: Pick<Program, 'stampsRequired' | 'stampMode' | 'maxStampsPerPurchase' | 'rewardDescription'>; history: HistoryItem[] };
+type CardData = { card: StaffCard; program: Program; history: HistoryItem[] };
 
 function CardPanel({ cardId }: { cardId: string }) {
   const toast = useToast();
   const { data, error, refresh, setData } = usePolling(() => api<CardData>('GET', `/staff/cards/${cardId}`), CARD_POLL_MS, [cardId]);
   const [items, setItems] = useState(1);
+  const [amount, setAmount] = useState('');
+  const [service, setService] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmRedeem, setConfirmRedeem] = useState(false);
   const [dupPrompt, setDupPrompt] = useState<string | null>(null);
@@ -228,7 +231,13 @@ function CardPanel({ cardId }: { cardId: string }) {
   const shown = Math.min(card.balance, goal);
   const remaining = Math.max(0, goal - card.balance);
   const extra = reward ? Math.max(0, card.balance - reward.stampsCost) : 0;
-  const perItem = program.stampMode === 'per_item';
+  const type = program.programType ?? 'stamps_purchase';
+  const perItem = (type === 'stamps_purchase' || type === 'custom') && program.stampMode === 'per_item';
+  const services = type === 'stamps_service' ? program.eligibleServices ?? [] : [];
+  const amountCents = Math.round(Number(amount.replace(/[^\d.]/g, '')) * 100) || 0;
+  const pointsPreview = isPoints(program) ? Math.min(Math.floor(amountCents / (program.amountPerPointCents || 1000)), program.maxStampsPerPurchase) : 0;
+  const needsInput = (isPoints(program) && amountCents <= 0) || (services.length > 0 && !service);
+  const actionLabel = type === 'stamps_visit' ? 'Registrar visita' : type === 'stamps_service' ? 'Registrar servicio' : isPoints(program) ? 'Registrar consumo' : 'Registrar compra';
 
   const purchase = async (confirmDuplicate = false) => {
     if (busy) return;
@@ -236,14 +245,20 @@ function CardPanel({ cardId }: { cardId: string }) {
     if (!pendingKey.current) pendingKey.current = newIdempotencyKey();
     const before = shown;
     try {
-      const r = await api('POST', `/staff/cards/${cardId}/purchases`, { itemCount: perItem ? items : 1, idempotencyKey: pendingKey.current, confirmDuplicate });
+      const body: Record<string, unknown> = { itemCount: perItem || type === 'stamps_service' ? items : 1, idempotencyKey: pendingKey.current, confirmDuplicate };
+      if (isPoints(program)) body.amountCents = amountCents;
+      if (services.length) body.service = service;
+      const r = await api('POST', `/staff/cards/${cardId}/purchases`, body);
       pendingKey.current = null;
       setDupPrompt(null);
       setAnimFrom(before);
-      setItems(1);
+      setItems(1); setAmount(''); setService('');
       setData({ ...data, card: r.card });
       refresh();
-      toast('good', r.rewardUnlocked ? `¡${card.customerName} completó su tarjeta! Recompensa desbloqueada.` : `${plural(r.stampsAwarded, 'sello agregado', 'sellos agregados')} a ${card.customerName}.`);
+      toast('good', r.rewardUnlocked ? `¡${card.customerName} completó su tarjeta! Recompensa desbloqueada.`
+        : r.limitReached ? `Operación registrada sin ${units(program, 2)}: ${card.customerName} ya alcanzó el límite de hoy.`
+        : r.stampsAwarded === 0 ? `Operación registrada. Ya contaba esta visita de ${card.customerName}.`
+        : `+${r.stampsAwarded} ${units(program, r.stampsAwarded)} para ${card.customerName}.`);
     } catch (e) {
       const err = e as ApiError;
       if (err.code === 'possible_duplicate') {
@@ -290,17 +305,17 @@ function CardPanel({ cardId }: { cardId: string }) {
               <button className="text-[12.5px] font-medium underline underline-offset-2 inline-flex items-center gap-1" onClick={() => setConfirmLink(true)}><Link2 size={12} /> Nuevo enlace</button>
             </div>
           </div>
-          {reward ? <Badge tone="gold"><Gift size={12} /> Recompensa disponible</Badge> : <Badge tone="neutral">Faltan {plural(remaining, 'sello', 'sellos')}</Badge>}
+          {reward ? <Badge tone="gold"><Gift size={12} /> Recompensa disponible</Badge> : <Badge tone="neutral">Faltan {remaining} {units(program, remaining)}</Badge>}
         </div>
 
         <div className="p-4 sm:p-5 grid gap-5 md:grid-cols-[minmax(0,1fr)_260px] items-start">
           <div className="flex flex-col gap-4 min-w-0">
             <div className="rounded-2xl p-4 sm:p-5 text-[color:var(--cream)]" style={{ background: 'var(--brand)' }} key={card.balance + ':' + card.cycle}>
               <div className="flex items-baseline justify-between mb-4">
-                <span className="text-[12px] uppercase tracking-[0.14em] opacity-60">Sellos acumulados</span>
+                <span className="text-[12px] uppercase tracking-[0.14em] opacity-60">{unitTitle(program)} acumulados</span>
                 <span className="font-display text-[22px] tabular-nums" data-testid="staff-stamp-count">{shown}<span className="opacity-50"> / {goal}</span></span>
               </div>
-              <StampGrid total={goal} filled={shown} animateFrom={animFrom} />
+              {isPoints(program) || goal > 20 ? <PointsMeter total={goal} filled={shown} unit={unitTitle(program)} /> : <StampGrid total={goal} filled={shown} animateFrom={animFrom} />}
               {extra > 0 && <div className="mt-3 text-[12px] opacity-70">+{extra} para el siguiente ciclo</div>}
             </div>
             <dl className="grid grid-cols-3 gap-2 text-[12.5px]">
@@ -328,11 +343,40 @@ function CardPanel({ cardId }: { cardId: string }) {
                 </div>
               </div>
             )}
-            <Button variant="primary" size="lg" className="w-full" onClick={() => purchase(false)} disabled={busy}>
-              <ShoppingBag size={18} /> {busy ? 'Registrando…' : 'Registrar compra'}
+            {isPoints(program) && (
+              <label className="flex flex-col gap-1.5 rounded-xl border border-line px-3 py-2">
+                <span className="text-[13px] text-ink">Monto de la cuenta (MXN)</span>
+                <input inputMode="decimal" className={inputCls} placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} data-testid="amount-input" />
+                <span className="text-[12px] text-slate2" data-testid="points-preview">{amountCents > 0 ? `Suma ${pointsPreview} ${units(program, pointsPreview)}` : `1 ${units(program, 1)} por cada ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format((program.amountPerPointCents ?? 1000) / 100)}`}</span>
+              </label>
+            )}
+            {services.length > 0 && (
+              <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Servicio realizado">
+                <span className="text-[13px] text-ink">Servicio realizado</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {services.map((sv) => <button key={sv} type="button" role="radio" aria-checked={service === sv} onClick={() => setService(sv)} className={cx('h-9 px-3 rounded-lg border text-[13px]', service === sv ? 'border-ink bg-ink text-white' : 'border-line text-ink')}>{sv}</button>)}
+                </div>
+              </div>
+            )}
+            {type === 'stamps_service' && program.maxStampsPerPurchase > 1 && (
+              <div className="flex items-center justify-between rounded-xl border border-line px-3 py-2">
+                <span className="text-[13px] text-ink">Servicios en esta visita</span>
+                <div className="flex items-center gap-2">
+                  <button type="button" aria-label="Menos servicios" className="h-9 w-9 rounded-lg border border-line inline-flex items-center justify-center" onClick={() => setItems((n) => Math.max(1, n - 1))}><Minus size={15} /></button>
+                  <span className="w-6 text-center tabular-nums font-semibold">{items}</span>
+                  <button type="button" aria-label="Más servicios" className="h-9 w-9 rounded-lg border border-line inline-flex items-center justify-center" onClick={() => setItems((n) => Math.min(program.maxStampsPerPurchase, n + 1))}><Plus size={15} /></button>
+                </div>
+              </div>
+            )}
+            <Button variant="primary" size="lg" className="w-full" onClick={() => purchase(false)} disabled={busy || needsInput} data-testid="register-operation">
+              <ShoppingBag size={18} /> {busy ? 'Registrando…' : actionLabel}
             </Button>
             <p className="text-[11.5px] text-slate2 leading-snug">
-              {perItem ? `1 sello por artículo válido, hasta ${program.maxStampsPerPurchase} por compra.` : '1 sello por compra válida, sin importar cuántos artículos lleve.'} Varias compras seguidas cuentan como una sola visita.
+              {type === 'stamps_visit' ? `1 ${units(program, 1)} por visita. Varias compras dentro de ${program.visitWindowMinutes ?? 120} min cuentan como una sola.`
+                : type === 'stamps_service' ? `1 ${units(program, 1)} por servicio participante${program.maxStampsPerPurchase > 1 ? `, hasta ${program.maxStampsPerPurchase} por visita` : ''}.`
+                : isPoints(program) ? `Los puntos se calculan con el monto que escribes, hasta ${program.maxStampsPerPurchase} por operación.`
+                : perItem ? `1 ${units(program, 1)} por artículo válido, hasta ${program.maxStampsPerPurchase} por compra.` : `1 ${units(program, 1)} por compra válida, sin importar cuántos artículos lleve.`}
+              {program.maxAwardsPerDay ? ` Máximo ${program.maxAwardsPerDay} por día.` : ''}
             </p>
           </div>
         </div>
