@@ -142,7 +142,7 @@ async function statsByBusiness(): Promise<Map<string, Stats>> {
 export async function listBusinesses() {
   const [rows, stats] = await Promise.all([
     getPool().query(
-      `SELECT b.id, b.slug, b.name, b.vertical, b.city, b.status, b.is_demo, b.created_at,
+      `SELECT b.id, b.slug, b.name, b.vertical, b.city, b.status, b.is_demo, b.created_at, b.archived_at, (b.synthetic_declared_at IS NOT NULL) AS synthetic,
               s.plan_code, s.commercial_status, s.price_cents, s.currency,
               (SELECT string_agg(u.display_name, ', ' ORDER BY m.created_at) FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id
                 WHERE m.business_id = b.id AND m.role = 'OWNER' AND m.active) AS owners,
@@ -155,7 +155,7 @@ export async function listBusinesses() {
   return rows.rows.map((r) => {
     const st = stats.get(r.id);
     return {
-      id: r.id, slug: r.slug, name: r.name, vertical: r.vertical, city: r.city, status: r.status, isDemo: r.is_demo, createdAt: r.created_at,
+      id: r.id, slug: r.slug, name: r.name, vertical: r.vertical, city: r.city, status: r.status, isDemo: r.is_demo, synthetic: r.synthetic, createdAt: r.created_at, archivedAt: r.archived_at,
       owner: r.owners || (r.pending_owner ? `${r.pending_owner} (invitación pendiente)` : null),
       plan: r.plan_code, commercialStatus: r.commercial_status, priceCents: r.price_cents, currency: r.currency,
       customers: st?.customers ?? 0, lastActivity: st?.lastActivity ?? null,
@@ -174,14 +174,17 @@ export async function overview() {
                       ORDER BY e.created_at DESC LIMIT 10`),
   ]);
   const dbMs = Date.now() - t0;
+  // V0.4.5: los archivados se cuentan aparte y NO entran en las métricas de operación.
   const bucket = (demo: boolean) => {
-    const bs = list.filter((b) => b.isDemo === demo);
+    const all = list.filter((b) => b.isDemo === demo);
+    const bs = all.filter((b) => b.status !== 'archived');
     const sum = (k: keyof Stats) => bs.reduce((acc, b) => acc + Number(stats.get(b.id)?.[k] ?? 0), 0);
     return {
       businesses: bs.length,
       active: bs.filter((b) => b.status === 'active' && b.commercialStatus === 'activo').length,
       pilot: bs.filter((b) => b.status === 'active' && b.commercialStatus === 'piloto').length,
       suspended: bs.filter((b) => b.status === 'suspended').length,
+      archived: all.length - bs.length,
       customers: sum('customers'), cards: sum('cards'), purchases: sum('purchases'), stamps: sum('stamps'), rewardsRedeemed: sum('rewardsRedeemed'),
     };
   };
@@ -194,7 +197,7 @@ export async function overview() {
       environment: process.env.VERCEL_ENV || (config.isProduction ? 'production' : 'development'),
       region: process.env.VERCEL_REGION || 'local',
       node: process.version,
-      database: { ok: true, latencyMs: dbMs, schema: 'V0.3 (0006_control_center)' },
+      database: { ok: true, latencyMs: dbMs, schema: 'V0.4.5 (0011_business_lifecycle)' },
       emailProvider: 'no configurado (las invitaciones se entregan por enlace)',
       wallet: {
         google: walletLabel(GoogleWalletProvider.fromEnv().status()),
@@ -211,7 +214,7 @@ function walletLabel(st: ReturnType<GoogleWalletProvider['status']>) {
 
 export async function businessDetail(id: string) {
   const b = (await getPool().query(
-    `SELECT b.id, b.slug, b.status, b.suspended_reason, b.logo_data_url, b.logo_fit, b.logo_original_data_url, b.created_at, b.updated_at, b.is_demo,
+    `SELECT b.id, b.slug, b.status, b.suspended_reason, b.archived_at, b.archived_reason, b.synthetic_declared_at, b.logo_data_url, b.logo_fit, b.logo_original_data_url, b.created_at, b.updated_at, b.is_demo,
             s.plan_code, s.commercial_status, s.start_date, s.pilot_end_date, s.renewal_date, s.price_cents, s.currency, s.notes, s.updated_at AS sub_updated
        FROM businesses b LEFT JOIN business_subscriptions s ON s.business_id = b.id WHERE b.id = $1`, [id],
   )).rows[0];
@@ -229,7 +232,7 @@ export async function businessDetail(id: string) {
   const d = (v: Date | string | null) => (v ? (v instanceof Date ? isoDate(v) : String(v).slice(0, 10)) : null);
   return {
     ...pub,
-    status: b.status, suspendedReason: b.suspended_reason, logoDataUrl: b.logo_data_url, logoFit: b.logo_fit ?? null, logoOriginalDataUrl: b.logo_original_data_url ?? null, createdAt: b.created_at,
+    status: b.status, suspendedReason: b.suspended_reason, archivedAt: b.archived_at, archivedReason: b.archived_reason, syntheticDeclaredAt: b.synthetic_declared_at, logoDataUrl: b.logo_data_url, logoFit: b.logo_fit ?? null, logoOriginalDataUrl: b.logo_original_data_url ?? null, createdAt: b.created_at,
     subscription: b.plan_code ? {
       plan: b.plan_code, commercialStatus: b.commercial_status, startDate: d(b.start_date), pilotEndDate: d(b.pilot_end_date),
       renewalDate: d(b.renewal_date), priceCents: b.price_cents, currency: b.currency, notes: b.notes, updatedAt: b.sub_updated,
@@ -263,6 +266,7 @@ export async function setBusinessStatus(admin: AdminSession, id: string, raw: un
   return withTenant(id, async (tx) => {
     const cur = (await tx.query('SELECT status FROM businesses WHERE id = $1 FOR UPDATE', [id])).rows[0];
     if (!cur) throw notFound('Negocio');
+    if (cur.status === 'archived') throw new AppError(409, 'archived', 'El negocio está archivado. Primero restáuralo.');
     if (cur.status === input.status) throw new AppError(409, 'no_change', input.status === 'active' ? 'El negocio ya está activo.' : 'El negocio ya está suspendido.');
     await tx.query('UPDATE businesses SET status = $2, suspended_reason = $3 WHERE id = $1', [id, input.status, input.status === 'suspended' ? input.reason : null]);
     let sessionsRevoked = 0;

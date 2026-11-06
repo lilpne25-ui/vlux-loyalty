@@ -17,6 +17,7 @@ import {
   businessDetail, createBusinessFromWizard, listBusinesses, listPlans, overview, platformAuditLog, setBusinessStatus,
   updateBusiness, updatePlan, updateSubscription,
 } from './services/platform';
+import { archiveBusiness, declareSynthetic, deleteBusiness, deletionPreview, exportBusiness, listDeletions, restoreBusiness } from './services/lifecycle';
 import { inviteSchema, inviteStaff, resendInvitation, revokeInvitation } from './services/invitations';
 import { z } from 'zod';
 
@@ -119,6 +120,28 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBod
   });
   p.patch('/businesses/:id', async (c) => c.json(await updateBusiness(c.get('admin'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
   p.post('/businesses/:id/status', async (c) => c.json(await setBusinessStatus(c.get('admin'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
+  // V0.4.5 · Ciclo de vida: archivar, restaurar, respaldo, datos sintéticos y eliminación definitiva.
+  const bid = (c: Context) => uuidSchema.parse(c.req.param('id'));
+  p.post('/businesses/:id/archive', async (c) => c.json(await archiveBusiness(c.get('admin'), bid(c), await jsonBody(c))));
+  p.post('/businesses/:id/restore', async (c) => c.json(await restoreBusiness(c.get('admin'), bid(c), await jsonBody(c))));
+  p.get('/businesses/:id/deletion-preview', async (c) => c.json(await deletionPreview(c.get('admin'), bid(c))));
+  p.post('/businesses/:id/export', async (c) => {
+    await rateLimit(`admin-export:${c.get('admin').adminId}`, 10, 15 * 60_000);
+    const r = await exportBusiness(c.get('admin'), bid(c));
+    c.header('Cache-Control', 'no-store');
+    c.header('Content-Disposition', 'attachment; filename="vlux-respaldo-negocio.json"');
+    c.header('X-Content-SHA256', r.sha256);
+    return c.body(r.body, 200, { 'Content-Type': 'application/json; charset=utf-8' });
+  });
+  p.post('/businesses/:id/declare-synthetic', async (c) => {
+    await rateLimit(`admin-stepup:${c.get('admin').adminId}`, 5, 15 * 60_000);
+    return c.json(await declareSynthetic(c.get('admin'), bid(c), await jsonBody(c)));
+  });
+  p.post('/businesses/:id/delete', async (c) => {
+    await rateLimit(`admin-stepup:${c.get('admin').adminId}`, 5, 15 * 60_000);
+    return c.json(await deleteBusiness(c.get('admin'), bid(c), await jsonBody(c)));
+  });
+  p.get('/deletions', async (c) => c.json({ deletions: await listDeletions() }));
   p.put('/businesses/:id/subscription', async (c) => c.json(await updateSubscription(c.get('admin'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
 
   const roleSchema = z.object({ role: z.enum(['OWNER', 'EMPLOYEE']) });

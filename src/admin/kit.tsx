@@ -88,6 +88,7 @@ export const PLAN_LABEL: Record<string, string> = { piloto: 'Piloto', inicio: 'I
 /** Nombre legible de las acciones de bitácora. */
 export const ACTION_LABEL: Record<string, string> = {
   'business.created': 'Negocio creado', 'business.updated': 'Negocio editado', 'business.suspended': 'Servicio suspendido', 'business.reactivated': 'Servicio reactivado',
+  'business.archived': 'Negocio archivado', 'business.restored': 'Negocio restaurado', 'business.exported': 'Respaldo descargado', 'business.synthetic_declared': 'Datos declarados de prueba', 'business.deleted': 'Negocio eliminado', 'admin.stepup_failed': 'Reverificación 2FA fallida',
   'subscription.updated': 'Suscripción actualizada', 'plan.updated': 'Plan actualizado',
   'invitation.created': 'Invitación creada', 'invitation.resent': 'Invitación reenviada', 'invitation.revoked': 'Invitación revocada', 'invitation.accepted': 'Invitación aceptada', 'invitation.failed_attempt': 'Intento fallido de invitación',
   'admin.bootstrap': 'Primer administrador', 'admin.login': 'Inicio de sesión', 'admin.login_failed': 'Inicio de sesión fallido', 'admin.mfa_failed': 'Código 2FA incorrecto',

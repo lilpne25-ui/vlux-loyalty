@@ -259,6 +259,31 @@ export async function setAdminDisabled(s: AdminSession, adminId: string, disable
   });
 }
 
+/**
+ * V0.4.5 · Reverificación 2FA para operaciones peligrosas (eliminar un negocio, declarar datos sintéticos).
+ * Exige un código TOTP NUEVO (no reutilizable) aunque la sesión ya esté verificada. Cuenta como fallo de 2FA.
+ */
+export async function verifyStepUp(s: AdminSession, code: unknown, purpose: string) {
+  const clean = typeof code === 'string' ? code.replace(/\s/g, '') : '';
+  if (!/^\d{6}$/.test(clean)) throw new AppError(422, 'validation', 'Escribe el código de 6 dígitos de tu app de autenticación.');
+  const ok = await withTx(async (tx) => {
+    const a = (await tx.query('SELECT totp_secret_enc, totp_last_step, mfa_failures, locked_until FROM platform_admins WHERE id = $1 FOR UPDATE', [s.adminId])).rows[0];
+    if (!a?.totp_secret_enc) return false;
+    if (a.locked_until && new Date(a.locked_until) > new Date()) throw new AppError(429, 'rate_limited', 'Demasiados intentos. Espera un momento y vuelve a intentar.');
+    const step = verifyTotp(decryptSecret(a.totp_secret_enc), clean);
+    if (step !== null && step > Number(a.totp_last_step)) {
+      await tx.query('UPDATE platform_admins SET totp_last_step = $2, mfa_failures = 0 WHERE id = $1', [s.adminId, step]);
+      return true;
+    }
+    const n = Number(a.mfa_failures) + 1;
+    await tx.query(`UPDATE platform_admins SET mfa_failures = $2::int, locked_until = CASE WHEN $2::int >= $3::int THEN now() + make_interval(mins => $4) ELSE locked_until END WHERE id = $1`,
+      [s.adminId, n, MAX_FAILED, LOCK_MINUTES]);
+    await platformAudit(tx, s.adminId, 'admin.stepup_failed', { details: { purpose, failures: n } });
+    return false;
+  });
+  if (!ok) throw new AppError(401, 'invalid_code', 'El código no es correcto o ya se usó. Espera el siguiente código.');
+}
+
 export const requireMfa = (s: AdminSession | null) => {
   if (!s) throw unauthorized();
   if (!s.mfaVerified) throw new AppError(403, 'mfa_required', 'Completa el segundo factor para continuar.');

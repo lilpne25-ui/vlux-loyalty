@@ -1,6 +1,7 @@
 // Directorio de negocios y ficha de cada negocio (acceso, suscripción, configuración, estado, bitácora).
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Ban, ExternalLink, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Search, UserPlus, XCircle } from 'lucide-react';
+import { Archive, ArrowLeft, Ban, ExternalLink, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { ArchiveModal, DeleteModal, RestoreModal } from './Lifecycle';
 import { api, ApiError, type Vertical } from '../lib/api';
 import { navigate } from '../lib/router';
 import { usePolling } from '../lib/usePolling';
@@ -14,17 +15,19 @@ import { LogoControls } from './LogoControls';
 import { defaultFit, sanitizeFit, type LogoAnalysis, type LogoFit } from '../lib/logoFit';
 
 type Row = {
-  id: string; slug: string; name: string; vertical: Vertical; city: string; status: 'active' | 'suspended'; isDemo: boolean; createdAt: string;
+  id: string; slug: string; name: string; vertical: Vertical; city: string; status: 'active' | 'suspended' | 'archived'; isDemo: boolean; synthetic?: boolean; createdAt: string;
   owner: string | null; plan: string | null; commercialStatus: string | null; priceCents: number | null; currency: string | null; customers: number; lastActivity: string | null;
 };
 
 export function Directory() {
   const { data, error, refresh } = usePolling(() => api<{ businesses: Row[] }>('GET', '/admin/businesses'), 60_000, []);
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<'todos' | 'piloto' | 'activo' | 'suspendidos' | 'demo'>('todos');
+  const [filter, setFilter] = useState<'todos' | 'piloto' | 'activo' | 'suspendidos' | 'demo' | 'archivados'>('todos');
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase();
     return (data?.businesses ?? []).filter((b) => {
+      // V0.4.5: los archivados solo aparecen en su propio filtro.
+      if ((filter === 'archivados') !== (b.status === 'archived')) return false;
       if (filter === 'piloto' && b.commercialStatus !== 'piloto') return false;
       if (filter === 'activo' && b.commercialStatus !== 'activo') return false;
       if (filter === 'suspendidos' && b.status !== 'suspended') return false;
@@ -35,14 +38,14 @@ export function Directory() {
 
   return (
     <>
-      <PageHeader title="Negocios" sub={data ? `${data.businesses.length} en la plataforma` : ' '} actions={<CButton variant="primary" onClick={() => navigate('/vlux-admin/negocios/nuevo')}><Plus size={15} /> Nuevo negocio</CButton>} />
+      <PageHeader title="Negocios" sub={data ? `${data.businesses.filter((b) => b.status !== 'archived').length} en operación · ${data.businesses.filter((b) => b.status === 'archived').length} archivados` : ' '} actions={<CButton variant="primary" onClick={() => navigate('/vlux-admin/negocios/nuevo')}><Plus size={15} /> Nuevo negocio</CButton>} />
       <div className="flex flex-wrap gap-2 mb-4">
         <div className="relative flex-1 min-w-[220px] max-w-[360px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 cc-faint" />
           <input className="cc-input" style={{ paddingLeft: 36 }} placeholder="Buscar por nombre, ciudad o dueño" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar negocios" />
         </div>
         <select className="cc-input" style={{ width: 180 }} value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} aria-label="Filtrar">
-          <option value="todos">Todos</option><option value="piloto">En piloto</option><option value="activo">Activos</option><option value="suspendidos">Suspendidos</option><option value="demo">Demostración</option>
+          <option value="todos">En operación</option><option value="piloto">En piloto</option><option value="activo">Activos</option><option value="suspendidos">Suspendidos</option><option value="demo">Demostración</option><option value="archivados">Archivados</option>
         </select>
       </div>
       {error && <div className="mb-4"><ErrorLine message={error.message} onRetry={refresh} /></div>}
@@ -76,7 +79,7 @@ function StatusPills({ row }: { row: { status: string; commercialStatus: string 
   const c = row.commercialStatus ? COMMERCIAL[row.commercialStatus] : null;
   return (
     <div className="flex flex-wrap gap-1.5">
-      {row.status === 'suspended' ? <Pill tone="red">Servicio suspendido</Pill> : c ? <Pill tone={c.tone}>{c.label}</Pill> : null}
+      {row.status === 'archived' ? <Pill tone="silver">Archivado</Pill> : row.status === 'suspended' ? <Pill tone="red">Servicio suspendido</Pill> : c ? <Pill tone={c.tone}>{c.label}</Pill> : null}
       {row.isDemo && <Pill dot={false}>Demo</Pill>}
     </div>
   );
@@ -87,7 +90,7 @@ type Invitation = { id: string; email: string; displayName: string; role: 'OWNER
 type Detail = {
   id: string; slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; cardFinish?: 'signature' | 'silver' | 'black'; reviewUrl: string | null; isDemo: boolean;
   program: { stampsRequired: number; stampMode: string; maxStampsPerPurchase: number; visitWindowMinutes: number; rewardDescription: string; version: number };
-  status: 'active' | 'suspended'; suspendedReason: string | null; logoDataUrl: string | null; logoFit?: unknown | null; logoOriginalDataUrl?: string | null; createdAt: string; registrationUrl: string;
+  status: 'active' | 'suspended' | 'archived'; suspendedReason: string | null; archivedAt?: string | null; archivedReason?: string | null; syntheticDeclaredAt?: string | null; logoDataUrl: string | null; logoFit?: unknown | null; logoOriginalDataUrl?: string | null; createdAt: string; registrationUrl: string;
   subscription: { plan: string; commercialStatus: string; startDate: string; pilotEndDate: string | null; renewalDate: string | null; priceCents: number; currency: string; notes: string; updatedAt: string } | null;
   staff: { membershipId: string; role: 'OWNER' | 'EMPLOYEE'; active: boolean; email: string; displayName: string; createdAt: string; lastLogin: string | null }[];
   invitations: Invitation[];
@@ -104,6 +107,7 @@ export function BusinessDetail({ id }: { id: string }) {
   const [link, setLink] = useState<{ title: string; url: string; expiresAt?: string } | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [lc, setLc] = useState<null | 'archive' | 'restore' | 'delete'>(null);
 
   if (error) return <ErrorLine message={error.message} onRetry={refresh} />;
   if (!d) return <div className="flex flex-col gap-3"><Skeleton className="h-8 w-64" /><Skeleton className="h-40" /></div>;
@@ -123,14 +127,20 @@ export function BusinessDetail({ id }: { id: string }) {
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <CButton onClick={() => setEditOpen(true)}><Pencil size={14} /> Editar</CButton>
-          {d.status === 'active'
-            ? <CButton variant="danger" onClick={() => setStatusOpen(true)}><Ban size={14} /> Suspender servicio</CButton>
-            : <CButton variant="primary" onClick={() => setStatusOpen(true)}><RotateCcw size={14} /> Reactivar servicio</CButton>}
-        </div>
+        <section className="flex flex-col gap-2" aria-label="Administrar negocio" data-testid="manage-business">
+          <div className="cc-label">Administrar negocio</div>
+          <div className="flex flex-wrap gap-2">
+            {d.status !== 'archived' && <CButton onClick={() => setEditOpen(true)}><Pencil size={14} /> Editar</CButton>}
+            {d.status === 'active' && <CButton variant="danger" onClick={() => setStatusOpen(true)}><Ban size={14} /> Suspender</CButton>}
+            {d.status === 'suspended' && <CButton variant="primary" onClick={() => setStatusOpen(true)}><RotateCcw size={14} /> Reactivar</CButton>}
+            {d.status !== 'archived' && <CButton onClick={() => setLc('archive')}><Archive size={14} /> Archivar</CButton>}
+            {d.status === 'archived' && <CButton variant="primary" onClick={() => setLc('restore')}><RotateCcw size={14} /> Restaurar</CButton>}
+            <CButton variant="ghost" onClick={() => setLc('delete')}><Trash2 size={14} /> Eliminar</CButton>
+          </div>
+        </section>
       </div>
       {d.status === 'suspended' && <div className="mb-5 cc-raised px-4 py-3 text-[13px] text-[#FDA29B]">Servicio suspendido: el personal no puede entrar y la página de registro no responde. Motivo: {d.suspendedReason}</div>}
+      {d.status === 'archived' && <div className="mb-5 cc-raised px-4 py-3 text-[13px] cc-muted" data-testid="archived-banner">Archivado{d.archivedAt ? ` el ${shortDate(d.archivedAt)}` : ''}: fuera de operación y de las métricas activas. Los registros se conservan. Motivo: {d.archivedReason}</div>}
 
       <div className="flex gap-1 border-b border-[color:var(--cc-line)] mb-6 overflow-x-auto cc-scroll" role="tablist">
         {TABS.map(([k, label]) => (
@@ -160,6 +170,9 @@ export function BusinessDetail({ id }: { id: string }) {
         )}
       </CModal>
       <StatusModal open={statusOpen} d={d} onClose={() => setStatusOpen(false)} onDone={() => { setStatusOpen(false); refresh(); }} />
+      <ArchiveModal open={lc === 'archive'} business={d} onClose={() => setLc(null)} onDone={() => { setLc(null); refresh(); }} />
+      <RestoreModal open={lc === 'restore'} business={d} onClose={() => setLc(null)} onDone={() => { setLc(null); refresh(); }} />
+      <DeleteModal open={lc === 'delete'} business={d} onClose={() => setLc(null)} onDeleted={() => { setLc(null); navigate('/vlux-admin/negocios'); }} onChanged={refresh} />
       <EditModal open={editOpen} d={d} onClose={() => setEditOpen(false)} onDone={() => { setEditOpen(false); refresh(); }} />
     </>
   );
@@ -179,7 +192,7 @@ function Summary({ d }: { d: Detail }) {
         <section className="cc-panel p-5">
           <h2 className="text-[14px] font-medium">Estado operativo</h2>
           <dl className="mt-4 grid sm:grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
-            <Def k="Servicio" v={d.status === 'active' ? 'Activo' : 'Suspendido'} />
+            <Def k="Servicio" v={d.status === 'active' ? 'Activo' : d.status === 'archived' ? 'Archivado' : 'Suspendido'} />
             <Def k="Dueños activos" v={String(d.staff.filter((x) => x.role === 'OWNER' && x.active).length)} />
             <Def k="Empleados activos" v={String(d.staff.filter((x) => x.role === 'EMPLOYEE' && x.active).length)} />
             <Def k="Invitaciones pendientes" v={String(d.invitations.filter((x) => x.status === 'pendiente').length)} />
