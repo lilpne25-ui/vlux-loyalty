@@ -33,7 +33,10 @@ Resultado: **historial completo 0001–0014 y 14/14 checksums idénticos**. 0009
 Probado en local: aplicar → revertir → reaplicar; instalación desde cero 0001→0015; 148/148 integración; regresiones E2E.
 Checksum: `e1b0156b6b8389530aa8e4ba57631cd7d4b7b6a78c1c95cca0358b0dea2fe24f`.
 
-### Aplicar en Supabase Preview (Vlux, editor SQL)
+### Aplicada en Supabase Preview el 2026-11-07 09:05 UTC (por Vlux)
+Verificada por lectura: 15 filas en `schema_migrations`, checksum de 0015 idéntico, 12 índices, 0 funciones ejecutables por PUBLIC, asesor de seguridad sin avisos (`evidencia/supabase-preview-0015.txt`). Los pasos de abajo quedan como referencia.
+
+### Procedimiento (referencia)
 1. Abrir [`0015_pegar_en_supabase.sql`](0015_pegar_en_supabase.sql), copiar todo y ejecutarlo en Supabase → SQL Editor del proyecto **vlux-loyalty-preview**.
 2. El script se niega a correr si 0015 ya está registrada o si falta alguna de 0001–0014, y registra su fila de historial con el checksum correcto (probado: después, `migrate.ts up` no encuentra nada pendiente).
 3. Avisar para repetir los asesores de seguridad y rendimiento (solo lectura) y cerrar S1 en `GO_NO_GO.md`.

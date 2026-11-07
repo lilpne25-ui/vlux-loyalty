@@ -1,0 +1,18 @@
+Verificación de solo lectura en Supabase Preview (proyecto kpcmxmmwcolcxhkiwmaq), 2026-11-07 ~09:12 UTC, hecha por Claude
+después de que Vlux pegó 0015_pegar_en_supabase.sql. Sin cadenas de conexión ni datos personales.
+
+schema_migrations: 15 filas
+  0014_access_push           d47f7ccee9a0a7e2…  2026-11-07 05:45:49
+  0015_release_hardening     e1b0156b6b838953…  2026-11-07 09:05:55   (checksum completo coincide con el de db/migrations/0015_release_hardening.up.sql: e1b0156b…fe24f)
+search_path:
+  businesses_set_logo_hash   search_path=pg_catalog, public
+  forbid_mutation            search_path=pg_catalog, public
+funciones de public ejecutables por PUBLIC (excluyendo extensiones): 0
+índices de 0015 presentes: 12 de 12
+negocios: 8 (sin cambios)   tablas de public sin RLS: 0
+Asesor de seguridad (get_advisors security): lints = []   (antes: 2 WARN function_search_path_mutable)
+Asesor de rendimiento: no repetido en esta pasada (los hallazgos de llaves foráneas se decidieron en PERFORMANCE.md).
+
+Huella de permisos de vlux_app (misma consulta PQ de ops/backup-verify.sh: 29 tablas con r/a/w/d + 14 funciones de public con x)
+Supabase Preview vs. base local migrada 0001→0015 con ops/grants.sql: IDÉNTICAS (43 entradas, diff vacío).
+=> ops/grants.sql describe exactamente los permisos que Preview tiene hoy; una restauración que lo aplique reproduce los mismos permisos.

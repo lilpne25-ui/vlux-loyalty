@@ -13,7 +13,7 @@ Los tres niveles no son equivalentes: pasar uno no implica el siguiente.
 ## Bloqueos críticos de producción (cualquiera abierto = NO-GO para piloto)
 | # | Requisito | Estado | Evidencia / qué falta | Quién lo desbloquea |
 |---|---|---|---|---|
-| 1 | Sin riesgos de seguridad altos o críticos sin resolver | **PASS** (en código) | S2, S3, S4 (altos) corregidos y probados; S1 (medio) corregido en 0015 pero **no aplicado** en Preview (`SECURITY_REVIEW.md`). Para piloto: aplicar 0015 y repetir asesores | Vlux: pegar `0015_pegar_en_supabase.sql` |
+| 1 | Sin riesgos de seguridad altos o críticos sin resolver | **PASS** | S2, S3, S4 (altos) corregidos y probados; S1 (medio) corregido y **aplicado en Preview** (2026-11-07 09:05 UTC): asesor de seguridad sin avisos (`evidencia/supabase-preview-0015.txt`). Pendiente: S4 solo queda cerrado de verdad cuando `main` deje de tener el workflow público (ver `BACKUP_PRIVATE_SETUP.md`) | Vlux: desactivar workflow en `main` |
 | 2 | Respaldos con restauración comprobada | **BLOCKED** | Procedimiento PASS en local (`BACKUP_RECOVERY.md`). Nunca se ha respaldado ni restaurado Supabase real; workflow 7/7 fallido por falta de secretos | Vlux: repo privado `vlux-ops` + 2 secretos + simulacro |
 | 3 | Entorno de producción separado | **FAIL** | No existe. Preview interno y público comparten una BD Free | Vlux: autorizar Supabase Pro + proyectos Vercel de producción |
 | 4 | Infraestructura comercial habilitada | **FAIL** | Vercel Hobby prohíbe uso comercial; Supabase Free sin respaldos y se pausa. Costo ≈ USD 45/mes (`FINANCIAL_MODEL.md`) | Vlux: contratar Vercel Pro + Supabase Pro |
@@ -21,7 +21,7 @@ Los tres niveles no son equivalentes: pasar uno no implica el siguiente.
 | 6 | Pruebas físicas necesarias | **NOT TESTED** | 0 de 27 pruebas de `DEVICE_TESTS.md` | Vlux/equipo: iPhone, Android y caja reales |
 | 7 | Documentación de privacidad aprobada | **BLOCKED** | Borradores en `LEGAL_DRAFTS.md`; sin revisión jurídica. `PRIVACY_NOTICE_VERSION=borrador-2026-10` | Abogado |
 | 8 | Monitoreo y procedimiento de recuperación | **BLOCKED** | Runbook y procedimientos escritos (`RUNBOOK.md`); monitor externo no creado (depende de producción y dominio) | Vlux: crear monitor gratuito al tener producción |
-Resumen: 2 PASS · 2 FAIL · 3 BLOCKED · 1 NOT TESTED.
+Resumen: 2 PASS · 2 FAIL · 3 BLOCKED · 1 NOT TESTED. (El #1 pasó de PASS en código a PASS con evidencia en Preview; el #2 sigue BLOCKED.)
 
 ## Detalle por área
 | Área | Requisito | Estado | Evidencia |
@@ -30,14 +30,16 @@ Resumen: 2 PASS · 2 FAIL · 3 BLOCKED · 1 NOT TESTED.
 | Código | `npm audit` 0 vulnerabilidades | PASS | `BASELINE.md` |
 | Código | E2E V0.4.6 + regresiones V0.2–V0.4.5 | PASS (1 BLOCKED: Google Wallet, fuera de alcance) | `evidencia/e2e-*` |
 | Seguridad | Aislamiento por negocio (RLS 34/34, rol NOBYPASSRLS) | PASS | `SECURITY_REVIEW.md` |
-| Seguridad | Funciones con `search_path` fijo | PASS local · **BLOCKED** en Preview (0015 sin pegar) | prueba 1 |
-| Seguridad | Asesores de Supabase después de 0015 | BLOCKED | requiere 0015 |
+| Seguridad | Funciones con `search_path` fijo | PASS (local y Preview) | prueba 1; `evidencia/supabase-preview-0015.txt` |
+| Seguridad | Asesor de seguridad de Supabase después de 0015 | PASS (0 avisos). Asesor de rendimiento: no repetido | `evidencia/supabase-preview-0015.txt` |
 | Seguridad | Data API desactivada en producción | NOT TESTED | producción no existe |
 | Migraciones | 0001–0014 en Preview con checksums idénticos | PASS | `MIGRATIONS.md` |
 | Migraciones | Instalación desde cero 0001→0015 | PASS | local |
-| Migraciones | 0015 aplicada en Preview | BLOCKED | pegar SQL |
+| Migraciones | 0015 aplicada en Preview (checksum correcto, 12 índices, EXECUTE restringido, 8 negocios intactos) | PASS | `evidencia/supabase-preview-0015.txt` |
 | Respaldos | Verificación y simulacro (local, 300 negocios, escritura concurrente) | PASS | `evidencia/backup-verify-local.txt`, `restore-drill-local.txt` |
-| Respaldos | Respaldo real diario verde | FAIL | 7/7 fallidos, issue #2 |
+| Respaldos | Workflow público en `main` (sin protección de repositorio privado) | **FAIL (riesgo)**: hoy falla por falta de secretos, pero si alguien agrega los secretos al repo público subiría el respaldo como artefacto público | `BACKUP_PRIVATE_SETUP.md` §1 |
+| Respaldos | Paquete `vlux-ops` privado listo y probado en local (export → respaldo → restauración → verificación) | PASS | `ops/vlux-ops/`, `BACKUP_PRIVATE_SETUP.md` |
+| Respaldos | Primer respaldo real en `vlux-ops` verde | BLOCKED | repo privado y secretos |
 | Respaldos | Restauración real comprobada | BLOCKED | secretos y destino privado |
 | Rendimiento | 300 negocios simultáneos sin errores (local) | PASS | p95 18.4 ms, p99 40.7 ms |
 | Rendimiento | Latencia real Vercel↔Supabase desde México | NOT TESTED | requiere infraestructura de pago aislada |
@@ -50,7 +52,8 @@ Resumen: 2 PASS · 2 FAIL · 3 BLOCKED · 1 NOT TESTED.
 | Operación | Runbook e incidentes | PASS (escrito) · ensayo NOT TESTED | `RUNBOOK.md` |
 
 ## Ruta mínima a READY FOR CONTROLLED PILOT (en orden)
-1. **Pegar 0015** en Supabase Preview y avisar → repetir asesores (≈ 10 min).
+1. ~~Pegar 0015~~ **Hecho** (2026-11-07 09:05 UTC), asesor de seguridad en 0.
+1b. **Desactivar el workflow público de respaldo en `main`** (UI, 1 min) y crear `vlux-ops` (`BACKUP_PRIVATE_SETUP.md`).
 2. **Autorizar y contratar** Supabase Pro + Vercel Pro (≈ USD 45/mes) y dominio → crear producción según `PRODUCTION_ARCHITECTURE.md` (≈ 1 día con acompañamiento).
 3. **Respaldos**: repo privado `vlux-ops`, secretos, primera ejecución verde y simulacro restaurado (≈ 1 h).
 4. **Monitor externo** sobre `/api/health?db=1` (≈ 15 min).

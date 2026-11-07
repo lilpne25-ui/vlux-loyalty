@@ -5,10 +5,10 @@ Alcance: código del servidor (`server/`), migraciones 0001–0015, permisos rea
 ## Resumen
 | # | Hallazgo | Severidad | Estado | Evidencia |
 |---|---|---|---|---|
-| S1 | `search_path` mutable en `forbid_mutation` y `businesses_set_logo_hash` (asesor de Supabase) | Media | **Corregido en código (0015); pendiente aplicar en Preview** | `release-rc1.test.ts` prueba 1 falla sin 0015 y pasa con 0015 |
+| S1 | `search_path` mutable en `forbid_mutation` y `businesses_set_logo_hash` (asesor de Supabase) | Media | **Corregido y aplicado en Preview (0015, 2026-11-07 09:05 UTC)** | `release-rc1.test.ts` prueba 1 falla sin 0015 y pasa con 0015 |
 | S2 | Tras restaurar un respaldo (`--no-privileges`), las funciones SECURITY DEFINER (`platform_purge_business`, `platform_business_export`…) quedaban ejecutables por **PUBLIC**; `ops/grants.sql` no las corregía | **Alta** (solo en una base restaurada) | **Corregido** | prueba 5 + `backup-verify.sh` "funciones ejecutables por PUBLIC: 0" |
 | S3 | `ops/grants.sql` congelado en V0.3: tras restaurar, la app no tenía permisos sobre 8 tablas y 3 funciones (restauración "exitosa" pero app rota) | Alta (recuperación) | **Corregido** | prueba 5 (huella de permisos idéntica a una base migrada) |
-| S4 | El workflow de respaldo subiría el respaldo cifrado como artefacto de un **repositorio público** (descargable por cualquiera; solo lo protegería la frase) | Alta | **Mitigado**: el job se detiene si el repo es público | `.github/workflows/respaldo-diario.yml` paso "Verificar destino restringido" |
+| S4 | El workflow de respaldo subiría el respaldo cifrado como artefacto de un **repositorio público** (descargable por cualquiera; solo lo protegería la frase) | Alta | **Mitigado en la rama del RC; ABIERTO en `main`** (allí sigue el workflow anterior sin protección; hoy inofensivo porque no hay secretos). Cierre: desactivar el workflow en `main` y usar `vlux-ops` (`BACKUP_PRIVATE_SETUP.md`) | `.github/workflows/respaldo-diario.yml` paso "Verificar destino restringido" |
 | S5 | EXECUTE a PUBLIC en funciones de disparador y en `current_business_id` | Baja | **Corregido (0015)** | prueba 2; disparadores siguen funcionando (prueba 3) |
 | S6 | Privilegios por omisión de Supabase dan acceso a `anon`/`authenticated` sobre tablas **nuevas** de `public` (hoy se retiran tabla por tabla) | Media (futura) | **Corregido (0015)** | `ALTER DEFAULT PRIVILEGES … REVOKE` |
 | S7 | API de datos de Supabase (PostgREST) expuesta para el esquema `public` aunque la app no la usa | Baja (anon sin permisos y RLS en todas las tablas) | **Recomendación**: desactivar Data API en el proyecto de producción | Catálogo: 0 permisos de `anon`/`authenticated` |
@@ -50,7 +50,7 @@ La suite de integración contiene **101 aserciones negativas** (34 × 401, 16 ×
 
 ## Asesores de Supabase
 - **Antes** (2026-11-07 06:08 UTC): 2 WARN de seguridad (S1).
-- **Después**: **NOT TESTED en Preview** hasta que Vlux pegue `0015_pegar_en_supabase.sql` (el conector no puede escribir). En local la consulta equivalente al asesor (funciones sin `search_path`) devuelve 0. Al pegarla, repetir el asesor y anotar el resultado en `GO_NO_GO.md`.
+- **Después** (2026-11-07 ~09:12 UTC, tras pegar Vlux la 0015): **0 avisos** (`lints = []`). Comprobado también por lectura: ambas funciones con `search_path=pg_catalog, public`, 0 funciones ejecutables por PUBLIC, 12/12 índices, RLS en todas las tablas, 8 negocios intactos (`evidencia/supabase-preview-0015.txt`).
 
 ## Riesgos residuales
 - Repositorio público: el código y la arquitectura son visibles. No hay secretos en el repo (revisado: `.env*` ignorados; `scripts/` y `docs/` sin cadenas de conexión). Riesgo aceptado por decisión de Vlux.

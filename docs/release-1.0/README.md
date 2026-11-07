@@ -16,7 +16,7 @@
 | 4 | Revisión de seguridad | [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md) |
 | 5 | Historial de migraciones verificado | [`MIGRATIONS.md`](MIGRATIONS.md) + [`0015_pegar_en_supabase.sql`](0015_pegar_en_supabase.sql) |
 | 6 | Pruebas automatizadas | [`TEST_REPORT.md`](TEST_REPORT.md) |
-| 7 | Respaldo y restauración | [`BACKUP_RECOVERY.md`](BACKUP_RECOVERY.md) |
+| 7 | Respaldo y restauración | [`BACKUP_RECOVERY.md`](BACKUP_RECOVERY.md) · activación privada: [`BACKUP_PRIVATE_SETUP.md`](BACKUP_PRIVATE_SETUP.md) |
 | 8 | Arquitectura de producción | [`PRODUCTION_ARCHITECTURE.md`](PRODUCTION_ARCHITECTURE.md) |
 | 9 | Variables y secretos | [`PRODUCTION_ARCHITECTURE.md`](PRODUCTION_ARCHITECTURE.md) § Variables, § Política de secretos |
 | 10 | Monitoreo y runbook | [`RUNBOOK.md`](RUNBOOK.md) |
@@ -30,8 +30,8 @@
 Además: [`PERFORMANCE.md`](PERFORMANCE.md), [`FEATURE_FLAGS.md`](FEATURE_FLAGS.md), evidencia en [`evidencia/`](evidencia/).
 
 ## Acciones de Vlux (en orden)
-1. Pegar `0015_pegar_en_supabase.sql` en Supabase → SQL Editor (Preview) y avisar.
-2. Crear el repo privado `vlux-ops` y sus 2 secretos (`BACKUP_RECOVERY.md` § Pasos).
+1. ~~Pegar 0015~~ **Hecho y verificado** (2026-11-07 09:05 UTC; asesor de seguridad en 0).
+2. Desactivar el workflow público de respaldo en `main`, crear `vlux-ops` privado con sus 2 secretos y hacer el primer respaldo: [`BACKUP_PRIVATE_SETUP.md`](BACKUP_PRIVATE_SETUP.md).
 3. Autorizar Vercel Pro + Supabase Pro + dominio.
 4. Hacer las pruebas físicas.
 5. Enviar `LEGAL_DRAFTS.md` al abogado.

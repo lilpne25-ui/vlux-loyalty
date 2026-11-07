@@ -44,6 +44,7 @@ Artefacto privado (retención 30 días)        Falla en cualquier paso ─► is
 ```
 
 ## Pasos para desbloquear (Vlux)
+> La versión detallada y verificable está en [`BACKUP_PRIVATE_SETUP.md`](BACKUP_PRIVATE_SETUP.md) (incluye cómo apagar el workflow público de `main` y un paquete `vlux-ops` ya probado). Lo de abajo es el resumen original.
 1. Crear un repositorio **privado** `vlux-ops` (gratis en GitHub). Copiar `ops/backup-verify.sh`, `ops/grants.sql` y `.github/workflows/respaldo-diario.yml`. El repo público puede conservar los archivos; su workflow se detendrá solo.
 2. En `vlux-ops` → Settings → Secrets → Actions:
    - `SUPABASE_BACKUP_URL`: conexión del **dueño del esquema** por Session Pooler (puerto 5432, usuario `postgres.<ref>`), terminada en `?sslmode=require`. Nunca la pegues en un chat, issue o archivo.
