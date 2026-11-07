@@ -9,7 +9,7 @@ Proyectos **nuevos** y separados de Preview: Supabase Pro (proyecto `vlux-loyalt
 | # | Paso | Compuerta |
 |---|---|---|
 | 0 | Autorización del propietario: planes de pago, dominio, región | decisión de Vlux |
-| 1 | Cerrar `ODALEX_DATA_PROTECTION_PLAN.md` §2 (base legal, encargado, copia) y aprobar aviso de privacidad | abogado |
+| 1 | Cerrar `DATA_PROTECTION_PLAN.md` §2 (base legal, encargado, copia) y aprobar aviso de privacidad | abogado |
 | 2 | Crear proyecto Supabase Pro vacío; aplicar 0001→0015 con `scripts/migrate.ts`; `ops/grants.sql`; verificar 0 avisos del asesor y RLS 34/34 | `db:status` + asesor |
 | 3 | Crear proyecto Vercel Pro; variables nuevas; desplegar `v1.0.0`; correr el E2E contra el despliegue | E2E verde |
 | 4 | Apuntar `vlux-ops` a **producción** (secretos propios), un respaldo manual y simulacro → **BACKUP PRODUCTION VERIFIED** | restauración verificada |
@@ -23,4 +23,4 @@ Proyectos **nuevos** y separados de Preview: Supabase Pro (proyecto `vlux-loyalt
 Orden por dependencias de FK: `businesses` → `staff_users` (solo los de ese negocio) → `staff_memberships` → `reward_rules` → `customers` → `cards` → `card_access_tokens` → `visits` → `purchases` → `rewards` → `stamp_events` → `business_subscriptions` → `audit_events`. Reglas: filtrar siempre por `business_id`; regenerar sesiones (no migrarlas); tokens de tarjeta: migrarlos (ya son hashes) para que los QR/enlaces entregados sigan funcionando, o reemitirlos con aviso al cliente; comparar hash por tabla como en `RESTORE_TEST_REPORT.md`.
 
 ## Riesgos
-Decidir cuál de los dos registros de negocio es el definitivo antes del paso 7; contactos de origen desconocido en el mismo proyecto; diferencias Supabase↔PostgreSQL estándar no cubiertas por la prueba sintética; RTO real desconocido hasta ensayar una restauración en un proyecto Supabase nuevo.
+Decidir cuál registro de negocio es el definitivo antes del paso 7; contactos de origen desconocido en el mismo proyecto; diferencias Supabase↔PostgreSQL estándar no cubiertas por la prueba sintética; RTO real desconocido hasta ensayar una restauración en un proyecto Supabase nuevo.

@@ -35,7 +35,7 @@ Parche listo: [`parches/main-retirar-respaldo-publico.patch`](parches/main-retir
 
 ## 3. Primer respaldo, paso a paso
 **Antes de ejecutar:** decide el origen del primer respaldo.
-- Hoy Supabase Preview tiene 8 negocios, 11 clientes y 8 con contacto (WhatsApp/correo). Se presume que son de prueba, pero **confírmalo**. Si hay duda, no respaldes Preview todavía: haz el primer ensayo contra una base vacía o sintética.
+- Supabase Preview contiene datos de un negocio real y contactos de origen no confirmado: trátalos como datos personales (ver `DATA_PROTECTION_PLAN.md`). Si hay duda, no respaldes Preview todavía: haz el primer ensayo contra una base vacía o sintética.
 - No se debe respaldar producción ni datos reales hasta cumplir 1–3 de abajo y la §4.
 
 1. En `vlux-ops` → Settings → **Secrets and variables → Actions → New repository secret**:

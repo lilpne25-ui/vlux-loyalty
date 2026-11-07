@@ -16,7 +16,7 @@
 | Tokens y sesiones | solo hashes en BD; ahora aislados por RLS; revocación limitada a `revoked_at` |
 | `SECURITY DEFINER` | 5 funciones envueltas; `search_path` fijo; sin EXECUTE para PUBLIC/anon/authenticated |
 | Secretos | escaneo de lo añadido: sin credenciales |
-| Pendientes | R-1, R-2, E-1 (ver auditoría RLS); limitación de tasa en memoria no distribuida (heredado, sin cambios) |
+| Pendientes | R-1 (evaluado en `R1_ROLE_SEPARATION.md`: **abierto**; recomendación B antes de producción), R-2, E-1; limitación de tasa en memoria no distribuida (heredado, sin cambios) |
 
 ## Despliegue y reversa
 Orden: **1)** desplegar el código (funciona con 0015 y 0016), **2)** pegar `0016_pegar_en_supabase.sql`. Al revés, el código anterior pierde acceso a sesiones y tokens. Reversa: `0016…down.sql` y redeploy del código previo. Nada de esto se ha ejecutado fuera de PostgreSQL local.

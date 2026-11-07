@@ -34,6 +34,6 @@ Archivos revisados (clon de `lilpne25-ui/vlux-ops`, commit `74a9f45`): `.github/
 - **Protección de la clave:** si se pierde `BACKUP_PASSPHRASE`, todo respaldo es inservible; si se filtra junto con un artefacto, el dump queda en claro. Guardarla en un gestor de contraseñas con copia independiente de GitHub.
 - **Separación origen/destino:** el destino de la prueba es un servicio PostgreSQL efímero del runner; con las guardas nuevas no puede ser Supabase.
 - **GitHub como único almacén y única dependencia:** si la cuenta se bloquea o el repo se borra, se pierden los respaldos y el workflow. Se necesita una segunda copia cifrada fuera de GitHub (no se contrató nada).
-- **Un repositorio privado reduce el riesgo, no sustituye** contrato de encargo, base legal, retención, control de acceso y plan de borrado (ver `ODALEX_DATA_PROTECTION_PLAN.md`).
+- **Un repositorio privado reduce el riesgo, no sustituye** contrato de encargo, base legal, retención, control de acceso y plan de borrado (ver `DATA_PROTECTION_PLAN.md`).
 - **Secretos:** no verifiqué su existencia (el conector de GitHub no lista secretos). Estado: **NOT TESTED**; la confirmación del propietario es la única fuente.
 - **Riesgo residual en `main`:** el workflow del repositorio público está `disabled_manually` (PASS) pero el archivo sigue en `main` sin candado de repo privado. Hubo 7 ejecuciones programadas, todas fallidas (la última el 2026-11-06; sin secretos). Aplicar el parche de `parches/` para quitarlo.

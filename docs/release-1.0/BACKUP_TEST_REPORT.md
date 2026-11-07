@@ -43,4 +43,4 @@ Ninguno sustituye a otro.
 - Durabilidad en el tiempo (artefactos a 30 días, GitHub como único almacén).
 
 ## Pasos para que el propietario autorice el primer respaldo REAL de Preview
-Hasta no cumplirlos **no se ejecuta** el workflow. Ver `ODALEX_DATA_PROTECTION_PLAN.md` §4 (incluye la decisión legal previa).
+Hasta no cumplirlos **no se ejecuta** el workflow. Ver `DATA_PROTECTION_PLAN.md` §4 (incluye la decisión legal previa).

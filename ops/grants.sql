@@ -28,14 +28,23 @@ GRANT SELECT, INSERT, UPDATE ON
   platform_admin_recovery_codes, platform_admin_sessions, platform_admins, purchases, push_subscriptions,
   reward_rules, rewards, staff_users, visits
   TO vlux_app;
--- 0016: seis tablas con business_id solo permiten UPDATE en las columnas que el código modifica (nunca business_id ni llaves).
-GRANT SELECT, INSERT ON business_subscriptions, card_access_tokens, email_outbox, staff_invitations, staff_memberships, staff_sessions TO vlux_app;
-GRANT UPDATE (plan_code, commercial_status, start_date, pilot_end_date, renewal_date, price_cents, currency, notes, updated_by) ON business_subscriptions TO vlux_app;
-GRANT UPDATE (revoked_at, last_used_at) ON card_access_tokens TO vlux_app;
-GRANT UPDATE (status, provider, provider_message_id, attempts, sends_accepted, last_error, requested_at, accepted_at, delivered_at, failed_at, link_enc) ON email_outbox TO vlux_app;
-GRANT UPDATE (accepted_at, accepted_user_id, revoked_at, failed_attempts) ON staff_invitations TO vlux_app;
-GRANT UPDATE (role, active) ON staff_memberships TO vlux_app;
-GRANT UPDATE (revoked_at) ON staff_sessions TO vlux_app;
+-- Seis tablas con business_id. Los permisos dependen de la versión del esquema que se restaura:
+--   · respaldo ANTERIOR a 0016 (no existe app_scope()): UPDATE de tabla completa, igual que 0001-0015;
+--   · 0016 o posterior: solo SELECT/INSERT y UPDATE por columnas (nunca business_id ni llaves).
+-- Así el mismo archivo sirve antes y después de la transición de dos fases (docs/release-1.0/DEPLOY_0016_PLAN.md).
+DO $$ BEGIN
+  IF to_regprocedure('public.app_scope()') IS NULL THEN
+    GRANT SELECT, INSERT, UPDATE ON business_subscriptions, card_access_tokens, email_outbox, staff_invitations, staff_memberships, staff_sessions TO vlux_app;
+  ELSE
+    GRANT SELECT, INSERT ON business_subscriptions, card_access_tokens, email_outbox, staff_invitations, staff_memberships, staff_sessions TO vlux_app;
+    GRANT UPDATE (plan_code, commercial_status, start_date, pilot_end_date, renewal_date, price_cents, currency, notes, updated_by) ON business_subscriptions TO vlux_app;
+    GRANT UPDATE (revoked_at, last_used_at) ON card_access_tokens TO vlux_app;
+    GRANT UPDATE (status, provider, provider_message_id, attempts, sends_accepted, last_error, requested_at, accepted_at, delivered_at, failed_at, link_enc) ON email_outbox TO vlux_app;
+    GRANT UPDATE (accepted_at, accepted_user_id, revoked_at, failed_attempts) ON staff_invitations TO vlux_app;
+    GRANT UPDATE (role, active) ON staff_memberships TO vlux_app;
+    GRANT UPDATE (revoked_at) ON staff_sessions TO vlux_app;
+  END IF;
+END $$;
 GRANT SELECT, INSERT, UPDATE, DELETE ON activation_drafts, card_pair_codes, rate_limits TO vlux_app;
 -- Solo inserción (bitácoras y libro mayor; además los protege el disparador forbid_mutation)
 GRANT SELECT, INSERT ON audit_events, business_deletions, email_events, platform_audit_events, review_events, stamp_events TO vlux_app;

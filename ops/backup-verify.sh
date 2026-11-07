@@ -47,11 +47,35 @@ echo "3) Verificación de integridad (origen vs restaurada)"
 DST="$(psql "$RESTORE_URL" -Atc "$Q")"
 SRC_AFTER="$(psql "$SOURCE_URL" -Atc "$Q")"
 echo "   origen antes:   $SRC_BEFORE"; echo "   restaurada:     $DST"; echo "   origen después: $SRC_AFTER"
-awk -v a="$SRC_BEFORE" -v d="$DST" -v b="$SRC_AFTER" 'BEGIN {
-  n = split(a, A, " "); split(d, D, " "); split(b, B, " "); bad = 0
-  for (i = 1; i <= n; i++) { split(A[i], x, "="); split(D[i], y, "="); split(B[i], z, "=");
-    if (x[1] != y[1] || y[1] != z[1] || y[2] + 0 < x[2] + 0 || y[2] + 0 > z[2] + 0) { print "   FUERA DE RANGO: " A[i] " / " D[i] " / " B[i]; bad = 1 } }
-  exit bad }' || { echo "FALLA: los conteos no coinciden (si hubo una purga durante el respaldo, repite)"; exit 1; }
+# Comparar por nombre de tabla, no por posición. Las collations de Supabase y del contenedor
+# PostgreSQL pueden ordenar businesses y business_subscriptions de manera distinta.
+awk -v a="$SRC_BEFORE" -v d="$DST" -v b="$SRC_AFTER" '
+function parse_counts(s, out, label, words, pair, n, i, key) {
+  n = split(s, words, /[[:space:]]+/)
+  for (i=1; i<=n; i++) {
+    if (split(words[i], pair, "=") != 2 || pair[1] == "" || pair[2] !~ /^[0-9]+$/) {
+      print "FALLA: formato de conteo invalido en " label; bad=1; continue
+    }
+    key=pair[1]
+    if (key in out) { print "FALLA: tabla duplicada en " label ": " key; bad=1 }
+    out[key]=pair[2]+0
+  }
+}
+BEGIN {
+  parse_counts(a, A, "origen antes")
+  parse_counts(d, D, "restaurada")
+  parse_counts(b, B, "origen despues")
+  for (key in A) {
+    if (!(key in D) || !(key in B)) {
+      print "FALLA: tabla ausente: " key; bad=1
+    } else if (D[key] < A[key] || D[key] > B[key]) {
+      print "FUERA DE RANGO: " key ": " A[key] " / " D[key] " / " B[key]; bad=1
+    }
+  }
+  for (key in D) if (!(key in A)) { print "FALLA: tabla adicional en restaurada: " key; bad=1 }
+  for (key in B) if (!(key in A)) { print "FALLA: tabla adicional en origen despues: " key; bad=1 }
+  exit bad
+}' || { echo "FALLA: los conteos no coinciden (si hubo una purga durante el respaldo, repite)"; exit 1; }
 BAD="$(psql "$RESTORE_URL" -Atc "SELECT count(*) FROM cards c LEFT JOIN (SELECT card_id, sum(delta) s FROM stamp_events GROUP BY 1) e ON e.card_id = c.id WHERE c.stamp_balance <> coalesce(e.s,0)")"
 echo "   tarjetas con saldo distinto a su libro mayor: $BAD"; [ "$BAD" = "0" ] || { echo "FALLA: libro mayor"; exit 1; }
 NORLS="$(psql "$RESTORE_URL" -Atc "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND NOT c.relrowsecurity")"

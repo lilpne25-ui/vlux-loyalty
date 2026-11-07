@@ -104,7 +104,8 @@ test('T07: la vista previa muestra conteos, personal compartido y bloqueos; sin 
   await app.connect();
   try {
     // 0016: la función exige alcance de plataforma; sin él ni siquiera llega a evaluar las reglas de negocio.
-    await assert.rejects(app.query('SELECT platform_purge_business($1, $2)', [b.businessId, b.slug]), /alcance de plataforma requerido/);
+    const has0016 = (await app.query("SELECT to_regprocedure('public.app_scope()') IS NOT NULL AS ok")).rows[0].ok as boolean;
+    await assert.rejects(app.query('SELECT platform_purge_business($1, $2)', [b.businessId, b.slug]), has0016 ? /alcance de plataforma requerido/ : /clientes reales/);
     await app.query('BEGIN');
     await app.query("SELECT set_config('app.scope', 'platform', true)");
     await assert.rejects(app.query('SELECT platform_purge_business($1, $2)', [b.businessId, b.slug]), /clientes reales/);

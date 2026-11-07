@@ -17,7 +17,7 @@ SRC_ADMIN="postgres://postgres:$SP@127.0.0.1:$PSRC/vlux_synth"; DST_ADMIN="postg
 now() { date +%s.%N; }; el() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.1f", b-a}'; }
 {
 echo "== Simulacro sintético $(date -u +%FT%TZ) · commit $(git rev-parse --short HEAD) · $(docker exec "$SRC" postgres --version)"
-echo "== 1) Migraciones 0001–0015"
+echo "== 1) Migraciones 0001–0016 (todas las del repositorio)"
 DATABASE_ADMIN_URL="$SRC_ADMIN" APP_DB_PASSWORD="$APPPW" npx tsx scripts/db-setup-local.ts
 DATABASE_ADMIN_URL="$SRC_ADMIN" npx tsx scripts/migrate.ts up | tail -2
 echo "== 2) Datos sintéticos (10 negocios x 300 clientes)"
