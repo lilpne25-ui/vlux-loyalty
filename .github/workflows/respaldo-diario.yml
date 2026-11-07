@@ -29,6 +29,16 @@ jobs:
       SOURCE_URL: ${{ secrets.SUPABASE_BACKUP_URL }}
       BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
     steps:
+      # 1.0.0-rc.1: en un repositorio PÚBLICO los artefactos y los registros de Actions los puede ver cualquiera.
+      # Aunque el respaldo va cifrado, NO se publica: el job se detiene antes de leer la base.
+      # Destino correcto: este mismo workflow en un repositorio PRIVADO de operación (ver docs/release-1.0/BACKUP_RECOVERY.md).
+      - name: Verificar destino restringido (repositorio privado)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRIVATE="$(gh api "repos/${{ github.repository }}" --jq .private)"
+          if [ "$PRIVATE" != "true" ]; then
+            echo "::error::Repositorio público: el respaldo no se ejecuta aquí. Usa un repositorio privado de operación (docs/release-1.0/BACKUP_RECOVERY.md)."; exit 1; fi
       - name: Verificar secretos
         run: |
           if [ -z "$SOURCE_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
