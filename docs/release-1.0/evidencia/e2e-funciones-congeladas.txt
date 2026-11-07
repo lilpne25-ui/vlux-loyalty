@@ -1,0 +1,57 @@
+frozen-v02-tres-dispositivos.log:PASS 01 alta del negocio · cafe-e2e-8356a4
+frozen-v02-tres-dispositivos.log:PASS 01b alta de un segundo negocio (aislamiento)
+frozen-v02-tres-dispositivos.log:PASS 02 alta de empleado desde el panel del dueño
+frozen-v02-tres-dispositivos.log:PASS 05a QR del mostrador apunta a la URL pública de registro · http://localhost:8792/n/cafe-e2e-8356a4
+frozen-v02-tres-dispositivos.log:PASS 03 registro de cliente · FZDE-THCX
+frozen-v02-tres-dispositivos.log:PASS 04 tarjeta web creada (0 de 8)
+frozen-v02-tres-dispositivos.log:PASS 05b QR de la tarjeta sin datos personales
+frozen-v02-tres-dispositivos.log:PASS 13a móvil sin scroll horizontal (cliente)
+frozen-v02-tres-dispositivos.log:PASS 02b empleado cambia su contraseña temporal al primer acceso
+frozen-v02-tres-dispositivos.log:PASS 14a empleado entra directo a caja (sin panel del dueño en el menú)
+frozen-v02-tres-dispositivos.log:PASS 07 empleado identifica la tarjeta con la cámara en vivo
+frozen-v02-tres-dispositivos.log:PASS 06 compra registrada y sello asignado
+frozen-v02-tres-dispositivos.log:PASS 08 sincronización: el cliente ve el sello sin recargar · 1294 ms
+frozen-v02-tres-dispositivos.log:PASS 08b el dueño ve la operación desde su computadora
+frozen-v02-tres-dispositivos.log:PASS 04b enlace personal abre la misma tarjeta en otro teléfono
+frozen-v02-tres-dispositivos.log:PASS 11a doble toque detectado y no suma sin confirmación
+frozen-v02-tres-dispositivos.log:PASS 09 recompensa desbloqueada en caja
+frozen-v02-tres-dispositivos.log:PASS 09b el cliente recibe la celebración en su teléfono
+frozen-v02-tres-dispositivos.log:PASS 10 canje confirmado; inicia ciclo nuevo
+frozen-v02-tres-dispositivos.log:PASS 11 canje duplicado rechazado · 409
+frozen-v02-tres-dispositivos.log:PASS 10b el cliente ve su nuevo ciclo
+frozen-v02-tres-dispositivos.log:PASS 12 estadísticas: compras y sellos no se confunden con visitas · {"customers":"1","visits":"1","purchases":"8","stamps":"8","unlocked":"1","redemptions":"1","recurring":"0"}
+frozen-v02-tres-dispositivos.log:PASS 13 otro negocio no ve clientes ajenos
+frozen-v02-tres-dispositivos.log:PASS 13b otro negocio no puede identificar la tarjeta · 404
+frozen-v02-tres-dispositivos.log:PASS 14b empleado no accede al panel del dueño (UI y API) · 403
+frozen-v02-tres-dispositivos.log:PASS 14c móvil sin scroll horizontal (caja)
+frozen-v02-tres-dispositivos.log:PASS 14d móvil sin scroll horizontal (panel del dueño) · 0
+frozen-v02-tres-dispositivos.log:PASS 14e la cookie de la tarjeta no es legible desde JavaScript (HttpOnly)
+frozen-v02-tres-dispositivos.log:PASS sin errores de consola ni de página
+frozen-v02-tres-dispositivos.log:Total: 29 PASS, 0 FAIL
+frozen-v045-operacion.log:PASS T31a el alta ofrece los 16 giros del catálogo · 16
+frozen-v045-operacion.log:PASS T31b un giro regulado (dentista) muestra el aviso de no guardar datos de salud
+frozen-v045-operacion.log:PASS T31c la plantilla del dentista sugiere sellos por visita
+frozen-v045-operacion.log:PASS T32a sin edición manual, cambiar de giro aplica la plantilla del nuevo giro (servicios)
+frozen-v045-operacion.log:PASS T32b la plantilla trae servicios participantes editables · Corte, Barba, Corte y barba
+frozen-v045-operacion.log:PASS T32c el resumen describe el programa con su unidad (servicios)
+frozen-v045-operacion.log:PASS T33a antes de enviar, la pantalla dice que no se envió ningún correo
+frozen-v045-operacion.log:PASS T33b con proveedor simulado queda "Aceptado por el proveedor", nunca "Entregado"
+frozen-v045-operacion.log:PASS T34 reenviar de inmediato se frena (espera mínima) y no crea otra invitación · {"invCount":1,"attempts":1,"sends_accepted":1}
+frozen-v045-operacion.log:PASS T35a el dueño nuevo ve "Primeros pasos" (opcional)
+frozen-v045-operacion.log:PASS T36a el editor del dueño muestra el tipo y los servicios del programa
+frozen-v045-operacion.log:PASS T36b una meta fuera de rango se explica y no se puede guardar
+frozen-v045-operacion.log:PASS T35b los primeros pasos se pueden ocultar
+frozen-v045-operacion.log:PASS T37a la tarjeta del cliente usa la unidad del programa (servicios)
+frozen-v045-operacion.log:PASS T37b la caja pide el servicio antes de registrar
+frozen-v045-operacion.log:PASS T37c el servicio suma 1 en la caja
+frozen-v045-operacion.log:PASS T37d el cliente ve +1 servicio sin recargar
+frozen-v045-operacion.log:PASS T37e la caja no desborda a 390 px · 0
+frozen-v045-operacion.log:PASS T38a archivar exige escribir el nombre exacto
+frozen-v045-operacion.log:PASS T38b el negocio queda archivado y el aviso lo indica
+frozen-v045-operacion.log:PASS T38c archivar revoca las sesiones del personal · 401
+frozen-v045-operacion.log:PASS T39a la vista previa muestra conteos y bloquea un negocio con clientes reales
+frozen-v045-operacion.log:PASS T39b sin respaldo no se puede eliminar
+frozen-v045-operacion.log:PASS T39c el respaldo trae los datos del negocio y no trae contraseñas ni tokens
+frozen-v045-operacion.log:PASS T39d el negocio se elimina y quedan constancia y bitácora · {"left":0,"tomb":1,"audit":1}
+frozen-v045-operacion.log:PASS T40 sin errores de consola ni de página
+frozen-v045-operacion.log:Total: 26 PASS, 0 FAIL

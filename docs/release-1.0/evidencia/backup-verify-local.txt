@@ -1,0 +1,16 @@
+1) Respaldo lógico (pg_dump formato custom, solo esquema public)
+e5651a84491e2dea17f7e0eba1855fcd84017ff2f2d54e2e9daaac15f2266856  <scratch>/respaldos/vlux-20261107T062410Z.dump
+2) Restauración en base AISLADA: vlux_restore_20261107062410
+3) Verificación de integridad (origen vs restaurada)
+   origen antes:   audit_events=45117 business_subscriptions=300 businesses=300 cards=30000 customers=30000 migrations=15 platform_admins=0 platform_audit_events=0 purchases=69267 reward_rules=300 rewards=0 staff_memberships=300 staff_users=300 stamp_events=13535 visits=66291
+   restaurada:     audit_events=45128 business_subscriptions=300 businesses=300 cards=30000 customers=30000 migrations=15 platform_admins=0 platform_audit_events=0 purchases=69278 reward_rules=300 rewards=0 staff_memberships=300 staff_users=300 stamp_events=13544 visits=66298
+   origen después: audit_events=45215 business_subscriptions=300 businesses=300 cards=30000 customers=30000 migrations=15 platform_admins=0 platform_audit_events=0 purchases=69365 reward_rules=300 rewards=0 staff_memberships=300 staff_users=300 stamp_events=13622 visits=66356
+   tarjetas con saldo distinto a su libro mayor: 0
+   tablas sin RLS tras restaurar: 0
+   tarjetas con más de un premio disponible: 0
+   permisos mínimos de vlux_app tras restaurar: t
+   permisos de vlux_app idénticos al origen: sí
+   funciones ejecutables por PUBLIC tras restaurar: 0
+   prueba funcional como vlux_app: rls-ok escritura-ok
+4) Registro del último respaldo verificado
+RESPALDO Y RESTAURACIÓN VERIFICADOS: <scratch>/respaldos/vlux-20261107T062410Z.dump

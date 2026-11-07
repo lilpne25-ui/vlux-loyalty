@@ -1,0 +1,15 @@
+1) Integridad del archivo cifrado
+vlux-20261107T062410Z.dump.gpg: OK
+2) Descifrado (AES-256, frase desde la variable de entorno)
+   archivo de pg_dump válido
+3) Restauración en base AISLADA: vlux_drill_20261107062509
+4) Verificaciones
+   última migración: 0015_release_hardening (15)
+   tarjetas con saldo distinto al libro mayor: 0
+   tablas sin RLS: 0
+   funciones ejecutables por PUBLIC: 0
+   llaves foráneas sin validar: 0
+   conteos: audit_events=45128 businesses=300 cards=30000 purchases=69278 stamp_events=13544
+   prueba como vlux_app: rls-ok
+5) Resultado: descifrado+restauración 3 s · verificación 0 s · total 3 s · base: vlux_drill_20261107062509 (bórrala al terminar la revisión)
+SIMULACRO DE RESTAURACIÓN OK
