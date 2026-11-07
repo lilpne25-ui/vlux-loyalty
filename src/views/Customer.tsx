@@ -13,6 +13,8 @@ import { VerticalIcon } from '../components/VerticalIcon';
 import { sanitizeFit } from '../lib/logoFit';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
 import { SaveCardPanel, PairScreen, OfflineNotice } from '../components/SaveCard';
+import { CustomerNotifications } from '../components/Notifications';
+import { NearbyCheck } from '../components/Nearby';
 import { applyBusinessAppHead, isStandalone, useOnline } from '../lib/pwa';
 
 const POLL_MS = 4000;
@@ -305,6 +307,9 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
       </section>
 
       <SaveCardPanel slug={slug} businessName={b.name} />
+
+      <CustomerNotifications slug={slug} businessName={b.name} />
+      <NearbyCheck slug={slug} businessName={b.name} location={b.location ?? null} />
 
       <div className="grid grid-cols-2 gap-2.5">
         <button onClick={() => setWalletOpen('apple')} className="wallet-btn"><Wallet size={17} /> <span className="leading-tight text-left"><span className="block text-[10.5px] opacity-70">Vista previa</span>Apple Wallet</span></button>

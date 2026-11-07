@@ -9,6 +9,8 @@
 //   /t#token      abre la tarjeta desde el enlace personal
 //   /restablecer#token  contraseña nueva con enlace de un solo uso
 //   /invitacion#token   aceptar invitación de dueño o empleado (V0.3)
+//   /activar            activación presencial con código corto (V0.4.6)
+//   ?negocio=<slug>     en /acceso, /caja y /panel: abre ESE negocio (enlaces permanentes y apps instaladas, V0.4.6)
 //   /vlux-admin/*       VLUX Control Center (V0.3, solo equipo VLUX; se carga aparte)
 import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { ScanLine, LayoutDashboard, LogOut, KeyRound, ArrowLeftRight } from 'lucide-react';
@@ -22,7 +24,7 @@ import { OwnerView } from './views/Owner';
 import { LandingView } from './views/Landing';
 import { LoginView } from './views/Login';
 import { CardLinkView, ChangePasswordPanel, ResetPasswordView } from './views/Account';
-import { InvitationView } from './views/Invitation';
+import { ActivateWithCodeView, InvitationView } from './views/Invitation';
 
 const AdminApp = lazy(() => import('./admin/AdminApp'));
 const PersonalizarView = lazy(() => import('./views/Personalizar'));
@@ -68,6 +70,7 @@ function Shell() {
 
   if (path === '/vlux-admin' || path.startsWith('/vlux-admin/')) return <Suspense fallback={<div className="cc min-h-full" />}><AdminApp /></Suspense>;
   if (path === '/invitacion') return <InvitationView />;
+  if (path === '/activar') return <ActivateWithCodeView />;
   if (path === '/t') return <CardLinkView />;
   if (path === '/restablecer') return <ResetPasswordView />;
 
@@ -89,18 +92,28 @@ function Shell() {
 
   if (s.loading) return <Loading />;
   const session = s.session;
+  const wanted = search.get('negocio');
+  const home = (role: 'OWNER' | 'EMPLOYEE', slug?: string) => `${role === 'OWNER' ? '/panel' : '/caja'}${slug ? `?negocio=${encodeURIComponent(slug)}` : ''}`;
   if (!session || path === '/acceso') {
-    if (session) {
-      navigate(session.role === 'OWNER' ? '/panel' : '/caja', { replace: true });
+    if (session && (!wanted || wanted === session.business.slug)) {
+      navigate(home(session.role, session.business.slug), { replace: true });
       return <Loading />;
     }
-    return <LoginView onLoggedIn={async (ses) => { await loadSession(); navigate(ses.role === 'OWNER' ? '/panel' : '/caja', { replace: true }); }} />;
+    if (!session) return <LoginView businessSlug={wanted} onLoggedIn={async (ses) => { await loadSession(); navigate(home(ses.role, ses.business.slug), { replace: true }); }} />;
+  }
+  // V0.4.6 · La app instalada (o el enlace permanente) es de un negocio concreto. Si la sesión abierta es de OTRO negocio,
+  // nunca se muestran sus datos bajo este ícono: se cambia de negocio solo si la persona también pertenece a él;
+  // si no, se explica y se ofrece entrar con otra cuenta.
+  if (wanted && wanted !== session.business.slug) {
+    return <BusinessGate wanted={wanted} session={session} onSwitched={async (role) => { await loadSession(); navigate(home(role, wanted), { replace: true }); }}
+      onLogout={async () => { await api('POST', '/staff/logout', {}).catch(() => undefined); setS({ loading: false, session: null, colors: null }); navigate(`/acceso?negocio=${encodeURIComponent(wanted)}`, { replace: true }); }}
+      onStay={() => navigate(home(session.role, session.business.slug), { replace: true })} />;
   }
 
   const logout = async () => {
     await api('POST', '/staff/logout', {}).catch(() => undefined);
     setS({ loading: false, session: null, colors: null });
-    navigate('/acceso', { replace: true });
+    navigate(`/acceso?negocio=${encodeURIComponent(session.business.slug)}`, { replace: true });
   };
 
   const wantsPanel = path.startsWith('/panel');
@@ -120,12 +133,48 @@ function Shell() {
               <p className="mt-2 text-[14px] text-slate2">Tu cuenta es de caja. Si necesitas acceso, pídeselo al dueño del negocio.</p>
             </div>
           ) : wantsPanel ? (
-            <OwnerView onBusinessChanged={loadSession} />
+            <OwnerView onBusinessChanged={loadSession} welcome={search.get('bienvenida') === '1'} />
           ) : (
             <EmployeeView businessName={session.business.name} businessSlug={session.business.slug} initialCode={code} />
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function BusinessGate({ wanted, session, onSwitched, onLogout, onStay }: { wanted: string; session: StaffSessionInfo; onSwitched: (role: 'OWNER' | 'EMPLOYEE') => void; onLogout: () => void; onStay: () => void }) {
+  const [state, setState] = useState<'checking' | 'other'>('checking');
+  const [name, setName] = useState<string>(wanted);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const mine = await api<{ businesses: { slug: string; name: string; role: 'OWNER' | 'EMPLOYEE' }[] }>('GET', '/staff/businesses');
+        if (mine.businesses.some((b) => b.slug === wanted)) {
+          const r = await api<{ session: StaffSessionInfo }>('POST', '/staff/switch', { slug: wanted });
+          if (live) onSwitched(r.session.role);
+          return;
+        }
+      } catch { /* sin acceso a ese negocio */ }
+      try { const p = await api<{ business: { name: string } }>('GET', `/public/businesses/${encodeURIComponent(wanted)}`); if (live) setName(p.business.name); } catch { /* negocio inexistente */ }
+      if (live) setState('other');
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted]);
+  if (state === 'checking') return <Loading />;
+  return (
+    <div className="biz-bg min-h-full">
+      <div className="mx-auto w-full max-w-[440px] gutter py-14 flex flex-col gap-5" data-testid="business-gate">
+        <VluxMark className="text-[#475467]" />
+        <h1 className="text-[22px] font-semibold tracking-tight text-ink">Este acceso es de {name}</h1>
+        <p className="text-[14px] text-slate2">Tu sesión abierta en este teléfono es de <strong className="text-ink">{session.business.name}</strong> y esa cuenta no tiene acceso a {name}. Por seguridad no mostramos datos de un negocio con el acceso de otro.</p>
+        <div className="flex flex-col gap-2">
+          <button onClick={onLogout} className="h-11 rounded-xl bg-ink text-white text-[14px] font-medium">Entrar con la cuenta de {name}</button>
+          <button onClick={onStay} className="h-11 rounded-xl border border-line text-[14px] text-ink">Seguir en {session.business.name}</button>
+        </div>
+      </div>
     </div>
   );
 }

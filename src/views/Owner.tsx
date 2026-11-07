@@ -1,7 +1,7 @@
 // Panel del dueño: métricas reales, clientes, actividad, configuración, equipo y QR del mostrador.
 // V0.2: todo viene de la BD de SU negocio (RLS). Ya no hay datos de ejemplo mezclados con datos reales.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Users, Footprints, Repeat, Gift, Stamp, Star, Settings2, LayoutGrid, ListChecks, Save, RotateCcw, Info, ShoppingBag, Trophy, UserPlus, QrCode, Printer, Download, Trash2, KeyRound, Undo2 } from 'lucide-react';
+import { Users, Footprints, Repeat, Gift, Stamp, Star, Settings2, LayoutGrid, ListChecks, Save, RotateCcw, Info, ShoppingBag, Trophy, UserPlus, QrCode, Printer, Download, Trash2, KeyRound, Undo2, Smartphone, BellRing } from 'lucide-react';
 import { api, ApiError, BusinessInfo, HistoryItem, Program, Vertical } from '../lib/api';
 import { relativeTime, businessQrValue } from '../lib/format';
 import { usePolling } from '../lib/usePolling';
@@ -12,11 +12,13 @@ import { Badge, Button, Field, inputCls, useToast, cx, Modal, QRCode, BusinessLo
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { sanitizeFit } from '../lib/logoFit';
 import { AccessCenter, Links } from '../components/AccessCenter';
-import { InstallAppButton, useStaffAppHead } from '../components/InstallApp';
+import { InstallAppButton, InstallScreen, useStaffAppHead } from '../components/InstallApp';
+import { CommunicationTab } from './Communication';
+import { downloadQrPng } from '../lib/qr';
 import { HistoryTable } from './Employee';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
 
-type Tab = 'resumen' | 'clientes' | 'config' | 'equipo' | 'accesos';
+type Tab = 'resumen' | 'clientes' | 'config' | 'equipo' | 'accesos' | 'comunicacion';
 interface Dashboard {
   kpis: { customers: number; newCustomers7d: number; visits: number; purchases: number; stamps: number; recurring: number; rewardsUnlocked: number; redemptions: number; rewardsPending: number; reviewPrompts: number; reviewClicks: number };
   series: { day: string; visits: number; purchases: number }[];
@@ -27,10 +29,11 @@ interface Dashboard {
 }
 type FullBusiness = BusinessInfo & { program: Program & { ruleId: string; version: number; visitWindowMinutes: number } };
 
-export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void }) {
+export function OwnerView({ onBusinessChanged, welcome }: { onBusinessChanged: () => void; welcome?: boolean }) {
   const [tab, setTab] = useState<Tab>('resumen');
   const biz = usePolling(() => api<FullBusiness>('GET', '/staff/business'), 60_000, []);
-  useStaffAppHead(biz.data?.slug, 'panel', biz.data?.name);
+  useStaffAppHead(biz.data?.slug, 'panel', biz.data?.name, biz.data?.primaryColor);
+  const [showWelcome, setShowWelcome] = useState(!!welcome);
   if (biz.error && !biz.data) return <div className="gutter py-10"><ErrorBox message={biz.error.message} onRetry={biz.refresh} /></div>;
   if (!biz.data) return <Loading />;
   const b = biz.data;
@@ -48,7 +51,7 @@ export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void
               <span>{b.program.stampsRequired} {units(b.program, b.program.stampsRequired)} = {b.program.rewardDescription.toLowerCase()}</span>
             </div>
           </div>
-          <InstallAppButton app="panel" />
+          <InstallAppButton app="panel" business={{ slug: b.slug, name: b.name, logoUrl: b.logoUrl }} />
         </header>
 
         <nav className="flex gap-1 border-b border-line -mb-1 overflow-x-auto no-scrollbar" role="tablist" aria-label="Secciones del panel">
@@ -58,6 +61,7 @@ export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void
             ['config', 'Programa', <Settings2 size={15} key="c" />],
             ['equipo', 'Equipo', <Users size={15} key="d" />],
             ['accesos', 'Accesos', <QrCode size={15} key="e" />],
+            ['comunicacion', 'Comunicación', <BellRing size={15} key="f" />],
           ] as const).map(([k, label, icon]) => (
             <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx('h-10 px-3 -mb-px inline-flex items-center gap-1.5 text-[13.5px] font-medium border-b-2 whitespace-nowrap transition shrink-0', tab === k ? 'border-ink text-ink' : 'border-transparent text-slate2 hover:text-ink')}>
               {icon} {label}
@@ -70,8 +74,35 @@ export function OwnerView({ onBusinessChanged }: { onBusinessChanged: () => void
         {tab === 'config' && <Settings business={b} onSaved={() => { biz.refresh(); onBusinessChanged(); }} />}
         {tab === 'equipo' && <Team />}
         {tab === 'accesos' && <AccessTab business={b} onSeen={() => markStep(b.slug, 'qr')} />}
+        {tab === 'comunicacion' && <CommunicationTab business={b} />}
       </div>
+      {showWelcome && <OwnerWelcome business={b} onClose={() => { setShowWelcome(false); const u = new URL(location.href); u.searchParams.delete('bienvenida'); history.replaceState(null, '', u.pathname + u.search); }} onQr={() => markStep(b.slug, 'qr')} />}
     </div>
+  );
+}
+
+/**
+ * V0.4.6 · Bienvenida al activar la cuenta: tres acciones claras. Instalar es OPCIONAL.
+ * Aparece al llegar desde la invitación (?bienvenida=1) y se puede cerrar.
+ */
+function OwnerWelcome({ business: b, onClose, onQr }: { business: FullBusiness; onClose: () => void; onQr: () => void }) {
+  const [install, setInstall] = useState(false);
+  const toast = useToast();
+  if (install) return <InstallScreen app="panel" business={{ slug: b.slug, name: b.name, logoUrl: b.logoUrl }} open onClose={() => setInstall(false)} />;
+  return (
+    <Modal open onClose={onClose} title={`¡Bienvenido a ${b.name}!`} labelledBy="owner-welcome-title">
+      <div className="flex flex-col gap-4" data-testid="owner-welcome">
+        <div className="flex items-center gap-3">
+          <BusinessLogo name={b.name} size={52} src={b.logoUrl} />
+          <p className="text-[14px] text-[#475467] leading-snug">Tu cuenta quedó activa. Tu contraseña es solo tuya: VLUX no la conoce.</p>
+        </div>
+        <div className="grid gap-2">
+          <button className="welcome-action" onClick={onClose} data-testid="welcome-open-panel"><LayoutGrid size={18} /> <span><strong>Abrir mi panel</strong><span>Clientes, visitas y tu programa.</span></span></button>
+          <button className="welcome-action" onClick={() => setInstall(true)} data-testid="welcome-install"><Smartphone size={18} /> <span><strong>Instalar mi panel en este teléfono</strong><span>Opcional. Ábrelo con un toque, como una app.</span></span></button>
+          <button className="welcome-action" onClick={() => { downloadQrPng(businessQrValue(b.slug), `${b.slug}-qr-clientes.png`); onQr(); toast('good', 'QR de tu negocio descargado (PNG).'); }} data-testid="welcome-qr"><QrCode size={18} /> <span><strong>Descargar el QR de mi negocio</strong><span>Para el mostrador: tus clientes crean su tarjeta.</span></span></button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -583,7 +614,7 @@ function AccessTab({ business: b, onSeen }: { business: FullBusiness; onSeen?: (
   useEffect(() => { api<Links>('GET', `/public/businesses/${b.slug}/access`).then(setLinks).catch(() => setLinks(null)); }, [b.slug]);
   return (
     <div className="flex flex-col gap-8">
-      {links && <AccessCenter businessName={b.name} slug={b.slug} links={links} />}
+      {links && <AccessCenter businessName={b.name} slug={b.slug} links={links} logoUrl={b.logoUrl} />}
       <div>
         <h2 className="text-[18px] font-semibold text-ink mb-1">Cartel para el mostrador</h2>
         <p className="text-[13.5px] text-slate2 mb-4">El QR de clientes listo para imprimir.</p>

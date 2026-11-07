@@ -50,7 +50,7 @@ const securityHeaders = {
   'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
-  'permissions-policy': 'camera=(self), microphone=(), geolocation=()',
+  'permissions-policy': 'camera=(self), microphone=(), geolocation=(self)',
   'strict-transport-security': 'max-age=63072000; includeSubDomains',
 };
 const config = {

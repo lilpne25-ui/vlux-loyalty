@@ -37,7 +37,7 @@ export async function forgetToken(q: Tx | ReturnType<typeof getPool>, where: { i
 
 export function emailState() {
   const cfg = emailConfigFromEnv();
-  return { state: cfg.state, from: cfg.from, webhook: !!cfg.webhookSecret };
+  return { state: cfg.state, from: cfg.from, webhook: !!cfg.webhookSecret, provider: cfg.provider?.name ?? null };
 }
 
 export async function sendInvitationEmail(p: { adminId: string; businessId: string; invitationId: string; linkBase: string; assetBase: string }) {

@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { config } from '../config';
 import { getPool, withTenant, withTx, type Tx } from '../db';
 import { AppError, notFound } from '../errors';
-import { DUMMY_PASSWORD_HASH, hashPassword, newToken, sha256, verifyPassword } from '../security';
+import { CODE_ALPHABET, DUMMY_PASSWORD_HASH, hashPassword, newToken, sha256, verifyPassword } from '../security';
+import { randomInt } from 'node:crypto';
 import { emailSchema, passwordSchema } from '../validation';
 import { audit } from './audit';
 import { createStaffSession, type Role } from './auth';
@@ -17,10 +18,27 @@ const MAX_ATTEMPTS = 5;
 
 export const inviteSchema = z.object({ email: emailSchema, displayName: z.string().trim().min(2).max(60) });
 export const acceptSchema = z.object({
-  token: z.string().min(20).max(100),
+  token: z.string().min(20).max(100).optional(),
+  code: z.string().max(20).optional(),
   password: z.string().min(1).max(200),
   displayName: z.string().trim().min(2).max(60).optional(),
-});
+}).refine((v) => !!v.token || !!v.code, { message: 'Falta la invitación.' });
+
+/** V0.4.6 · Activación presencial: la invitación dura 30 minutos y además se puede abrir con un código corto. */
+export const IN_PERSON_MINUTES = 30;
+export type Delivery = 'link' | 'in_person';
+
+/** Código de 10 caracteres (alfabeto sin ambiguos, 31 símbolos ≈ 49 bits), de un solo uso y con vencimiento corto. */
+export function newAccessCode() {
+  let s = '';
+  for (let i = 0; i < 10; i++) s += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
+  return `${s.slice(0, 5)}-${s.slice(5)}`;
+}
+/** Normaliza lo que escribe la persona: mayúsculas, sin espacios ni guiones; O→0 no aplica (el alfabeto no tiene O ni 0). */
+export function normalizeAccessCode(raw: string) {
+  const c = raw.toUpperCase().replace(/[\s-]/g, '');
+  return c.length === 10 && [...c].every((ch) => CODE_ALPHABET.includes(ch)) ? c : null;
+}
 
 export type Inviter = { type: 'platform' | 'staff'; id: string };
 export type InvitationStatus = 'pendiente' | 'aceptada' | 'revocada' | 'vencida';
@@ -29,7 +47,7 @@ const statusOf = (r: { accepted_at: Date | null; revoked_at: Date | null; expire
   r.accepted_at ? 'aceptada' : r.revoked_at ? 'revocada' : new Date(r.expires_at) <= new Date() ? 'vencida' : 'pendiente';
 
 /** Crea una invitación (dentro de la transacción del llamador). Revoca la invitación abierta anterior del mismo correo. */
-export async function createInvitation(tx: Tx, p: { businessId: string; email: string; displayName: string; role: Role; by: Inviter }) {
+export async function createInvitation(tx: Tx, p: { businessId: string; email: string; displayName: string; role: Role; by: Inviter; delivery?: Delivery }) {
   const member = (await tx.query(
     `SELECT m.active FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id WHERE m.business_id = $1 AND u.email = $2`,
     [p.businessId, p.email],
@@ -45,15 +63,18 @@ export async function createInvitation(tx: Tx, p: { businessId: string; email: s
   }
   await tx.query('UPDATE staff_invitations SET revoked_at = now() WHERE business_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL', [p.businessId, p.email]);
   const token = newToken();
+  const delivery: Delivery = p.delivery ?? 'link';
+  const accessCode = delivery === 'in_person' ? newAccessCode() : null;
+  const minutes = delivery === 'in_person' ? IN_PERSON_MINUTES : config.invitationHours * 60;
   const id = (await tx.query(
-    `INSERT INTO staff_invitations (token_hash, business_id, email, display_name, role, invited_by_type, invited_by_id, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(hours => $8)) RETURNING id, expires_at`,
-    [sha256(token), p.businessId, p.email, p.displayName, p.role, p.by.type, p.by.id, config.invitationHours],
+    `INSERT INTO staff_invitations (token_hash, business_id, email, display_name, role, invited_by_type, invited_by_id, expires_at, delivery, access_code_hash)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(mins => $8), $9, $10) RETURNING id, expires_at`,
+    [sha256(token), p.businessId, p.email, p.displayName, p.role, p.by.type, p.by.id, minutes, delivery, accessCode ? sha256(accessCode.replace('-', '')) : null],
   )).rows[0];
   // V0.4.5: el correo se prepara en la misma transacción (outbox) y se envía después del commit.
   await forgetToken(tx, { businessId: p.businessId, email: p.email });
   await attachOutbox(tx, { invitationId: id.id, businessId: p.businessId, email: p.email, token });
-  return { token, invitationId: id.id as string, expiresAt: id.expires_at as Date };
+  return { token, accessCode, delivery, invitationId: id.id as string, expiresAt: id.expires_at as Date };
 }
 
 async function auditInvitation(businessId: string, by: Inviter, action: string, invitationId: string, details: Record<string, unknown> = {}) {
@@ -61,22 +82,35 @@ async function auditInvitation(businessId: string, by: Inviter, action: string, 
   if (by.type === 'platform') await platformAudit(getPool(), by.id, action, { businessId, entityType: 'staff_invitation', entityId: invitationId, details });
 }
 
-export async function inviteStaff(p: { businessId: string; email: string; displayName: string; role: Role; by: Inviter }) {
+export async function inviteStaff(p: { businessId: string; email: string; displayName: string; role: Role; by: Inviter; delivery?: Delivery }) {
   const r = await withTx((tx) => createInvitation(tx, p));
-  await auditInvitation(p.businessId, p.by, 'invitation.created', r.invitationId, { role: p.role });
+  await auditInvitation(p.businessId, p.by, 'invitation.created', r.invitationId, { role: p.role, delivery: r.delivery });
   return r;
+}
+
+/**
+ * V0.4.6 · Registro de cómo se compartió una invitación (copiar, compartir, WhatsApp, QR, presencial).
+ * Solo guarda el MÉTODO: nunca el enlace ni el token. "whatsapp_opened" significa que se abrió WhatsApp con el
+ * mensaje preparado, NO que se envió; "confirmed_sent" es la confirmación manual de quien lo envió.
+ */
+export const shareMethods = ['copied', 'native_share', 'whatsapp_opened', 'qr_shown', 'qr_downloaded', 'confirmed_sent'] as const;
+export async function recordInvitationShare(businessId: string, invitationId: string, method: (typeof shareMethods)[number], by: Inviter) {
+  const r = await getPool().query('SELECT id FROM staff_invitations WHERE id = $1 AND business_id = $2', [invitationId, businessId]);
+  if (!r.rowCount) throw notFound('Invitación');
+  await auditInvitation(businessId, by, 'invitation.shared', invitationId, { method });
+  return { ok: true, method };
 }
 
 export async function listInvitations(businessId: string, role?: Role) {
   const rows = (await getPool().query(
-    `SELECT i.id, i.email, i.display_name, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.created_at, i.invited_by_type,
+    `SELECT i.id, i.email, i.display_name, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.created_at, i.invited_by_type, i.delivery,
             o.status AS email_status, o.attempts AS email_attempts, o.sends_accepted, o.accepted_at AS email_accepted_at, o.delivered_at AS email_delivered_at,
             o.last_error AS email_error, (o.link_enc IS NOT NULL) AS can_email
        FROM staff_invitations i LEFT JOIN email_outbox o ON o.invitation_id = i.id
       WHERE i.business_id = $1 AND ($2::text IS NULL OR i.role = $2) ORDER BY i.created_at DESC LIMIT 50`,
     [businessId, role ?? null],
   )).rows;
-  return rows.map((r) => ({ id: r.id, email: r.email, displayName: r.display_name, role: r.role, status: statusOf(r), expiresAt: r.expires_at, acceptedAt: r.accepted_at, createdAt: r.created_at, invitedBy: r.invited_by_type,
+  return rows.map((r) => ({ id: r.id, email: r.email, displayName: r.display_name, role: r.role, status: statusOf(r), expiresAt: r.expires_at, acceptedAt: r.accepted_at, createdAt: r.created_at, invitedBy: r.invited_by_type, delivery: r.delivery,
     emailDelivery: r.email_status ? { status: r.email_status, attempts: r.email_attempts, sendsAccepted: r.sends_accepted, acceptedAt: r.email_accepted_at, deliveredAt: r.email_delivered_at, error: r.email_error, canSend: r.can_email && statusOf(r) === 'pendiente' } : null }));
 }
 
@@ -93,49 +127,59 @@ export async function revokeInvitation(businessId: string, invitationId: string,
 }
 
 /** Reenvío = nueva invitación con los mismos datos (la anterior queda revocada). Sirve también para vencidas. */
-export async function resendInvitation(businessId: string, invitationId: string, by: Inviter, role?: Role) {
+export async function resendInvitation(businessId: string, invitationId: string, by: Inviter, role?: Role, delivery: Delivery = 'link') {
   const old = (await getPool().query(
     'SELECT email, display_name, role, accepted_at FROM staff_invitations WHERE id = $1 AND business_id = $2 AND ($3::text IS NULL OR role = $3)',
     [invitationId, businessId, role ?? null],
   )).rows[0];
   if (!old) throw notFound('Invitación');
   if (old.accepted_at) throw new AppError(409, 'already_accepted', 'Esa invitación ya se aceptó.');
-  const r = await withTx((tx) => createInvitation(tx, { businessId, email: old.email, displayName: old.display_name, role: old.role, by }));
-  await auditInvitation(businessId, by, 'invitation.resent', r.invitationId, { previous: invitationId });
+  const r = await withTx((tx) => createInvitation(tx, { businessId, email: old.email, displayName: old.display_name, role: old.role, by, delivery }));
+  await auditInvitation(businessId, by, 'invitation.resent', r.invitationId, { previous: invitationId, delivery });
   return r;
 }
 
 // ---------- Lado de quien recibe la invitación ----------
-async function findByToken(token: string) {
+type Credential = { token?: string; code?: string };
+async function findByCredential(c: Credential) {
+  let col = 'token_hash', key: Buffer;
+  if (c.token) key = sha256(c.token);
+  else {
+    const code = normalizeAccessCode(c.code ?? '');
+    if (!code) return undefined;
+    col = 'access_code_hash'; key = sha256(code);
+  }
   return (await getPool().query(
-    `SELECT i.id, i.business_id, i.email, i.display_name, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.failed_attempts,
-            b.name AS business_name, b.slug, b.status AS business_status,
+    `SELECT i.id, i.business_id, i.email, i.display_name, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.failed_attempts, i.delivery,
+            b.name AS business_name, b.slug, b.status AS business_status, b.primary_color, b.accent_color,
             (SELECT id FROM staff_users u WHERE u.email = i.email) AS user_id
-       FROM staff_invitations i JOIN businesses b ON b.id = i.business_id WHERE i.token_hash = $1`,
-    [sha256(token)],
+       FROM staff_invitations i JOIN businesses b ON b.id = i.business_id WHERE i.${col} = $1`,
+    [key],
   )).rows[0];
 }
 
 const invalidInvite = () => new AppError(404, 'invalid_invitation', 'Esta invitación no es válida. Pide una nueva a quien te invitó.');
 
-function checkUsable(inv: Awaited<ReturnType<typeof findByToken>>) {
+function checkUsable(inv: Awaited<ReturnType<typeof findByCredential>>) {
   if (!inv || inv.revoked_at) throw invalidInvite();
   if (inv.accepted_at) throw new AppError(409, 'invitation_used', 'Esta invitación ya se usó. Entra con tu correo y contraseña.');
   if (new Date(inv.expires_at) <= new Date()) throw new AppError(410, 'invitation_expired', 'Esta invitación venció. Pide que te la reenvíen.');
   if (inv.business_status !== 'active') throw new AppError(403, 'business_suspended', 'El servicio de este negocio está suspendido. Contacta a VLUX.');
 }
 
-export async function inspectInvitation(token: string) {
-  if (typeof token !== 'string' || token.length < 20 || token.length > 100) throw invalidInvite();
-  const inv = await findByToken(token);
+export async function inspectInvitation(c: Credential | string) {
+  const cred: Credential = typeof c === 'string' ? { token: c } : c;
+  if (cred.token !== undefined && (typeof cred.token !== 'string' || cred.token.length < 20 || cred.token.length > 100)) throw invalidInvite();
+  if (!cred.token && typeof cred.code !== 'string') throw invalidInvite();
+  const inv = await findByCredential(cred);
   checkUsable(inv);
-  return { businessName: inv.business_name, role: inv.role as Role, email: inv.email as string, displayName: inv.display_name as string, accountExists: !!inv.user_id, expiresAt: inv.expires_at };
+  return { businessName: inv.business_name, businessSlug: inv.slug as string, primaryColor: inv.primary_color as string, accentColor: inv.accent_color as string, role: inv.role as Role, email: inv.email as string, displayName: inv.display_name as string, accountExists: !!inv.user_id, expiresAt: inv.expires_at, delivery: inv.delivery as Delivery };
 }
 
 /** Acepta la invitación y deja la sesión iniciada en ese negocio. */
 export async function acceptInvitation(raw: unknown) {
   const input = acceptSchema.parse(raw);
-  const inv = await findByToken(input.token);
+  const inv = await findByCredential({ token: input.token, code: input.token ? undefined : input.code });
   checkUsable(inv);
   let newHash: string | null = null;
   if (inv.user_id) {

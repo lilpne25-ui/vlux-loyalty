@@ -53,6 +53,25 @@ export async function ownerIssueEmployeeReset(session: StaffSession, membershipI
   return r;
 }
 
+/**
+ * V0.4.6 · Control Center: enlace de restablecimiento para una persona del negocio (dueño o empleado).
+ * Nunca muestra ni recupera la contraseña: la persona elige una nueva con un enlace de un solo uso (60 min)
+ * que además cierra sus sesiones abiertas. La cuenta es la misma en todos sus negocios (no se duplica).
+ */
+export async function adminIssueStaffReset(businessId: string, membershipId: string) {
+  const m = (await getPool().query(
+    `SELECT m.user_id, m.role, m.active, u.disabled_at, u.display_name,
+            (SELECT count(*)::int FROM staff_memberships o WHERE o.user_id = m.user_id AND o.business_id <> m.business_id AND o.active) AS other_businesses
+       FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id WHERE m.id = $1 AND m.business_id = $2`, [membershipId, businessId],
+  )).rows[0];
+  if (!m) throw notFound('Persona');
+  if (!m.active) throw new AppError(409, 'inactive_member', 'Ese acceso está desactivado. Reactívalo antes de emitir una contraseña nueva.');
+  if (m.disabled_at) throw new AppError(409, 'user_disabled', 'Esa cuenta está deshabilitada.');
+  const r = await issueResetToken(m.user_id);
+  await withTenant(businessId, (tx) => audit(tx, businessId, { type: 'platform', id: null }, 'staff.reset_issued', 'staff_membership', membershipId, { role: m.role }));
+  return { ...r, role: m.role as 'OWNER' | 'EMPLOYEE', displayName: m.display_name as string, otherBusinesses: m.other_businesses as number };
+}
+
 /** Plataforma (equipo VLUX): enlace de restablecimiento para el dueño que olvidó su contraseña. */
 export async function platformIssueReset(email: string) {
   const u = (await getPool().query('SELECT id FROM staff_users WHERE email = $1 AND disabled_at IS NULL', [email.trim().toLowerCase()])).rows[0];

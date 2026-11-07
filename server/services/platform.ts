@@ -62,6 +62,8 @@ export const businessEditSchema = z.object({
   logoDataUrl: logoSchema,
   logoFit: fitSchema,
   logoOriginalDataUrl: logoSchema.default(null),
+  // V0.4.6 · Ubicación pública del establecimiento (opcional). Sin enviar = se conserva; null = se borra.
+  location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).nullable().optional(),
 });
 
 export const statusChangeSchema = z.object({
@@ -194,8 +196,8 @@ export async function overview() {
       environment: process.env.VERCEL_ENV || (config.isProduction ? 'production' : 'development'),
       region: process.env.VERCEL_REGION || 'local',
       node: process.version,
-      database: { ok: true, latencyMs: dbMs, schema: 'V0.4.5 (0011_business_lifecycle)' },
-      emailProvider: (() => { const e = emailState(); return e.state === 'configured' ? `Resend configurado (${e.from}); webhook ${e.webhook ? 'firmado activo' : 'sin configurar: no se sabrá la entrega final'}` : e.state === 'mock' ? 'simulado (solo pruebas)' : 'no configurado (las invitaciones se entregan copiando el enlace)'; })(),
+      database: { ok: true, latencyMs: dbMs, schema: 'V0.4.6 (0014_access_push)' },
+      emailProvider: (() => { const e = emailState(); return e.state === 'configured' ? (e.provider === 'smtp' ? `SMTP propio configurado (${e.from}); solo se confirma “aceptado por el servidor”, la entrega final no es verificable por SMTP` : `Resend configurado (${e.from}); webhook ${e.webhook ? 'firmado activo' : 'sin configurar: no se sabrá la entrega final'}`) : e.state === 'mock' ? 'simulado (solo pruebas)' : 'no configurado (las invitaciones se entregan copiando el enlace)'; })(),
       wallet: {
         google: walletLabel(GoogleWalletProvider.fromEnv().status()),
         apple: new AppleWalletProvider().status().state === 'configured' ? 'configurado' : 'no disponible (sin certificados de Apple)',
@@ -219,8 +221,10 @@ export async function businessDetail(id: string) {
   const [pub, staff, invitations, stats, auditRows] = await Promise.all([
     getBusinessById(id),
     getPool().query(
-      `SELECT m.id, m.role, m.active, u.email, u.display_name, m.created_at,
-              (SELECT max(s.created_at) FROM staff_sessions s WHERE s.membership_id = m.id) AS last_login
+      `SELECT m.id, m.role, m.active, u.email, u.display_name, m.created_at, u.disabled_at, u.must_change_password,
+              (u.locked_until IS NOT NULL AND u.locked_until > now()) AS locked,
+              (SELECT max(s.created_at) FROM staff_sessions s WHERE s.membership_id = m.id) AS last_login,
+              (SELECT count(*)::int FROM staff_memberships o WHERE o.user_id = m.user_id AND o.business_id <> m.business_id AND o.active) AS other_businesses
          FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id WHERE m.business_id = $1 ORDER BY m.role, u.display_name`, [id]),
     listInvitations(id),
     statsByBusiness(),
@@ -234,7 +238,10 @@ export async function businessDetail(id: string) {
       plan: b.plan_code, commercialStatus: b.commercial_status, startDate: d(b.start_date), pilotEndDate: d(b.pilot_end_date),
       renewalDate: d(b.renewal_date), priceCents: b.price_cents, currency: b.currency, notes: b.notes, updatedAt: b.sub_updated,
     } : null,
-    staff: staff.rows.map((r) => ({ membershipId: r.id, role: r.role, active: r.active, email: r.email, displayName: r.display_name, createdAt: r.created_at, lastLogin: r.last_login })),
+    // V0.4.6 · Estado de la cuenta para el Centro de accesos (nunca se expone la contraseña ni su hash).
+    staff: staff.rows.map((r) => ({ membershipId: r.id, role: r.role, active: r.active, email: r.email, displayName: r.display_name, createdAt: r.created_at, lastLogin: r.last_login,
+      accountState: r.disabled_at ? 'deshabilitada' : !r.active ? 'acceso desactivado' : r.locked ? 'bloqueada temporalmente' : r.must_change_password ? 'debe cambiar contraseña' : 'activa',
+      otherBusinesses: r.other_businesses })),
     invitations,
     stats: stats.get(id) ?? null,
     audit: auditRows.map((r) => ({ action: r.action, actorType: r.actor_type, at: r.created_at })),
@@ -246,9 +253,11 @@ export async function updateBusiness(admin: AdminSession, id: string, raw: unkno
   const input = businessEditSchema.parse(raw);
   return withTenant(id, async (tx) => {
     const r = await tx.query(
-      `UPDATE businesses SET name = $2, vertical = $3, city = $4, primary_color = $5, accent_color = $6, review_url = $7, logo_data_url = $8, card_finish = $9, logo_fit = $10, logo_original_data_url = $11
+      `UPDATE businesses SET name = $2, vertical = $3, city = $4, primary_color = $5, accent_color = $6, review_url = $7, logo_data_url = $8, card_finish = $9, logo_fit = $10, logo_original_data_url = $11,
+              latitude = CASE WHEN $12 THEN $13 ELSE latitude END, longitude = CASE WHEN $12 THEN $14 ELSE longitude END
         WHERE id = $1 RETURNING id`,
-      [id, input.name, input.vertical, input.city, input.primaryColor, input.accentColor, input.reviewUrl, input.logoDataUrl, input.cardFinish, input.logoFit ? JSON.stringify(input.logoFit) : null, input.logoDataUrl ? input.logoOriginalDataUrl : null],
+      [id, input.name, input.vertical, input.city, input.primaryColor, input.accentColor, input.reviewUrl, input.logoDataUrl, input.cardFinish, input.logoFit ? JSON.stringify(input.logoFit) : null, input.logoDataUrl ? input.logoOriginalDataUrl : null,
+        input.location !== undefined, input.location?.lat ?? null, input.location?.lng ?? null],
     );
     if (!r.rowCount) throw notFound('Negocio');
     await audit(tx, id, { type: 'platform', id: null }, 'business.updated', 'business', id);

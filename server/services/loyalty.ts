@@ -10,6 +10,7 @@ import { purchaseSchema } from '../validation';
 import { audit } from './audit';
 import { loadCardSummary, loadHistory } from './cards';
 import type { StaffSession } from './auth';
+import { enqueueAfterStamps } from './notifications';
 
 /** Ventana en la que una segunda compra (con otra llave) se considera posible doble registro. */
 export const DUPLICATE_GUARD_SECONDS = 20;
@@ -133,7 +134,9 @@ export async function registerPurchase(session: StaffSession, cardId: string, ra
     await tx.query(`UPDATE cards SET stamp_balance = $2, last_purchase_at = now(), last_visit_at = CASE WHEN $3 THEN last_visit_at ELSE now() END WHERE id = $1`, [cardId, balance, !!sameVisit]);
     await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'purchase.registered', 'purchase', purchaseId, { cardId, itemCount: input.itemCount, stamps, newVisit: !sameVisit, programType: rule.programType, limitReached });
     const rewardUnlocked = await unlockIfEligible(tx, session.businessId, cardId, rule);
-    return { replayed: false, purchaseId, stampsAwarded: stamps, newVisit: !sameVisit, limitReached, programType: rule.programType, rewardUnlocked, card: await loadCardSummary(tx, cardId) };
+    // V0.4.6 · Aviso "recompensa lista" o "casi lo logras" (solo si el cliente lo aceptó). Se envía al confirmar la transacción.
+    const queuedNotifications = stamps > 0 ? (await enqueueAfterStamps(tx, session.businessId, cardId, rule, rewardUnlocked)).length : 0;
+    return { replayed: false, queuedNotifications, purchaseId, stampsAwarded: stamps, newVisit: !sameVisit, limitReached, programType: rule.programType, rewardUnlocked, card: await loadCardSummary(tx, cardId) };
   });
 }
 
@@ -156,8 +159,10 @@ export async function redeemReward(session: StaffSession, rewardId: string) {
     await tx.query('UPDATE cards SET stamp_balance = $2, cycle = cycle + 1 WHERE id = $1', [card.id, balance]);
     await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'reward.redeemed', 'reward', rewardId, { cardId: card.id, code: reward.code });
     // El excedente puede alcanzar de nuevo la meta.
-    const next = await unlockIfEligible(tx, session.businessId, card.id, await activeRule(tx));
-    return { redeemed: { id: rewardId, code: reward.code, description: reward.description }, rewardUnlocked: next, card: await loadCardSummary(tx, card.id) };
+    const rule = await activeRule(tx);
+    const next = await unlockIfEligible(tx, session.businessId, card.id, rule);
+    const queuedNotifications = next ? (await enqueueAfterStamps(tx, session.businessId, card.id, rule, next)).length : 0;
+    return { queuedNotifications, redeemed: { id: rewardId, code: reward.code, description: reward.description }, rewardUnlocked: next, card: await loadCardSummary(tx, card.id) };
   });
 }
 

@@ -340,3 +340,11 @@ select.cc-input { appearance: none; background-image: linear-gradient(45deg, tra
   .lp-demo-body { animation: none; }
 }
 .lp-logo-full { -webkit-mask-image: radial-gradient(ellipse 62% 62% at 50% 50%, #000 82%, transparent 100%); mask-image: radial-gradient(ellipse 62% 62% at 50% 50%, #000 82%, transparent 100%); }
+
+/* V0.4.6 · Bienvenida del dueño: tres acciones grandes, táctiles (≥ 56 px). */
+.welcome-action { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 12px 14px; text-align: left; border: 1px solid #E4E7EC; border-radius: 14px; background: #fff; color: #0E1013; transition: border-color .15s, background .15s; }
+.welcome-action:hover { border-color: #C9CED6; background: #FAFBFC; }
+.welcome-action:focus-visible { outline: 3px solid rgba(103,199,211,.45); outline-offset: 2px; }
+.welcome-action > svg { flex-shrink: 0; color: #0E6874; }
+.welcome-action > span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.welcome-action > span > span { font-size: 12.5px; color: #667085; }

@@ -14,7 +14,7 @@ const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfF
 
 test('accessLinks arma las tres direcciones y no incluye credenciales', () => {
   const l = accessLinks('https://app.ejemplo.mx/', 'cafe-x');
-  assert.deepEqual(l, { base: 'https://app.ejemplo.mx', customerUrl: 'https://app.ejemplo.mx/n/cafe-x', cashierUrl: 'https://app.ejemplo.mx/caja', ownerUrl: 'https://app.ejemplo.mx/panel', loginUrl: 'https://app.ejemplo.mx/acceso' });
+  assert.deepEqual(l, { base: 'https://app.ejemplo.mx', customerUrl: 'https://app.ejemplo.mx/n/cafe-x', cashierUrl: 'https://app.ejemplo.mx/caja?negocio=cafe-x', ownerUrl: 'https://app.ejemplo.mx/panel?negocio=cafe-x', loginUrl: 'https://app.ejemplo.mx/acceso?negocio=cafe-x' });
 });
 
 test('endpoint público de accesos: tres direcciones por negocio, sin tokens', async () => {
@@ -23,8 +23,8 @@ test('endpoint público de accesos: tres direcciones por negocio, sin tokens', a
   const r = await d.get(`/api/public/businesses/${b.slug}/access`);
   assert.equal(r.status, 200);
   assert.match(r.json.customerUrl, new RegExp(`/n/${b.slug}$`));
-  assert.match(r.json.cashierUrl, /\/caja$/);
-  assert.match(r.json.ownerUrl, /\/panel$/);
+  assert.match(r.json.cashierUrl, /\/caja\?negocio=[a-z0-9-]+$/);
+  assert.match(r.json.ownerUrl, /\/panel\?negocio=[a-z0-9-]+$/);
   assert.ok(!/token|#/.test(JSON.stringify(r.json)), 'ninguna dirección lleva secretos');
   assert.equal((await d.get('/api/public/businesses/no-existe-123/access')).status, 404);
 });
@@ -78,12 +78,12 @@ test('manifiestos de Panel y Caja: acceso directo con la marca, sin permisos', a
   const d = new Device('teléfono');
   const panel = await d.get(`/api/pwa/${b.slug}/staff/panel/manifest.webmanifest`);
   assert.equal(panel.status, 200);
-  assert.equal(panel.json.start_url, '/panel?fuente=app');
+  assert.equal(panel.json.start_url, `/panel?negocio=${b.slug}&fuente=app`); // V0.4.6: arranca en SU negocio
   assert.match(panel.json.name, /Panel/);
   assert.equal(panel.json.display, 'standalone');
   assert.equal(panel.json.scope, '/');
   const caja = await d.get(`/api/pwa/${b.slug}/staff/caja/manifest.webmanifest`);
-  assert.equal(caja.json.start_url, '/caja?fuente=app');
+  assert.equal(caja.json.start_url, `/caja?negocio=${b.slug}&fuente=app`);
   assert.notEqual(panel.json.id, caja.json.id, 'Panel y Caja se instalan como apps distintas');
   assert.ok(!/token|session|cookie/i.test(JSON.stringify(panel.json)));
   assert.equal((await d.get(`/api/pwa/${b.slug}/staff/admin/manifest.webmanifest`)).status, 404);

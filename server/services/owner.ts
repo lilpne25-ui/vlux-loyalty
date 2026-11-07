@@ -165,6 +165,10 @@ export async function anonymizeCustomer(session: StaffSession, customerId: strin
     await tx.query("UPDATE cards SET status = 'revoked' WHERE customer_id = $1", [customerId]);
     await tx.query('UPDATE card_access_tokens SET revoked_at = now() WHERE revoked_at IS NULL AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)', [customerId]);
     await tx.query("UPDATE rewards SET status = 'void' WHERE status = 'available' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    // V0.4.6 · Sin tarjeta no hay avisos: se desactivan sus notificaciones y se cancelan sus citas.
+    await tx.query("UPDATE push_subscriptions SET disabled_at = now(), disabled_reason = 'card_revoked' WHERE disabled_at IS NULL AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    await tx.query("UPDATE appointments SET status = 'cancelled' WHERE status = 'confirmed' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    await tx.query("UPDATE notification_outbox SET status = 'skipped', skip_reason = 'card_revoked' WHERE status = 'queued' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
     await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'customer.anonymized', 'customer', customerId);
     return { customerId, alreadyAnonymized: false };
   });

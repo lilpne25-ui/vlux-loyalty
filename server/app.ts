@@ -25,6 +25,7 @@ import { accessLinks } from './access-links';
 import { buildManifest, buildStaffManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
+import { cancelAppointment, communicationOverview, createAppointment, createPromotion, dispatchBusiness, publicPushConfig, runNotificationJob, subscribe, subscriptionStatus, unsubscribe, updatePreferences, updateSettings } from './services/notifications';
 import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
 
 type Env = { Variables: { staff: StaffSession } };
@@ -128,7 +129,7 @@ export function buildApp() {
       formAction: ["'self'"],
     },
     referrerPolicy: 'no-referrer',
-    permissionsPolicy: { camera: ['self'], microphone: [], geolocation: [] },
+    permissionsPolicy: { camera: ['self'], microphone: [], geolocation: ['self'] },
   }));
 
   app.onError((err, c) => {
@@ -172,7 +173,7 @@ export function buildApp() {
   // ---------- Público ----------
   api.get('/public/businesses/:slug', async (c) => {
     const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
-    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, cardFinish: b.cardFinish, isDemo: b.isDemo, logoUrl: b.logoUrl, logoFit: b.logoFit }, program: (({ ruleId: _r, ...p }) => p)(b.program), privacyNoticeVersion: config.privacyNoticeVersion });
+    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, cardFinish: b.cardFinish, isDemo: b.isDemo, logoUrl: b.logoUrl, logoFit: b.logoFit, location: b.location }, program: (({ ruleId: _r, ...p }) => p)(b.program), privacyNoticeVersion: config.privacyNoticeVersion });
   });
 
   // Accesos del negocio: qué dirección usa cada persona. Son direcciones derivadas del nombre público; no incluyen tokens ni credenciales.
@@ -222,6 +223,29 @@ export function buildApp() {
     return c.json({ ok: true });
   });
 
+  // ---------- V0.4.6 · Notificaciones del cliente (Web Push con consentimiento) ----------
+  api.get('/public/push-config', (c) => { c.header('Cache-Control', 'no-store'); return c.json(publicPushConfig()); });
+  const pushRoute = (path: string, fn: (ref: { businessId: string; cardId: string }, body: unknown) => Promise<unknown>) =>
+    api.post(`/me/:slug/push/${path}`, async (c) => {
+      const ref = await customerCard(c, c.req.param('slug'));
+      if (!ref) throw unauthorized();
+      await rateLimit(`push:${ref.cardId}`, 30, 60 * 60_000);
+      return c.json(await fn(ref, await jsonBody(c)));
+    });
+  pushRoute('subscribe', subscribe);
+  pushRoute('preferences', updatePreferences);
+  pushRoute('unsubscribe', unsubscribe);
+  pushRoute('status', subscriptionStatus);
+
+  // Tarea programada (Vercel Cron u otro programador). Requiere CRON_SECRET (≥32 caracteres) como Bearer.
+  api.get('/internal/notifications/run', async (c) => {
+    const expected = process.env.CRON_SECRET || '';
+    const got = (c.req.header('authorization') || '').replace(/^Bearer /, '');
+    if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
+    c.header('Cache-Control', 'no-store');
+    return c.json(await runNotificationJob({ budgetMs: 50_000 }));
+  });
+
   // ---------- PWA: vincular la app instalada (V0.2.2) ----------
   // Código de un solo uso generado desde el navegador donde ya está la tarjeta.
   api.post('/me/:slug/pair-code', async (c) => {
@@ -261,17 +285,18 @@ export function buildApp() {
   });
 
   api.get('/pwa/:slug/icon/:file', async (c) => {
-    const m = c.req.param('file').match(/^(192|512|180|maskable-512)\.png$/);
+    const m = c.req.param('file').match(/^(?:(panel|caja)-)?(192|512|180|maskable-512)\.png$/);
     if (!m) throw new AppError(404, 'not_found', 'Ruta no encontrada.');
     const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
-    const maskable = m[1].startsWith('maskable');
-    const size = maskable ? 512 : Number(m[1]);
+    const variant = (m[1] as 'panel' | 'caja' | undefined) ?? 'card';
+    const maskable = m[2].startsWith('maskable');
+    const size = maskable ? 512 : Number(m[2]);
     // Dibujar un ícono cuesta CPU: se guarda en memoria y la CDN lo cachea (s-maxage).
-    const key = `${b.slug}|${m[1]}|${b.name}|${b.primaryColor}|${b.accentColor}`;
+    const key = `${b.slug}|${variant}|${m[2]}|${b.name}|${b.primaryColor}|${b.accentColor}`;
     let png = iconCache.get(key);
     if (!png) {
       await rateLimit(`icon:${clientIp(c)}`, 60, 60_000);
-      png = new Uint8Array(renderIcon({ size, maskable, name: b.name, primary: b.primaryColor, accent: b.accentColor }));
+      png = new Uint8Array(renderIcon({ size, maskable, name: b.name, primary: b.primaryColor, accent: b.accentColor, variant }));
       if (iconCache.size >= 200) iconCache.delete(iconCache.keys().next().value as string);
       iconCache.set(key, png);
     }
@@ -304,14 +329,26 @@ export function buildApp() {
   });
 
   // ---------- Invitaciones (quien recibe el enlace) ----------
+  // V0.4.6 · Activación presencial: además del enlace, un código corto de 10 caracteres (≈49 bits, 30 min, un solo uso).
+  // Contra intentos de adivinarlo: límite por IP y un límite global de intentos con código.
+  const codeAttempt = async (c: Context, body: { token?: unknown; code?: unknown }) => {
+    if (typeof body?.token === 'string' && body.token) return;
+    if (typeof body?.code !== 'string') return;
+    await rateLimit(`invite-code-ip:${clientIp(c)}`, 10, 15 * 60_000);
+    await rateLimit('invite-code-global', 600, 15 * 60_000);
+  };
   api.post('/invitations/inspect', async (c) => {
     await rateLimit(`invite-inspect:${clientIp(c)}`, 30, 15 * 60_000);
-    const body = (await jsonBody(c)) as { token?: unknown };
+    const body = (await jsonBody(c)) as { token?: unknown; code?: unknown };
+    await codeAttempt(c, body);
+    if (typeof body?.code === 'string' && !(typeof body?.token === 'string' && body.token)) return c.json(await inspectInvitation({ code: body.code }));
     return c.json(await inspectInvitation(typeof body?.token === 'string' ? body.token : ''));
   });
   api.post('/invitations/accept', async (c) => {
     await rateLimit(`invite-accept:${clientIp(c)}`, 10, 15 * 60_000);
-    const r = await acceptInvitation(await jsonBody(c));
+    const raw = await jsonBody(c);
+    await codeAttempt(c, raw as { token?: unknown; code?: unknown });
+    const r = await acceptInvitation(raw);
     setCookie(c, STAFF_COOKIE, r.token, cookieOpts(config.staffSessionHours * 3600));
     return c.json({ role: r.role, businessSlug: r.businessSlug, linkedExisting: r.linkedExisting });
   });
@@ -382,12 +419,16 @@ export function buildApp() {
   staff.post('/cards/:cardId/purchases', async (c) => {
     const s = c.get('staff');
     await rateLimit(`purchase:${s.sessionId}`, 60, 60_000);
-    return c.json(await registerPurchase(s, uuidSchema.parse(c.req.param('cardId')), await jsonBody(c)));
+    const r = await registerPurchase(s, uuidSchema.parse(c.req.param('cardId')), await jsonBody(c));
+    await sendQueued(s.businessId, r.queuedNotifications, uuidSchema.parse(c.req.param('cardId')));
+    return c.json(r);
   });
   staff.post('/rewards/:rewardId/redeem', async (c) => {
     const s = c.get('staff');
     await rateLimit(`redeem:${s.sessionId}`, 30, 60_000);
-    return c.json(await redeemReward(s, uuidSchema.parse(c.req.param('rewardId'))));
+    const r = await redeemReward(s, uuidSchema.parse(c.req.param('rewardId')));
+    await sendQueued(s.businessId, r.queuedNotifications);
+    return c.json(r);
   });
   staff.post('/password', async (c) => {
     if (c.get('staff').demo) throw demoBlocked();
@@ -459,6 +500,18 @@ export function buildApp() {
     await rateLimit(`void:${s.userId}`, 30, 60 * 60_000);
     return c.json(await voidPurchase(s, uuidSchema.parse(c.req.param('purchaseId')), await jsonBody(c)));
   });
+  // V0.4.6 · Comunicación con clientes.
+  owner.get('/communication', async (c) => c.json(await communicationOverview(c.get('staff'))));
+  owner.put('/communication/settings', async (c) => c.json(await updateSettings(c.get('staff'), await jsonBody(c))));
+  owner.post('/communication/promotions', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`promo:${s.businessId}`, 5, 60 * 60_000);
+    const r = await createPromotion(s, await jsonBody(c));
+    const sent = await dispatchBusiness(s.businessId, { budgetMs: 8000, limit: 5 }).catch(() => null);
+    return c.json({ ...r, dispatch: sent }, 201);
+  });
+  owner.post('/appointments', async (c) => c.json(await createAppointment(c.get('staff'), await jsonBody(c)), 201));
+  owner.post('/appointments/:id/cancel', async (c) => c.json(await cancelAppointment(c.get('staff'), uuidSchema.parse(c.req.param('id')))));
   api.route('/owner', owner);
 
   // ---------- Control Center (equipo VLUX) ----------
@@ -503,6 +556,12 @@ export function buildApp() {
   });
 
   return app;
+}
+
+/** Envía de inmediato los avisos que generó una compra o canje (ya confirmada). Un fallo aquí nunca afecta a la caja. */
+async function sendQueued(businessId: string, queued: number | undefined, cardId?: string) {
+  if (!queued) return;
+  try { await dispatchBusiness(businessId, { cardId, budgetMs: 2500, limit: 5 }); } catch (e) { console.error('[push] envío inmediato falló; queda en cola', (e as Error).message); }
 }
 
 function publicSession(s: StaffSession) {

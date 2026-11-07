@@ -37,7 +37,7 @@ export interface Program {
   programType?: ProgramType; programName?: string; conditions?: string; unitSingular?: string | null; unitPlural?: string | null;
   eligibleServices?: string[]; amountPerPointCents?: number | null; maxAwardsPerDay?: number | null; validUntil?: string | null; version?: number;
 }
-export interface BusinessInfo { slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; cardFinish?: 'signature' | 'silver' | 'black'; reviewUrl?: string | null; isDemo: boolean; logoUrl?: string | null; logoFit?: unknown | null }
+export interface BusinessInfo { slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; cardFinish?: 'signature' | 'silver' | 'black'; reviewUrl?: string | null; isDemo: boolean; logoUrl?: string | null; logoFit?: unknown | null; location?: { lat: number; lng: number } | null }
 /** V0.4.5: id del catálogo extensible de giros (shared/catalog.ts). */
 export type Vertical = string;
 export interface RewardInfo { id?: string; code: string; description: string; stampsCost: number; unlockedAt: string }

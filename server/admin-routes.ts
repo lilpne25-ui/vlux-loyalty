@@ -9,8 +9,9 @@ import { config } from './config';
 import { AppError } from './errors';
 import { rateLimit } from './ratelimit';
 import { uuidSchema } from './validation';
+import { getPool } from './db';
 import {
-  acceptAdminInvite, adminLogin, adminLogout, bootstrapFirstAdmin, enrollConfirm, enrollStart, getAdminSession, inviteAdmin,
+  acceptAdminInvite, platformAudit, adminLogin, adminLogout, bootstrapFirstAdmin, enrollConfirm, enrollStart, getAdminSession, inviteAdmin,
   listAdmins, listAdminSessions, needsBootstrap, requireMfa, revokeAdminSession, setAdminDisabled, verifySecondFactor, type AdminSession,
 } from './services/platform-auth';
 import {
@@ -19,7 +20,8 @@ import {
 } from './services/platform';
 import { archiveBusiness, declareSynthetic, deleteBusiness, deletionPreview, exportBusiness, listDeletions, restoreBusiness } from './services/lifecycle';
 import { emailState, sendInvitationEmail } from './services/email-invitations';
-import { inviteSchema, inviteStaff, resendInvitation, revokeInvitation } from './services/invitations';
+import { inviteSchema, inviteStaff, recordInvitationShare, resendInvitation, revokeInvitation, shareMethods } from './services/invitations';
+import { adminIssueStaffReset } from './services/operations';
 import { z } from 'zod';
 
 type AdminEnv = { Variables: { admin: AdminSession } };
@@ -145,17 +147,41 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBod
   p.get('/deletions', async (c) => c.json({ deletions: await listDeletions() }));
   p.put('/businesses/:id/subscription', async (c) => c.json(await updateSubscription(c.get('admin'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
 
-  const roleSchema = z.object({ role: z.enum(['OWNER', 'EMPLOYEE']) });
+  const roleSchema = z.object({ role: z.enum(['OWNER', 'EMPLOYEE']), delivery: z.enum(['link', 'in_person']).default('link') });
+  // V0.4.6 · Respuesta común: enlace de un solo uso (token en el fragmento #), y en modo presencial también el código corto.
+  // El token y el código se muestran SOLO en esta respuesta; en BD viven sus hashes.
+  const invitationOut = (c: Context, r: { invitationId: string; token: string; accessCode: string | null; delivery: string; expiresAt: Date }) => ({
+    invitationId: r.invitationId, link: inviteLink(c, r.token), expiresAt: r.expiresAt, delivery: 'manual', mode: r.delivery,
+    accessCode: r.accessCode, activateUrl: r.accessCode ? `${appLinkBase(c)}/activar` : null,
+  });
   p.post('/businesses/:id/invitations', async (c) => {
     const id = uuidSchema.parse(c.req.param('id'));
     const body = await jsonBody(c);
     const input = inviteSchema.and(roleSchema).parse(body);
-    const r = await inviteStaff({ businessId: id, email: input.email, displayName: input.displayName, role: input.role, by: { type: 'platform', id: c.get('admin').adminId } });
-    return c.json({ invitationId: r.invitationId, link: inviteLink(c, r.token), expiresAt: r.expiresAt, delivery: 'manual', email: emailState() }, 201);
+    const r = await inviteStaff({ businessId: id, email: input.email, displayName: input.displayName, role: input.role, by: { type: 'platform', id: c.get('admin').adminId }, delivery: input.delivery });
+    return c.json({ ...invitationOut(c, r), email: emailState() }, 201);
   });
   p.post('/businesses/:id/invitations/:invId/resend', async (c) => {
-    const r = await resendInvitation(uuidSchema.parse(c.req.param('id')), uuidSchema.parse(c.req.param('invId')), { type: 'platform', id: c.get('admin').adminId });
-    return c.json({ invitationId: r.invitationId, link: inviteLink(c, r.token), expiresAt: r.expiresAt, delivery: 'manual' });
+    const body = (await jsonBody(c).catch(() => ({}))) as { delivery?: unknown };
+    const delivery = body?.delivery === 'in_person' ? 'in_person' : 'link';
+    const r = await resendInvitation(uuidSchema.parse(c.req.param('id')), uuidSchema.parse(c.req.param('invId')), { type: 'platform', id: c.get('admin').adminId }, undefined, delivery);
+    return c.json(invitationOut(c, r));
+  });
+  // V0.4.6 · Cómo se compartió (solo el método, nunca el enlace). Abrir WhatsApp NO equivale a enviado.
+  p.post('/businesses/:id/invitations/:invId/share', async (c) => {
+    const body = (await jsonBody(c)) as { method?: unknown };
+    const method = z.enum(shareMethods).parse(body?.method);
+    await rateLimit(`admin-share:${c.get('admin').adminId}`, 120, 60 * 60_000);
+    return c.json(await recordInvitationShare(uuidSchema.parse(c.req.param('id')), uuidSchema.parse(c.req.param('invId')), method, { type: 'platform', id: c.get('admin').adminId }));
+  });
+  // V0.4.6 · Restablecer contraseña de forma segura (dueño o empleado): enlace de un solo uso, nunca la contraseña.
+  p.post('/businesses/:id/staff/:membershipId/reset-link', async (c) => {
+    const a = c.get('admin');
+    await rateLimit(`admin-reset:${a.adminId}`, 20, 60 * 60_000);
+    const id = uuidSchema.parse(c.req.param('id'));
+    const r = await adminIssueStaffReset(id, uuidSchema.parse(c.req.param('membershipId')));
+    await platformAudit(getPool(), a.adminId, 'staff.reset_issued', { businessId: id, entityType: 'staff_membership', entityId: c.req.param('membershipId'), details: { role: r.role } });
+    return c.json({ resetLink: `${appLinkBase(c)}/restablecer#${r.token}`, expiresInMinutes: r.expiresInMinutes, role: r.role, displayName: r.displayName, otherBusinesses: r.otherBusinesses });
   });
   // V0.4.5 · Envío por correo (después del commit), con límites por administrador, negocio e invitación.
   p.get('/email/status', (c) => c.json(emailState()));

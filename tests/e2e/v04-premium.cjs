@@ -185,7 +185,7 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   const manifest = await owner.evaluate(() => document.querySelector('link[rel=manifest]')?.getAttribute('href'));
   ok('O1 el panel del dueño publica su propio manifiesto (agregar al teléfono)', manifest === `/api/pwa/${slug}/staff/panel/manifest.webmanifest`, manifest);
   const mres = await owner.evaluate(async (u) => { const r = await fetch(u); return { s: r.status, j: await r.json() }; }, manifest);
-  ok('O2 el manifiesto del panel es válido (standalone, /panel)', mres.s === 200 && mres.j.display === 'standalone' && mres.j.start_url === '/panel?fuente=app', mres.j.start_url);
+  ok('O2 el manifiesto del panel es válido (standalone, /panel)', mres.s === 200 && mres.j.display === 'standalone' && mres.j.start_url === `/panel?negocio=${slug}&fuente=app`, mres.j.start_url);
   ok('O3 el botón «Agregar panel a mi teléfono» está visible', await owner.isVisible('[data-testid=install-panel]'));
   await owner.click('[data-testid=install-panel]');
   await owner.waitForSelector('#install-staff-title, [role=dialog]');

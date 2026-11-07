@@ -55,6 +55,8 @@ export interface PublicBusiness {
   logoUrl: string | null;
   /** Ajuste del logotipo (autoajuste + cambios manuales); null = autoajuste en el cliente. */
   logoFit: unknown | null;
+  /** V0.4.6 · Ubicación pública del establecimiento (la misma que aparece en un mapa). Solo para calcular cercanía EN el teléfono del cliente. */
+  location: { lat: number; lng: number } | null;
   program: ReturnType<typeof publicProgram>;
 }
 
@@ -68,7 +70,7 @@ export async function getBusinessById(id: string): Promise<PublicBusiness> {
   return withTenant(id, async (tx) => {
     const row = (await tx.query(
       `SELECT b.id, b.slug, b.name, b.city, b.vertical, b.primary_color, b.accent_color, b.card_finish, b.review_url, b.is_demo,
-              b.logo_hash AS logo_v, b.logo_fit
+              b.logo_hash AS logo_v, b.logo_fit, b.latitude, b.longitude
          FROM businesses b WHERE b.id = $1`,
       [id],
     )).rows[0];
@@ -79,6 +81,7 @@ export async function getBusinessById(id: string): Promise<PublicBusiness> {
       id: row.id, slug: row.slug, name: row.name, city: row.city, vertical: row.vertical,
       primaryColor: row.primary_color, accentColor: row.accent_color, cardFinish: row.card_finish, reviewUrl: row.review_url, isDemo: row.is_demo,
       logoFit: row.logo_fit ?? null,
+      location: row.latitude != null && row.longitude != null ? { lat: Number(row.latitude), lng: Number(row.longitude) } : null,
       logoUrl: row.logo_v ? `/api/public/businesses/${row.slug}/logo?v=${row.logo_v}` : null,
       program: publicProgram(ruleFromRow(rule)),
     };

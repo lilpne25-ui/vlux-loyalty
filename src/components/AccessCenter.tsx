@@ -41,7 +41,7 @@ function AccessCard({ icon, tone, title, who, what, url, qrLabel, filename, extr
   );
 }
 
-export function AccessCenter({ businessName, slug, links }: { businessName: string; slug: string; links: Links }) {
+export function AccessCenter({ businessName, slug, links, logoUrl }: { businessName: string; slug: string; links: Links; logoUrl?: string | null }) {
   return (
     <section className="flex flex-col gap-4" aria-label="Accesos del negocio">
       <div>
@@ -60,18 +60,18 @@ export function AccessCenter({ businessName, slug, links }: { businessName: stri
           title="Caja" who="Tu equipo · con contraseña"
           what="Úsalo en el celular o tablet de caja para escanear tarjetas y registrar visitas. Pide correo y contraseña del empleado."
           url={links.cashierUrl} qrLabel={`QR de caja de ${businessName}`} filename={`${slug}-caja.png`}
-          extra={<InstallAppButton app="caja" label="Agregar caja a este teléfono" />}
+          extra={<p className="text-[12px] text-slate2 leading-snug" data-testid="cashier-install-hint">Para instalar la caja, abre este enlace <strong>en el teléfono o tablet del mostrador</strong>, entra con la cuenta del empleado y toca «Instalar caja en este teléfono».</p>}
         />
         <AccessCard
           testid="access-owner" icon={<LayoutDashboard size={19} />} tone="bg-[#FEF6EE] text-[#B93815]"
           title="Dueño" who="Solo tú · con contraseña"
           what="Revisa clientes, métricas y configura tu programa. No lo compartas con tu equipo: ellos usan el de Caja."
           url={links.ownerUrl} qrLabel={`QR del panel de ${businessName}`} filename={`${slug}-panel.png`}
-          extra={<InstallAppButton app="panel" label="Agregar panel a mi teléfono" />}
+          extra={<InstallAppButton app="panel" label="Instalar mi panel en este teléfono" business={{ slug, name: businessName, logoUrl }} />}
         />
       </div>
       <div className="rounded-xl bg-[#F6F7F9] px-4 py-3 text-[12.5px] text-[#475467] leading-snug">
-        Los botones <strong>Agregar a mi teléfono</strong> crean un acceso directo en este teléfono. Para tu equipo, abre el enlace de Caja en su teléfono y repite el paso allí.
+        <strong>Instalar</strong> crea un acceso directo en este teléfono. Para tu equipo, abre el enlace de Caja en su teléfono y repite el paso allí. Los enlaces no llevan contraseñas: cada persona entra con su cuenta.
         <Button variant="ghost" size="sm" className="ml-2 align-middle" onClick={() => window.print()}><Printer size={14} /> Imprimir esta página</Button>
       </div>
     </section>
