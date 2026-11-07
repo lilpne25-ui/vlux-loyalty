@@ -39,5 +39,5 @@ Centro de accesos, código presencial de punta a punta, bienvenida e instalació
 `schema_migrations`: 0001–0008 y 0011–0014. **0009 y 0010 siguen sin registro** aunque sus estructuras existen. **No ejecutar `scripts/migrate.ts up` contra Preview** hasta pegar `vlux-loyalty-v045/0009-0010_registrar_historial.sql` (solo 2 filas de historial): de lo contrario intentaría re-aplicar 0009/0010.
 
 ## Regresiones sobre el commit desplegado (local, emulador de Vercel Output, 2026-11-07)
-V0.2 29/29 · V0.2.1 14/14 · V0.2.2 40/40 · V0.3 24 PASS + 1 BLOCKED heredado (K) · V0.4 35/35 · V0.4.2 36/36 · V0.4.3 42/42 · V0.4.5 26/26 · V0.4.4 OK · **V0.4.6 27/27**. Unitarias 65/65, integración 141/141.
+V0.2 29/29 · V0.2.1 14/14 · V0.2.2 40/40 · V0.3 24 PASS + 1 BLOCKED heredado (K) · V0.4 35/35 · V0.4.2 36/36 · V0.4.3 OK · V0.4.4 42/42 · V0.4.5 26/26 · **V0.4.6 27/27**. Unitarias 65/65, integración 141/141.
 Las regresiones no se corren contra Preview: crean negocios y administradores, y la BD de Preview no debe recibir datos de prueba masivos.
