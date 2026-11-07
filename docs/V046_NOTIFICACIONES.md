@@ -51,7 +51,7 @@ Citas: no es una agenda médica. La tabla `appointments` solo guarda tarjeta, fe
 ## Envío
 - Recompensa / progreso: se encolan en la misma transacción de la compra y se envían justo después del commit (máximo 2.5 s; si no alcanza, quedan en cola). Un fallo de push nunca afecta a la caja.
 - Programados (regreso, citas, reintentos, pospuestos): `GET /api/internal/notifications/run` con `Authorization: Bearer $CRON_SECRET` (≥32 caracteres).
-- **Vercel Cron**: en Hobby solo una vez al día (precisión ±59 min); en Pro hasta cada minuto (vercel.com/docs/cron-jobs/usage-and-pricing). Con Hobby: `NOTIFICATION_JOB_INTERVAL_HOURS=24`. Alternativa sin costo: un programador externo (por ejemplo un cron en el servidor de VLUX) que llame la ruta cada hora. **No se configuró ningún cron**: requiere autorización y solo correría en Production.
+- **Vercel Cron**: en Hobby solo una vez al día (precisión ±59 min); en Pro hasta cada minuto (vercel.com/docs/cron-jobs/usage-and-pricing). Con Hobby: `NOTIFICATION_JOB_INTERVAL_HOURS=24`. Alternativa sin costo: un programador externo (por ejemplo un cron en el servidor de VLUX) que llame la ruta cada hora. Capacidad medida: ~125 avisos/s por ejecución (ver `V046_COSTOS.md`). Pendiente V0.4.7: purga de la cola por antigüedad. **No se configuró ningún cron**: requiere autorización y solo correría en Production.
 
 ## Configuración (variables de entorno)
 | Variable | Uso |
@@ -60,6 +60,7 @@ Citas: no es una agenda médica. La tabla `appointments` solo guarda tarjeta, fe
 | `VAPID_SUBJECT` | `mailto:accesos@vlux.com.mx` o una URL https |
 | `CRON_SECRET` | Protege la tarea programada |
 | `NOTIFICATION_JOB_INTERVAL_HOURS` | 1 (por omisión) o 24 con Vercel Hobby |
+| `NOTIFICATION_JOB_BUDGET_MS` | 2000–14000, por omisión 11000 (la función corta a los 15 s). ≈1,300 avisos por ejecución |
 
 ## Pruebas
 - Unitarias (U-PUSH-1…9): el cifrado se valida en ambos sentidos contra `http_ece` (implementación de referencia de M. Thomson, coautor de RFC 8188/8291); JWT VAPID verificado con la llave pública; lista de servicios; horas de silencio; ventana de citas.

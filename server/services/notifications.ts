@@ -404,7 +404,7 @@ export async function dispatchBusiness(businessId: string, opts: { cardId?: stri
 /** Tarea programada: recorre negocios con avisos pendientes o recordatorios activos. */
 export async function runNotificationJob(opts: { budgetMs?: number } = {}) {
   const started = Date.now();
-  const budget = opts.budgetMs ?? 50_000;
+  const budget = opts.budgetMs ?? 11_000;
   const ids = (await getPool().query('SELECT business_id FROM notification_due_businesses(500)')).rows.map((r) => r.business_id as string);
   const summary = { businesses: ids.length, processed: 0, queued: 0, sent: 0, failed: 0, skipped: 0, postponed: 0, expired: 0, outOfTime: false };
   for (const id of ids) {

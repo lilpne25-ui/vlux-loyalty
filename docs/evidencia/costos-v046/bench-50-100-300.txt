@@ -1,0 +1,51 @@
+=== N=50
+{
+  "negocios": 50,
+  "tarjetasPorNegocio": 300,
+  "latenciaPushMs": 40,
+  "sembradoMs": 1519,
+  "enCola": 15000,
+  "enviados": 15000,
+  "llamadasPush": 15000,
+  "ejecuciones": 3,
+  "msTotal": 120096,
+  "avisosPorSegundo": 125,
+  "maxMsPorEjecucion": 41353,
+  "bytesTablaSuscripciones": 63102976,
+  "bytesTablaAvisos": 55107584,
+  "pendientes": 0
+}
+=== N=100
+{
+  "negocios": 100,
+  "tarjetasPorNegocio": 300,
+  "latenciaPushMs": 40,
+  "sembradoMs": 2597,
+  "enCola": 30000,
+  "enviados": 30000,
+  "llamadasPush": 30000,
+  "ejecuciones": 6,
+  "msTotal": 236133,
+  "avisosPorSegundo": 127,
+  "maxMsPorEjecucion": 50692,
+  "bytesTablaSuscripciones": 40730624,
+  "bytesTablaAvisos": 37904384,
+  "pendientes": 0
+}
+=== N=300
+{
+  "negocios": 300,
+  "tarjetasPorNegocio": 300,
+  "latenciaPushMs": 40,
+  "sembradoMs": 8183,
+  "enCola": 89990,
+  "enviados": 89990,
+  "llamadasPush": 89990,
+  "ejecuciones": 15,
+  "msTotal": 709275,
+  "avisosPorSegundo": 127,
+  "maxMsPorEjecucion": 50728,
+  "bytesTablaSuscripciones": 70959104,
+  "bytesTablaAvisos": 61693952,
+  "pendientes": 0
+}

@@ -237,13 +237,15 @@ export function buildApp() {
   pushRoute('unsubscribe', unsubscribe);
   pushRoute('status', subscriptionStatus);
 
+  const jobBudgetMs = () => { const v = Number(process.env.NOTIFICATION_JOB_BUDGET_MS); return Number.isFinite(v) && v >= 2000 && v <= 14_000 ? v : 11_000; };
   // Tarea programada (Vercel Cron u otro programador). Requiere CRON_SECRET (≥32 caracteres) como Bearer.
   api.get('/internal/notifications/run', async (c) => {
     const expected = process.env.CRON_SECRET || '';
     const got = (c.req.header('authorization') || '').replace(/^Bearer /, '');
     if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
     c.header('Cache-Control', 'no-store');
-    return c.json(await runNotificationJob({ budgetMs: 50_000 }));
+    // La función de Vercel corta a los 15 s (maxDuration en build-vercel.mjs): el presupuesto queda por debajo.
+    return c.json(await runNotificationJob({ budgetMs: jobBudgetMs() }));
   });
 
   // ---------- PWA: vincular la app instalada (V0.2.2) ----------
