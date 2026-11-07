@@ -7,6 +7,7 @@
 //   máximo de promociones por mes por negocio, caducidad de cada aviso y reintentos acotados.
 // - El contenido no lleva datos sensibles: nombre del negocio, recompensa del programa y un enlace a la tarjeta.
 import { z } from 'zod';
+import { featureEnabled, featureStates } from '../features';
 import { withTenant, getPool, type Tx } from '../db';
 import { config } from '../config';
 import { AppError, notFound } from '../errors';
@@ -27,7 +28,7 @@ let fetchOverride: typeof fetch | undefined;
 /** Solo pruebas: sustituye la red por un servicio push simulado. */
 export function __setPushFetch(f: typeof fetch | undefined) { fetchOverride = f; }
 
-export function pushConfig(): VapidConfig | null { return vapidFromEnv(); }
+export function pushConfig(): VapidConfig | null { return featureEnabled('webPush') ? vapidFromEnv() : null; }
 function extraHosts() {
   // Hosts adicionales SOLO fuera de producción (pruebas con un servicio push simulado).
   if (config.isProduction) return [];
@@ -37,6 +38,8 @@ export function publicPushConfig() {
   const v = pushConfig();
   return v ? { enabled: true, publicKey: v.publicKey } : { enabled: false, publicKey: null };
 }
+
+const featureOff = () => new AppError(409, 'feature_disabled', 'Esta función todavía no está disponible en tu plan.');
 
 // ---------- Ajustes del negocio ----------
 export const settingsSchema = z.object({
@@ -186,7 +189,7 @@ export async function enqueueAfterStamps(tx: Tx, businessId: string, cardId: str
     if (id) out.push(id);
     return out;
   }
-  if (!unlocked && s.progressEnabled) {
+  if (!unlocked && s.progressEnabled && featureEnabled('autoReminders')) {
     const card = (await tx.query('SELECT stamp_balance, cycle FROM cards WHERE id = $1', [cardId])).rows[0];
     const remaining = rule.stampsRequired - card.stamp_balance;
     if (remaining >= 1 && remaining === s.progressRemaining && (await hasSubscriber(tx, cardId, 'reminders'))) {
@@ -201,6 +204,7 @@ export async function enqueueAfterStamps(tx: Tx, businessId: string, cardId: str
 /** Promoción autorizada por el dueño: solo a quien eligió "Promociones". Máximo PROMOTIONS_PER_30_DAYS por negocio. */
 export const promotionSchema = z.object({ title: z.string().trim().min(3).max(60), body: z.string().trim().min(5).max(160) }).strict();
 export async function createPromotion(session: StaffSession, raw: unknown) {
+  if (!featureEnabled('promotions')) throw featureOff();
   if (!pushConfig()) throw new AppError(409, 'push_disabled', 'Las notificaciones aún no están configuradas en este servicio.');
   const input = promotionSchema.parse(raw);
   return withTenant(session.businessId, async (tx) => {
@@ -220,6 +224,7 @@ export async function createPromotion(session: StaffSession, raw: unknown) {
 // ---------- Citas (preparación; sin datos clínicos) ----------
 export const appointmentSchema = z.object({ cardCode: z.string().trim().toUpperCase().regex(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/), startsAt: z.string().datetime({ offset: true }) }).strict();
 export async function createAppointment(session: StaffSession, raw: unknown) {
+  if (!featureEnabled('appointments')) throw featureOff();
   const input = appointmentSchema.parse(raw);
   const starts = new Date(input.startsAt);
   if (starts.getTime() < Date.now() + 10 * 60_000 || starts.getTime() > Date.now() + 180 * 86400_000) throw new AppError(422, 'validation', 'La cita debe ser futura (máximo 6 meses).');
@@ -262,7 +267,7 @@ export async function scheduleDue(tx: Tx, businessId: string) {
   const s = await loadSettings(tx);
   const b = await businessInfo(tx);
   let queued = 0;
-  if (s.returnEnabled) {
+  if (s.returnEnabled && featureEnabled('autoReminders')) {
     const rows = (await tx.query(
       `SELECT c.id, extract(epoch FROM c.last_visit_at)::bigint AS lv FROM cards c
         WHERE c.status = 'active' AND c.last_visit_at < now() - make_interval(days => $1)
@@ -274,7 +279,7 @@ export async function scheduleDue(tx: Tx, businessId: string) {
       if (await enqueue(tx, { businessId, cardId: r.id, category: 'reminders', template: 'return', dedupeKey: `return:${r.id}:${r.lv}`, title: clip(`${b.name} te extraña`, 60), body: 'Tu tarjeta sigue guardando tus visitas. Cuando vuelvas, muéstrala en caja.', url: `/n/${b.slug}`, expiresHours: 72 })) queued++;
     }
   }
-  if (s.appointmentsEnabled) {
+  if (s.appointmentsEnabled && featureEnabled('appointments')) {
     const win = appointmentWindow();
     const rows = (await tx.query(
       `SELECT a.id, a.card_id, a.starts_at FROM appointments a JOIN cards c ON c.id = a.card_id
@@ -449,7 +454,7 @@ export async function communicationOverview(session: StaffSession) {
       pushConfigured: !!pushConfig(), settings, activeCards: cards,
       subscribers: { cards: subs.cards, devices: subs.devices, rewards: subs.rewards, reminders: subs.reminders, promotions: subs.promotions, optOutsLast30Days: optOuts },
       last30Days: Object.fromEntries(totals.map((t) => [t.template, { total: t.total, delivered: t.delivered, devices: t.devices }])),
-      promotions, promotionsLimit: { used: promoUsed, max: PROMOTIONS_PER_30_DAYS }, appointments,
+      promotions, promotionsLimit: { used: promoUsed, max: PROMOTIONS_PER_30_DAYS }, appointments, features: featureStates(),
     };
   });
 }

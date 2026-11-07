@@ -7,6 +7,7 @@
 //    solo llegan rebotes (DSN) al buzón del remitente. TLS siempre con verificación de certificado y nombre de host.
 //  - sin configurar                                       → no se envía nada; la UI ofrece copiar el enlace.
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { featureEnabled } from '../features';
 import nodemailer from 'nodemailer';
 
 export interface OutgoingEmail { to: string; subject: string; html: string; text: string; idempotencyKey: string; tags?: Record<string, string> }
@@ -133,7 +134,7 @@ export function emailConfigFromEnv(env = process.env): EmailConfig {
   if (kind === 'resend' && env.RESEND_API_KEY && /<[^@\s]+@[^>\s]+>$|^[^@\s]+@[^@\s]+$/.test(from)) {
     return { provider: new ResendProvider(env.RESEND_API_KEY, from, env.EMAIL_REPLY_TO || undefined), state: 'configured', from, webhookSecret };
   }
-  if (kind === 'smtp' || kind === 'stalwart') {
+  if ((kind === 'smtp' || kind === 'stalwart') && featureEnabled('smtpEmail', env)) {
     const st = smtpSettingsFromEnv(env);
     if (st) return { provider: new SmtpProvider(st), state: 'configured', from: st.from, webhookSecret };
   }
