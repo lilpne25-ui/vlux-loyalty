@@ -58,3 +58,5 @@ El código del RC **no depende** de 0015 (solo permisos e índices): el Preview 
 - Toda tabla nueva: `ENABLE ROW LEVEL SECURITY`, permisos explícitos a `vlux_app` y actualizar `ops/grants.sql` (la prueba 5 falla si no).
 - Índices en tablas grandes de producción: crearlos antes con `CREATE INDEX CONCURRENTLY` (mismo nombre) y la migración usa `IF NOT EXISTS`.
 - Nunca correr `scripts/migrate.ts down` contra Preview ni producción: es solo para desarrollo.
+
+| 0016_tenant_isolation | Aislamiento por RLS en nueve tablas, alcances `app.scope`, envolturas de funciones de plataforma, UPDATE por columnas. **No aplicada en Preview.** Pegar `0016_pegar_en_supabase.sql` DESPUÉS de desplegar el código. Reversa: `0016_tenant_isolation.down.sql`. |

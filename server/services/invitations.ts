@@ -4,7 +4,7 @@
 // nunca se sobrescribe una contraseña existente.
 import { z } from 'zod';
 import { config } from '../config';
-import { getPool, withTenant, withTx, type Tx } from '../db';
+import { getPool, q, runWithScope, withTenant, type Tx } from '../db';
 import { AppError, notFound } from '../errors';
 import { CODE_ALPHABET, DUMMY_PASSWORD_HASH, hashPassword, newToken, sha256, verifyPassword } from '../security';
 import { randomInt } from 'node:crypto';
@@ -83,7 +83,8 @@ async function auditInvitation(businessId: string, by: Inviter, action: string, 
 }
 
 export async function inviteStaff(p: { businessId: string; email: string; displayName: string; role: Role; by: Inviter; delivery?: Delivery }) {
-  const r = await withTx((tx) => createInvitation(tx, p));
+  // Dentro del negocio destino: la política WITH CHECK impide invitar a otro negocio distinto del declarado.
+  const r = await withTenant(p.businessId, (tx) => createInvitation(tx, p));
   await auditInvitation(p.businessId, p.by, 'invitation.created', r.invitationId, { role: p.role, delivery: r.delivery });
   return r;
 }
@@ -95,46 +96,49 @@ export async function inviteStaff(p: { businessId: string; email: string; displa
  */
 export const shareMethods = ['copied', 'native_share', 'whatsapp_opened', 'qr_shown', 'qr_downloaded', 'confirmed_sent'] as const;
 export async function recordInvitationShare(businessId: string, invitationId: string, method: (typeof shareMethods)[number], by: Inviter) {
-  const r = await getPool().query('SELECT id FROM staff_invitations WHERE id = $1 AND business_id = $2', [invitationId, businessId]);
+  const r = await withTenant(businessId, (tx) => tx.query('SELECT id FROM staff_invitations WHERE id = $1 AND business_id = $2', [invitationId, businessId]));
   if (!r.rowCount) throw notFound('Invitación');
   await auditInvitation(businessId, by, 'invitation.shared', invitationId, { method });
   return { ok: true, method };
 }
 
 export async function listInvitations(businessId: string, role?: Role) {
-  const rows = (await getPool().query(
+  const rows = (await withTenant(businessId, (tx) => tx.query(
     `SELECT i.id, i.email, i.display_name, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.created_at, i.invited_by_type, i.delivery,
             o.status AS email_status, o.attempts AS email_attempts, o.sends_accepted, o.accepted_at AS email_accepted_at, o.delivered_at AS email_delivered_at,
             o.last_error AS email_error, (o.link_enc IS NOT NULL) AS can_email
        FROM staff_invitations i LEFT JOIN email_outbox o ON o.invitation_id = i.id
       WHERE i.business_id = $1 AND ($2::text IS NULL OR i.role = $2) ORDER BY i.created_at DESC LIMIT 50`,
     [businessId, role ?? null],
-  )).rows;
+  ))).rows;
   return rows.map((r) => ({ id: r.id, email: r.email, displayName: r.display_name, role: r.role, status: statusOf(r), expiresAt: r.expires_at, acceptedAt: r.accepted_at, createdAt: r.created_at, invitedBy: r.invited_by_type, delivery: r.delivery,
     emailDelivery: r.email_status ? { status: r.email_status, attempts: r.email_attempts, sendsAccepted: r.sends_accepted, acceptedAt: r.email_accepted_at, deliveredAt: r.email_delivered_at, error: r.email_error, canSend: r.can_email && statusOf(r) === 'pendiente' } : null }));
 }
 
 export async function revokeInvitation(businessId: string, invitationId: string, by: Inviter, role?: Role) {
-  const r = await getPool().query(
-    `UPDATE staff_invitations SET revoked_at = now()
-      WHERE id = $1 AND business_id = $2 AND ($3::text IS NULL OR role = $3) AND accepted_at IS NULL AND revoked_at IS NULL RETURNING id`,
-    [invitationId, businessId, role ?? null],
-  );
+  const r = await withTenant(businessId, async (tx) => {
+    const x = await tx.query(
+      `UPDATE staff_invitations SET revoked_at = now()
+        WHERE id = $1 AND business_id = $2 AND ($3::text IS NULL OR role = $3) AND accepted_at IS NULL AND revoked_at IS NULL RETURNING id`,
+      [invitationId, businessId, role ?? null],
+    );
+    if (x.rowCount) await forgetToken(tx, { invitationId });
+    return x;
+  });
   if (!r.rowCount) throw new AppError(404, 'not_found', 'La invitación no existe o ya no está pendiente.');
-  await forgetToken(getPool(), { invitationId });
   await auditInvitation(businessId, by, 'invitation.revoked', invitationId);
   return { ok: true };
 }
 
 /** Reenvío = nueva invitación con los mismos datos (la anterior queda revocada). Sirve también para vencidas. */
 export async function resendInvitation(businessId: string, invitationId: string, by: Inviter, role?: Role, delivery: Delivery = 'link') {
-  const old = (await getPool().query(
+  const old = (await withTenant(businessId, (tx) => tx.query(
     'SELECT email, display_name, role, accepted_at FROM staff_invitations WHERE id = $1 AND business_id = $2 AND ($3::text IS NULL OR role = $3)',
     [invitationId, businessId, role ?? null],
-  )).rows[0];
+  ))).rows[0];
   if (!old) throw notFound('Invitación');
   if (old.accepted_at) throw new AppError(409, 'already_accepted', 'Esa invitación ya se aceptó.');
-  const r = await withTx((tx) => createInvitation(tx, { businessId, email: old.email, displayName: old.display_name, role: old.role, by, delivery }));
+  const r = await withTenant(businessId, (tx) => createInvitation(tx, { businessId, email: old.email, displayName: old.display_name, role: old.role, by, delivery }));
   await auditInvitation(businessId, by, 'invitation.resent', r.invitationId, { previous: invitationId, delivery });
   return r;
 }
@@ -149,13 +153,14 @@ async function findByCredential(c: Credential) {
     if (!code) return undefined;
     col = 'access_code_hash'; key = sha256(code);
   }
-  return (await getPool().query(
+  // Antes de conocer el negocio: alcance auth, siempre por el hash exacto de un token o código secreto.
+  return (await runWithScope('auth', () => q(
     `SELECT i.id, i.business_id, i.email, i.display_name, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.failed_attempts, i.delivery,
             b.name AS business_name, b.slug, b.status AS business_status, b.primary_color, b.accent_color,
             (SELECT id FROM staff_users u WHERE u.email = i.email) AS user_id
        FROM staff_invitations i JOIN businesses b ON b.id = i.business_id WHERE i.${col} = $1`,
     [key],
-  )).rows[0];
+  ))).rows[0];
 }
 
 const invalidInvite = () => new AppError(404, 'invalid_invitation', 'Esta invitación no es válida. Pide una nueva a quien te invitó.');
@@ -184,18 +189,18 @@ export async function acceptInvitation(raw: unknown) {
   let newHash: string | null = null;
   if (inv.user_id) {
     // Se reserva el intento ANTES de verificar (atómico): peticiones en paralelo no pasan del máximo.
-    const slot = await getPool().query(
+    const slot = await withTenant(inv.business_id, (tx) => tx.query(
       `UPDATE staff_invitations SET failed_attempts = failed_attempts + 1
         WHERE id = $1 AND failed_attempts < $2 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING failed_attempts`, [inv.id, MAX_ATTEMPTS],
-    );
+    ));
     if (!slot.rowCount) throw invalidInvite();
     const u = (await getPool().query('SELECT password_hash, disabled_at FROM staff_users WHERE id = $1', [inv.user_id])).rows[0];
     const ok = await verifyPassword(input.password, u?.password_hash ?? DUMMY_PASSWORD_HASH);
     if (!ok || u.disabled_at) {
-      const r = (await getPool().query(
+      const r = (await withTenant(inv.business_id, (tx) => tx.query(
         `UPDATE staff_invitations SET revoked_at = CASE WHEN failed_attempts >= $2 THEN now() ELSE revoked_at END
          WHERE id = $1 RETURNING failed_attempts`, [inv.id, MAX_ATTEMPTS],
-      )).rows[0];
+      ))).rows[0];
       await withTenant(inv.business_id, (tx) => audit(tx, inv.business_id, { type: 'system', id: null }, 'invitation.failed_attempt', 'staff_invitation', inv.id, { attempts: r.failed_attempts }));
       throw new AppError(401, 'invalid_credentials', r.failed_attempts >= MAX_ATTEMPTS
         ? 'Demasiados intentos. La invitación se canceló; pide una nueva.'
@@ -205,7 +210,7 @@ export async function acceptInvitation(raw: unknown) {
     newHash = await hashPassword(passwordSchema.parse(input.password));
   }
 
-  const result = await withTx(async (tx) => {
+  const result = await withTenant(inv.business_id, async (tx) => {
     // Marca la invitación como usada de forma atómica: solo una aceptación gana.
     const claimed = await tx.query(
       `UPDATE staff_invitations SET accepted_at = now()

@@ -1,0 +1,15 @@
+v03-control-center: BLOCKED K Google Wallet: sin cuenta de emisor ni service account (no se simula).
+v03-control-center: Total: 24 PASS, 0 FAIL, 1 BLOCKED (K)
+v02-tres-dispositivos: Total: 29 PASS, 0 FAIL
+v021-operacion: Total: 14 PASS, 0 FAIL
+v046-accesos: Total: 27 PASS, 0 FAIL
+e2e-v045: Total: 26 PASS, 0 FAIL
+e2e-v044: Total: 42 PASS, 0 FAIL
+/tmp/claude-0/-home-user-vlux-loyalty/be5da8d8-5ed4-5ced-b4a4-20e4cd8d9b50/scratchpad/reg2/v03.log:Total: 24 PASS, 0 FAIL, 1 BLOCKED (K)
+/tmp/claude-0/-home-user-vlux-loyalty/be5da8d8-5ed4-5ced-b4a4-20e4cd8d9b50/scratchpad/reg2/v042.log:Total 36 · FAIL 0
+      1 Total chromium: 40 PASS, 0 FAIL
+      1 Total: 14 PASS, 0 FAIL
+      1 Total: 26 PASS, 0 FAIL
+      1 Total: 29 PASS, 0 FAIL
+      1 Total: 35 PASS, 0 FAIL
+      1 Total: 42 PASS, 0 FAIL

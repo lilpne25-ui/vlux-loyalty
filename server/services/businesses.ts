@@ -23,12 +23,13 @@ export async function createBusiness(raw: CreateBusinessInput) {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [input.slug, input.name, input.city, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl, input.isDemo],
     )).rows[0].id as string;
+    // Desde aquí la transacción pertenece al negocio recién creado (RLS de 0016 sobre membresías y suscripción).
+    await tx.query("SELECT set_config('app.business_id', $1, true)", [biz]);
     const existing = (await tx.query('SELECT id FROM staff_users WHERE email = $1', [input.owner.email])).rows[0];
     const userId = existing
       ? existing.id
       : (await tx.query('INSERT INTO staff_users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id', [input.owner.email, passwordHash, input.owner.displayName])).rows[0].id;
     await tx.query("INSERT INTO staff_memberships (business_id, user_id, role) VALUES ($1, $2, 'OWNER')", [biz, userId]);
-    await tx.query("SELECT set_config('app.business_id', $1, true)", [biz]);
     await insertRule(tx, biz, 1, input.rules, userId);
     // V0.3: todo negocio nace con registro comercial (piloto sin costo) para que el Control Center lo cuente.
     await tx.query(

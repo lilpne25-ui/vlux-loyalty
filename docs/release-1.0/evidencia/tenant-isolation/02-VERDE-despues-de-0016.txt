@@ -1,0 +1,55 @@
+ok 1 - A no puede revocar, reenviar ni listar invitaciones de B
+ok 2 - A no puede desactivar ni emitir restablecimiento a un empleado de B
+ok 3 - A no puede ver, exportar, anonimizar ni operar clientes y tarjetas de B
+ok 4 - la sesión de A no sirve como sesión de B ni tras cambiar de cookie
+ok 5 - rutas del Control Center y funciones de plataforma no responden a sesiones de negocio
+ok 6 - solicitudes simultáneas de A y B (mezcladas) nunca se cruzan
+ok 7 - contraseña incorrecta o negocio ajeno en el inicio de sesión no crea sesiones
+ok 8 - business_deletions: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 9 - business_deletions: sin contexto ni alcance no se ve ninguna fila
+ok 10 - business_deletions: un identificador de negocio inválido falla de forma segura
+ok 11 - business_subscriptions: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 12 - business_subscriptions: sin contexto ni alcance no se ve ninguna fila
+ok 13 - business_subscriptions: un identificador de negocio inválido falla de forma segura
+ok 14 - card_access_tokens: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 15 - card_access_tokens: sin contexto ni alcance no se ve ninguna fila
+ok 16 - card_access_tokens: un identificador de negocio inválido falla de forma segura
+ok 17 - email_events: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 18 - email_events: sin contexto ni alcance no se ve ninguna fila
+ok 19 - email_events: un identificador de negocio inválido falla de forma segura
+ok 20 - email_outbox: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 21 - email_outbox: sin contexto ni alcance no se ve ninguna fila
+ok 22 - email_outbox: un identificador de negocio inválido falla de forma segura
+ok 23 - platform_audit_events: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 24 - platform_audit_events: sin contexto ni alcance no se ve ninguna fila
+ok 25 - platform_audit_events: un identificador de negocio inválido falla de forma segura
+ok 26 - staff_invitations: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 27 - staff_invitations: sin contexto ni alcance no se ve ninguna fila
+ok 28 - staff_invitations: un identificador de negocio inválido falla de forma segura
+ok 29 - staff_memberships: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 30 - staff_memberships: sin contexto ni alcance no se ve ninguna fila
+ok 31 - staff_memberships: un identificador de negocio inválido falla de forma segura
+ok 32 - staff_sessions: con el contexto del negocio A no se ve ninguna fila de otros negocios
+ok 33 - staff_sessions: sin contexto ni alcance no se ve ninguna fila
+ok 34 - staff_sessions: un identificador de negocio inválido falla de forma segura
+ok 35 - el negocio A sí ve sus propias filas (no se bloquea a todos)
+ok 36 - INSERT hacia otro negocio es rechazado por WITH CHECK
+ok 37 - UPDATE sobre filas de otro negocio no afecta ninguna fila
+ok 38 - UPDATE no puede trasladar una fila propia a otro negocio
+ok 39 - vlux_app no puede borrar filas de las nueve tablas
+ok 40 - un alcance inventado o mal escrito no concede acceso
+ok 41 - alcance auth: solo lectura de sesiones, membresías, tokens e invitaciones; escribe únicamente revocaciones
+ok 42 - alcance platform: lectura transversal acotada; sin acceso a tokens de tarjeta ni salida de correo
+ok 43 - alcance webhook: localiza la salida de correo por id del proveedor y nada más
+ok 44 - las funciones de plataforma exigen alcance platform (no sirven con el contexto de un negocio)
+ok 45 - notification_due_businesses exige alcance worker
+ok 46 - vlux_app no puede cambiarse a un rol con más privilegios ni redefinir las políticas
+ok 47 - el contexto no se filtra entre transacciones de una misma conexión (un solo cliente en el pool)
+ok 48 - cambio legítimo de contexto A→B dentro de la misma conexión y concurrencia de negocios distintos
+ok 49 - PASSWORD de pruebas sigue siendo la esperada (guardia contra fixtures rotos)
+ok 50 - ninguna tabla con business_id admite una política abierta (excepción documentada: INSERT de la bitácora de plataforma)
+ok 51 - todas las tablas de public tienen RLS; vlux_app no es superusuario, no tiene BYPASSRLS y no es dueño de nada
+ok 52 - vlux_app solo puede actualizar columnas permitidas (nunca business_id ni llaves) en las tablas con alcance
+# tests 52
+# pass 52
+# fail 0

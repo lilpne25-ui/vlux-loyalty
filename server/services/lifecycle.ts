@@ -6,7 +6,7 @@
 //    (función platform_purge_business) y deja una lápida + bitácora global.
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { getPool, withTenant, withTx } from '../db';
+import { getPool, q, withTenant, withTx } from '../db';
 import { AppError, notFound } from '../errors';
 import { audit } from './audit';
 import { platformAudit, verifyStepUp, type AdminSession } from './platform-auth';
@@ -73,11 +73,11 @@ export async function deletionPreview(admin: AdminSession, id: string) {
   const b = await current(id);
   const [c, staff, inv, backup] = await Promise.all([
     counts(id),
-    getPool().query(
+    q(
       `SELECT u.email, u.display_name, m.role,
               EXISTS (SELECT 1 FROM staff_memberships o WHERE o.user_id = u.id AND o.business_id <> $1) AS shared
          FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id WHERE m.business_id = $1 ORDER BY m.role, u.display_name`, [id]),
-    getPool().query('SELECT count(*) FILTER (WHERE accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now())::int AS pending, count(*)::int AS total FROM staff_invitations WHERE business_id = $1', [id]),
+    q('SELECT count(*) FILTER (WHERE accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now())::int AS pending, count(*)::int AS total FROM staff_invitations WHERE business_id = $1', [id]),
     lastBackup(admin.adminId, id),
   ]);
   const synthetic = b.is_demo || !!b.synthetic_declared_at;
@@ -98,7 +98,7 @@ export async function deletionPreview(admin: AdminSession, id: string) {
 }
 
 async function lastBackup(adminId: string, businessId: string) {
-  const r = (await getPool().query(
+  const r = (await q(
     `SELECT details->>'sha256' AS sha, created_at FROM platform_audit_events
       WHERE action = 'business.exported' AND admin_id = $1 AND business_id = $2 AND created_at > now() - make_interval(mins => $3)
       ORDER BY created_at DESC LIMIT 1`, [adminId, businessId, BACKUP_WINDOW_MINUTES],
@@ -109,7 +109,7 @@ async function lastBackup(adminId: string, businessId: string) {
 /** Respaldo JSON de UN negocio (sin hashes de contraseñas ni tokens). Queda registrado con su huella SHA-256. */
 export async function exportBusiness(admin: AdminSession, id: string) {
   await current(id);
-  const data = (await getPool().query('SELECT platform_business_export($1) AS j', [id])).rows[0].j;
+  const data = (await q('SELECT platform_business_export($1) AS j', [id])).rows[0].j;
   const body = JSON.stringify({ format: 'vlux-business-export/1', exportedAt: new Date().toISOString(), data }, null, 2);
   const sha = createHash('sha256').update(body).digest('hex');
   await platformAudit(getPool(), admin.adminId, 'business.exported', { businessId: id, entityType: 'business', entityId: id, details: { sha256: sha, bytes: Buffer.byteLength(body) } });
@@ -158,7 +158,7 @@ export async function deleteBusiness(admin: AdminSession, id: string, raw: unkno
 }
 
 export async function listDeletions() {
-  return (await getPool().query(
+  return (await q(
     `SELECT d.slug, d.name, d.was_demo, d.counts, d.reason, d.deleted_at, a.display_name FROM business_deletions d JOIN platform_admins a ON a.id = d.deleted_by ORDER BY d.deleted_at DESC LIMIT 50`,
   )).rows.map((r) => ({ slug: r.slug, name: r.name, wasDemo: r.was_demo, counts: r.counts, reason: r.reason, deletedAt: r.deleted_at, deletedBy: r.display_name }));
 }

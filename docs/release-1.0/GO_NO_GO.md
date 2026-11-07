@@ -100,3 +100,10 @@ Veredicto **sin cambios**: DEMO = GO · PILOTO CONTROLADO = **NO-GO** · GA = NO
 
 ### Qué falta para READY FOR CONTROLLED PILOT
 Los 6 bloqueos abiertos de arriba (#2–#4, #6–#8) más: respuesta al hallazgo H-1 (prueba de lista permitida), restauración ensayada en un proyecto Supabase nuevo (RTO real), decisión sobre el registro de negocio definitivo y migración autorizada del negocio real (`PRODUCTION_DATA_MIGRATION_PLAN.md`).
+
+
+## Actualización 2026-11-07 (rama de endurecimiento RLS · migración 0016)
+- **DEMO = GO · PILOTO = NO-GO · GA = NO-GO** (sin cambio).
+- H-1 (nueve tablas `USING (true)`) y las funciones `SECURITY DEFINER` de plataforma están **corregidas en código y migración y verificadas en PostgreSQL 17 local** (202/202 integración, 76/76 unitarias). **No aplicada en Preview** (`0016_pegar_en_supabase.sql`, tras desplegar el código y con autorización de Vlux).
+- Siguen abiertos: producción separada y planes de pago, respaldo real restaurado, pruebas físicas, revisión legal, monitor externo, credenciales separadas plataforma/tenant (R-1), identidad global (R-2). Resolver RLS no habilita el piloto por sí solo.
+- PR #3 (retirar el respaldo del repositorio público): ver informe; veredicto a nivel de diff SAFE TO MERGE con condiciones.

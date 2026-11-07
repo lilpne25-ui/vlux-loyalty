@@ -50,7 +50,7 @@ for (const d of demos) {
   if (cardFinish) await withTenant(r.businessId, (tx) => tx.query('UPDATE businesses SET card_finish = $2 WHERE id = $1', [r.businessId, cardFinish]));
   const hash = await hashPassword(pw);
   const userId = (await getPool().query('INSERT INTO staff_users (email, password_hash, display_name) VALUES ($1, $2, $3) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id', [employee.email, hash, employee.displayName])).rows[0].id;
-  await getPool().query("INSERT INTO staff_memberships (business_id, user_id, role) VALUES ($1, $2, 'EMPLOYEE') ON CONFLICT DO NOTHING", [r.businessId, userId]);
+  await withTenant(r.businessId, (tx) => tx.query("INSERT INTO staff_memberships (business_id, user_id, role) VALUES ($1, $2, 'EMPLOYEE') ON CONFLICT DO NOTHING", [r.businessId, userId]));
   console.log(`creado: ${d.name} → /n/${d.slug} · dueño ${d.owner.email} · caja ${employee.email}`);
 }
 await closePool();

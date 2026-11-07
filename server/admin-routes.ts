@@ -9,7 +9,7 @@ import { config } from './config';
 import { AppError } from './errors';
 import { rateLimit } from './ratelimit';
 import { uuidSchema } from './validation';
-import { getPool } from './db';
+import { getPool, runWithScope } from './db';
 import {
   acceptAdminInvite, platformAudit, adminLogin, adminLogout, bootstrapFirstAdmin, enrollConfirm, enrollStart, getAdminSession, inviteAdmin,
   listAdmins, listAdminSessions, needsBootstrap, requireMfa, revokeAdminSession, setAdminDisabled, verifySecondFactor, type AdminSession,
@@ -47,7 +47,9 @@ export function buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBod
   const requireAdmin = async (c: Context<AdminEnv>, next: Next) => {
     c.set('admin', requireMfa(await session(c)));
     if (c.req.method !== 'GET') await rateLimit(`admin-write:${c.get('admin').adminId}`, 120, 60_000);
-    await next();
+    // Único punto donde nace el alcance «platform»: solo con sesión de administrador completa (2FA). Todas las transacciones
+    // de esta solicitud lo declaran a PostgreSQL (migración 0016); las rutas sin sesión completa NO lo reciben.
+    await runWithScope('platform', () => next());
   };
   const inviteLink = (c: Context, token: string) => `${appLinkBase(c)}/invitacion#${token}`;
 

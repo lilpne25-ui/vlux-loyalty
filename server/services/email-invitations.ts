@@ -2,7 +2,7 @@
 // Orden garantizado: 1) la invitación y su fila de outbox se guardan en la MISMA transacción (createInvitation);
 // 2) al pedir el envío se marca "requested" y se confirma; 3) recién entonces se llama al proveedor; 4) se registra el
 // resultado. Si el proceso muere entre 3 y 4, el reintento usa la misma llave de idempotencia del intento.
-import { getPool, withTenant, withTx, type Tx } from '../db';
+import { getPool, runWithScope, withTenant, withTx, type Tx } from '../db';
 import { AppError, notFound } from '../errors';
 import { decryptSecret, encryptSecret } from '../totp';
 import { emailConfigFromEnv, verifyWebhookSignature } from '../email/provider';
@@ -43,7 +43,7 @@ export function emailState() {
 export async function sendInvitationEmail(p: { adminId: string; businessId: string; invitationId: string; linkBase: string; assetBase: string }) {
   const cfg = emailConfigFromEnv();
   // 1) Reserva del envío (transacción corta y confirmada antes de hablar con el proveedor).
-  const job = await withTx(async (tx) => {
+  const job = await withTenant(p.businessId, async (tx) => {
     const r = (await tx.query(
       `SELECT o.id, o.status, o.link_enc, o.attempts, o.sends_accepted, o.requested_at, o.to_email,
               i.display_name, i.role, i.expires_at, i.accepted_at, i.revoked_at, b.name AS business_name, b.status AS business_status
@@ -70,7 +70,7 @@ export async function sendInvitationEmail(p: { adminId: string; businessId: stri
   });
 
   const finish = async (status: EmailStatus, extra: { messageId?: string; error?: string } = {}) => {
-    await withTx(async (tx) => {
+    await withTenant(p.businessId, async (tx) => {
       await tx.query(
         `UPDATE email_outbox SET status = $2, provider_message_id = coalesce($3, provider_message_id), last_error = $4,
            accepted_at = CASE WHEN $2 = 'accepted' THEN now() ELSE accepted_at END,
@@ -115,8 +115,12 @@ export async function handleEmailWebhook(headers: { id?: string | null; timestam
   const map = EVENT_MAP[evt.type ?? ''] ?? { kind: 'other' };
   const msgId = evt.data?.email_id;
   if (!msgId) return { ok: true, matched: false };
-  return withTx(async (tx) => {
-    const o = (await tx.query('SELECT id, business_id, status FROM email_outbox WHERE provider_message_id = $1 FOR UPDATE', [msgId])).rows[0];
+  // 1) Localizar la salida por el id que asignó el proveedor (no hay negocio todavía): alcance webhook, solo lectura.
+  const found = (await runWithScope('webhook', () => withTx((tx) => tx.query('SELECT id, business_id FROM email_outbox WHERE provider_message_id = $1', [msgId])))).rows[0];
+  if (!found) return { ok: true, matched: false };
+  // 2) Todo lo demás ocurre dentro del negocio dueño de esa salida.
+  return withTenant(found.business_id as string, async (tx) => {
+    const o = (await tx.query('SELECT id, business_id, status FROM email_outbox WHERE id = $1 FOR UPDATE', [found.id])).rows[0];
     if (!o) return { ok: true, matched: false };
     const ins = await tx.query('INSERT INTO email_events (outbox_id, business_id, event_key, kind, detail) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (event_key) DO NOTHING RETURNING id',
       [o.id, o.business_id, headers.id, map.kind, String(evt.type).slice(0, 60)]);

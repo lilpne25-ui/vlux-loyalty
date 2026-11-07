@@ -102,10 +102,16 @@ test('T07: la vista previa muestra conteos, personal compartido y bloqueos; sin 
   // Defensa en profundidad: la función de BD también lo rechaza aunque se llame directamente.
   const app = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await app.connect();
-  await assert.rejects(app.query('SELECT platform_purge_business($1, $2)', [b.businessId, b.slug]), /clientes reales/);
-  // vlux_app no puede borrar filas directamente.
-  await assert.rejects(app.query('DELETE FROM businesses WHERE id = $1', [b.businessId]), /permission denied/);
-  await app.end();
+  try {
+    // 0016: la función exige alcance de plataforma; sin él ni siquiera llega a evaluar las reglas de negocio.
+    await assert.rejects(app.query('SELECT platform_purge_business($1, $2)', [b.businessId, b.slug]), /alcance de plataforma requerido/);
+    await app.query('BEGIN');
+    await app.query("SELECT set_config('app.scope', 'platform', true)");
+    await assert.rejects(app.query('SELECT platform_purge_business($1, $2)', [b.businessId, b.slug]), /clientes reales/);
+    await app.query('ROLLBACK');
+    // vlux_app no puede borrar filas directamente.
+    await assert.rejects(app.query('DELETE FROM businesses WHERE id = $1', [b.businessId]), /permission denied/);
+  } finally { await app.end(); }
 });
 
 test('T08–T09: eliminación segura de un negocio sintético; el personal compartido se conserva', async () => {

@@ -8,7 +8,7 @@
 // - El contenido no lleva datos sensibles: nombre del negocio, recompensa del programa y un enlace a la tarjeta.
 import { z } from 'zod';
 import { featureEnabled, featureStates } from '../features';
-import { withTenant, getPool, type Tx } from '../db';
+import { withTenant, runWithScope, withTx, type Tx } from '../db';
 import { config } from '../config';
 import { AppError, notFound } from '../errors';
 import { audit } from './audit';
@@ -410,7 +410,7 @@ export async function dispatchBusiness(businessId: string, opts: { cardId?: stri
 export async function runNotificationJob(opts: { budgetMs?: number } = {}) {
   const started = Date.now();
   const budget = opts.budgetMs ?? 11_000;
-  const ids = (await getPool().query('SELECT business_id FROM notification_due_businesses(500)')).rows.map((r) => r.business_id as string);
+  const ids = (await runWithScope('worker', () => withTx((tx) => tx.query('SELECT business_id FROM notification_due_businesses(500)')))).rows.map((r) => r.business_id as string);
   const summary = { businesses: ids.length, processed: 0, queued: 0, sent: 0, failed: 0, skipped: 0, postponed: 0, expired: 0, outOfTime: false };
   for (const id of ids) {
     if (Date.now() - started > budget) { summary.outOfTime = true; break; }

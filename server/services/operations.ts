@@ -4,7 +4,7 @@
 //  - reemisión del enlace personal de una tarjeta (revoca los anteriores),
 //  - anulación auditada de una compra registrada por error.
 import { z } from 'zod';
-import { getPool, withTenant, withTx } from '../db';
+import { getPool, q, runWithScope, withTenant, withTx } from '../db';
 import { AppError, notFound } from '../errors';
 import { hashPassword, newToken, sha256, verifyPassword } from '../security';
 import { passwordSchema } from '../validation';
@@ -24,10 +24,11 @@ export async function changePassword(session: StaffSession, raw: unknown) {
   if (!u || !(await verifyPassword(input.currentPassword, u.password_hash))) throw new AppError(401, 'invalid_credentials', 'La contraseña actual no es correcta.');
   if (input.currentPassword === input.newPassword) throw new AppError(422, 'validation', 'La nueva contraseña debe ser distinta.');
   const hash = await hashPassword(input.newPassword);
-  await withTx(async (tx) => {
+  // Revoca las demás sesiones del usuario en TODOS sus negocios: alcance auth (solo revocaciones).
+  await runWithScope('auth', () => withTx(async (tx) => {
     await tx.query('UPDATE staff_users SET password_hash = $2, must_change_password = false, failed_logins = 0, locked_until = NULL WHERE id = $1', [session.userId, hash]);
     await tx.query('UPDATE staff_sessions SET revoked_at = now() WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL', [session.userId, session.sessionId]);
-  });
+  }));
   await withTenant(session.businessId, (tx) => audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'staff.password_changed', 'staff_user', session.userId));
   return { ok: true };
 }
@@ -45,7 +46,7 @@ async function issueResetToken(userId: string) {
 
 /** El dueño emite un enlace de restablecimiento para un empleado de SU negocio. */
 export async function ownerIssueEmployeeReset(session: StaffSession, membershipId: string) {
-  const m = (await getPool().query('SELECT user_id, role FROM staff_memberships WHERE id = $1 AND business_id = $2', [membershipId, session.businessId])).rows[0];
+  const m = (await withTenant(session.businessId, (tx) => tx.query('SELECT user_id, role FROM staff_memberships WHERE id = $1 AND business_id = $2', [membershipId, session.businessId]))).rows[0];
   if (!m) throw notFound('Empleado');
   if (m.role === 'OWNER') throw new AppError(422, 'cannot_change_owner', 'La contraseña del dueño se cambia desde su propia cuenta.');
   const r = await issueResetToken(m.user_id);
@@ -59,7 +60,8 @@ export async function ownerIssueEmployeeReset(session: StaffSession, membershipI
  * que además cierra sus sesiones abiertas. La cuenta es la misma en todos sus negocios (no se duplica).
  */
 export async function adminIssueStaffReset(businessId: string, membershipId: string) {
-  const m = (await getPool().query(
+  // Control Center (alcance platform vía requireAdmin): cuenta también membresías en otros negocios.
+  const m = (await q(
     `SELECT m.user_id, m.role, m.active, u.disabled_at, u.display_name,
             (SELECT count(*)::int FROM staff_memberships o WHERE o.user_id = m.user_id AND o.business_id <> m.business_id AND o.active) AS other_businesses
        FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id WHERE m.id = $1 AND m.business_id = $2`, [membershipId, businessId],
@@ -83,7 +85,7 @@ export async function platformIssueReset(email: string) {
 export async function resetPasswordWithToken(raw: unknown) {
   const input = resetWithTokenSchema.parse(raw);
   const hash = await hashPassword(input.newPassword);
-  const ok = await withTx(async (tx) => {
+  const ok = await runWithScope('auth', () => withTx(async (tx) => {
     const t = (await tx.query('SELECT id, user_id FROM password_reset_tokens WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now() FOR UPDATE', [sha256(input.token)])).rows[0];
     if (!t) return null;
     await tx.query('UPDATE password_reset_tokens SET used_at = now() WHERE id = $1', [t.id]);
@@ -91,7 +93,7 @@ export async function resetPasswordWithToken(raw: unknown) {
     await tx.query('UPDATE staff_sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [t.user_id]);
     const businesses = (await tx.query('SELECT business_id FROM staff_memberships WHERE user_id = $1', [t.user_id])).rows;
     return businesses.map((r) => ({ b: r.business_id as string, u: t.user_id as string }));
-  });
+  }));
   if (!ok) throw new AppError(400, 'invalid_reset_link', 'El enlace no es válido o ya venció. Pide uno nuevo.');
   for (const { b, u } of ok) await withTenant(b, (tx) => audit(tx, b, { type: 'staff', id: u }, 'staff.password_reset', 'staff_user', u));
   return { ok: true };
@@ -105,7 +107,7 @@ export async function reissueCardLink(session: StaffSession, cardId: string) {
     if (!card) throw notFound('Tarjeta');
     await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'card.link_reissued', 'card', cardId);
   });
-  await withTx(async (tx) => {
+  await withTenant(session.businessId, async (tx) => {
     await tx.query('UPDATE card_access_tokens SET revoked_at = now() WHERE card_id = $1 AND business_id = $2 AND revoked_at IS NULL', [cardId, session.businessId]);
     await tx.query('INSERT INTO card_access_tokens (token_hash, card_id, business_id) VALUES ($1, $2, $3)', [sha256(token), cardId, session.businessId]);
   });

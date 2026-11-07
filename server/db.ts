@@ -7,6 +7,7 @@
 // entre invocaciones), pocas conexiones por instancia (PG_POOL_MAX), cierre de inactivas y
 // reintento SOLO al obtener la conexión o al abrir la transacción (nunca a mitad de una
 // transacción, para no duplicar sellos).
+import { AsyncLocalStorage } from 'node:async_hooks';
 import pg from 'pg';
 import { config } from './config';
 import { pgSsl, stripSslParams } from './pgssl';
@@ -46,6 +47,25 @@ export async function closePool() {
 
 export type Tx = pg.PoolClient;
 
+/**
+ * Alcance de la transacción (migración 0016). Declara de dónde viene la autoridad cuando NO hay un negocio fijado:
+ *   auth     antes de conocer el negocio (iniciar sesión, resolver sesión/token de tarjeta/invitación por su llave secreta);
+ *   platform Control Center, tras validar la sesión del administrador con 2FA;
+ *   webhook  devoluciones firmadas del proveedor de correo;
+ *   worker   tarea programada de avisos.
+ * Se propaga con AsyncLocalStorage y se escribe con set_config(..., true) al abrir CADA transacción: vive solo en ella
+ * (seguro con el Transaction Pooler). Sin alcance ni negocio, las tablas gobernadas por 0016 no devuelven filas.
+ */
+export type Scope = 'auth' | 'platform' | 'webhook' | 'worker';
+const SCOPES: ReadonlySet<string> = new Set<Scope>(['auth', 'platform', 'webhook', 'worker']);
+const scopeStore = new AsyncLocalStorage<Scope>();
+/** Ejecuta fn y todo lo que invoque (incluidas sus transacciones) con ese alcance. Úsalo en el borde mínimo posible. */
+export function runWithScope<T>(scope: Scope, fn: () => Promise<T>): Promise<T> {
+  if (!SCOPES.has(scope)) throw new Error(`Alcance inválido: ${scope}`);
+  return scopeStore.run(scope, fn);
+}
+export const currentScope = (): Scope | undefined => scopeStore.getStore();
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Reintenta (3 intentos, espera exponencial) SOLO operaciones seguras de repetir ante errores transitorios. */
@@ -68,7 +88,11 @@ function begin(): Promise<pg.PoolClient> {
   return retrying(async () => {
     const client = await getPool().connect();
     try {
-      await client.query('BEGIN');
+      // El alcance sale de una lista cerrada (nunca de la entrada del usuario), así que se envía junto con BEGIN en un solo viaje.
+      // SIEMPRE se fijan ambos valores locales (vacíos si no aplican): así un valor de SESIÓN que alguien haya dejado en esta
+      // conexión del pool (set_config(..., false) tras una inyección SQL) queda tapado durante la transacción y no la hereda.
+      const scope = scopeStore.getStore();
+      await client.query(`BEGIN; SELECT set_config('app.scope', '${scope && SCOPES.has(scope) ? scope : ''}', true), set_config('app.business_id', '', true)`);
       return client;
     } catch (e) {
       client.release(true);
@@ -94,6 +118,14 @@ export async function withTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
     // Una conexión rota se destruye en lugar de volver al pool.
     client.release(broken);
   }
+}
+
+/**
+ * Una consulta suelta con el alcance vigente (sustituye a getPool().query cuando la tabla está gobernada por 0016:
+ * fuera de una transacción no existe forma segura de fijar el contexto con el Transaction Pooler).
+ */
+export function q(sql: string, params?: unknown[]): Promise<pg.QueryResult> {
+  return withTx((tx) => tx.query(sql, params));
 }
 
 /** Transacción con aislamiento por negocio (RLS). */
