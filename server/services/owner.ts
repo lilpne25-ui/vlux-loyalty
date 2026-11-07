@@ -1,5 +1,5 @@
 // Panel del dueño: métricas reales, clientes, actividad, configuración, personal y privacidad.
-import { withTenant, getPool, withTx } from '../db';
+import { withTenant } from '../db';
 import { AppError, notFound } from '../errors';
 import { hashPassword } from '../security';
 import { createEmployeeSchema, updateProgramSchema } from '../validation';
@@ -128,17 +128,17 @@ export async function updateProgram(session: StaffSession, raw: unknown) {
 }
 
 export async function listStaff(session: StaffSession) {
-  return (await getPool().query(
+  return (await withTenant(session.businessId, (tx) => tx.query(
     `SELECT m.id AS membership_id, m.role, m.active, u.email, u.display_name, m.created_at FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id
       WHERE m.business_id = $1 ORDER BY m.role, u.display_name`,
     [session.businessId],
-  )).rows.map((r) => ({ membershipId: r.membership_id, role: r.role, active: r.active, email: r.email, displayName: r.display_name, createdAt: r.created_at.toISOString() }));
+  ))).rows.map((r) => ({ membershipId: r.membership_id, role: r.role, active: r.active, email: r.email, displayName: r.display_name, createdAt: r.created_at.toISOString() }));
 }
 
 export async function createEmployee(session: StaffSession, raw: unknown) {
   const input = createEmployeeSchema.parse(raw);
   const hash = await hashPassword(input.password);
-  const membershipId = await withTx(async (tx) => {
+  const membershipId = await withTenant(session.businessId, async (tx) => {
     const existing = (await tx.query('SELECT id FROM staff_users WHERE email = $1', [input.email])).rows[0];
     // Por privacidad no se reutiliza ni se revela una cuenta existente de otro negocio.
     if (existing) throw new AppError(409, 'email_taken', 'Ese correo ya tiene una cuenta. Usa otro correo para este empleado.');
@@ -150,10 +150,10 @@ export async function createEmployee(session: StaffSession, raw: unknown) {
 }
 
 export async function setStaffActive(session: StaffSession, membershipId: string, active: boolean) {
-  const m = (await getPool().query('SELECT id, role, user_id FROM staff_memberships WHERE id = $1 AND business_id = $2', [membershipId, session.businessId])).rows[0];
+  const m = (await withTenant(session.businessId, (tx) => tx.query('SELECT id, role, user_id FROM staff_memberships WHERE id = $1 AND business_id = $2', [membershipId, session.businessId]))).rows[0];
   if (!m) throw notFound('Empleado');
   if (m.role === 'OWNER') throw new AppError(422, 'cannot_change_owner', 'La cuenta del dueño no se desactiva desde aquí.');
-  await withTx(async (tx) => {
+  await withTenant(session.businessId, async (tx) => {
     await tx.query('UPDATE staff_memberships SET active = $2 WHERE id = $1', [membershipId, active]);
     if (!active) await tx.query('UPDATE staff_sessions SET revoked_at = now() WHERE membership_id = $1 AND revoked_at IS NULL', [membershipId]);
   });

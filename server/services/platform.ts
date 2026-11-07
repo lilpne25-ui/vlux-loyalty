@@ -4,7 +4,7 @@
 import { APP_VERSION, SCHEMA_VERSION } from '../version';
 import { z } from 'zod';
 import { config } from '../config';
-import { getPool, withTenant, withTx } from '../db';
+import { getPool, q, withTenant, withTx } from '../db';
 import { AppError, notFound } from '../errors';
 import { audit } from './audit';
 import { getBusinessById } from './businesses';
@@ -135,13 +135,13 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
 // ---------- Lecturas ----------
 type Stats = { customers: number; cards: number; purchases: number; stamps: number; rewardsRedeemed: number; lastActivity: Date | null };
 async function statsByBusiness(): Promise<Map<string, Stats>> {
-  const rows = (await getPool().query('SELECT * FROM platform_business_stats()')).rows;
+  const rows = (await q('SELECT * FROM platform_business_stats()')).rows;
   return new Map(rows.map((r) => [r.business_id, { customers: Number(r.customers), cards: Number(r.cards), purchases: Number(r.purchases), stamps: Number(r.stamps), rewardsRedeemed: Number(r.rewards_redeemed), lastActivity: r.last_activity }]));
 }
 
 export async function listBusinesses() {
   const [rows, stats] = await Promise.all([
-    getPool().query(
+    q(
       `SELECT b.id, b.slug, b.name, b.vertical, b.city, b.status, b.is_demo, b.created_at, b.archived_at, (b.synthetic_declared_at IS NOT NULL) AS synthetic,
               s.plan_code, s.commercial_status, s.price_cents, s.currency,
               (SELECT string_agg(u.display_name, ', ' ORDER BY m.created_at) FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id
@@ -168,8 +168,8 @@ export async function overview() {
   const [list, stats, recent, platformRecent] = await Promise.all([
     listBusinesses(),
     statsByBusiness(),
-    getPool().query('SELECT a.business_id, a.action, a.actor_type, a.created_at, b.name, b.is_demo FROM platform_recent_activity(15) a JOIN businesses b ON b.id = a.business_id'),
-    getPool().query(`SELECT e.action, e.created_at, e.business_id, b.name, a.display_name FROM platform_audit_events e
+    q('SELECT a.business_id, a.action, a.actor_type, a.created_at, b.name, b.is_demo FROM platform_recent_activity(15) a JOIN businesses b ON b.id = a.business_id'),
+    q(`SELECT e.action, e.created_at, e.business_id, b.name, a.display_name FROM platform_audit_events e
                        LEFT JOIN businesses b ON b.id = e.business_id LEFT JOIN platform_admins a ON a.id = e.admin_id
                       ORDER BY e.created_at DESC LIMIT 10`),
   ]);
@@ -213,7 +213,7 @@ function walletLabel(st: ReturnType<GoogleWalletProvider['status']>) {
 }
 
 export async function businessDetail(id: string) {
-  const b = (await getPool().query(
+  const b = (await q(
     `SELECT b.id, b.slug, b.status, b.suspended_reason, b.archived_at, b.archived_reason, b.synthetic_declared_at, b.logo_data_url, b.logo_fit, b.logo_original_data_url, b.created_at, b.updated_at, b.is_demo,
             s.plan_code, s.commercial_status, s.start_date, s.pilot_end_date, s.renewal_date, s.price_cents, s.currency, s.notes, s.updated_at AS sub_updated
        FROM businesses b LEFT JOIN business_subscriptions s ON s.business_id = b.id WHERE b.id = $1`, [id],
@@ -221,7 +221,7 @@ export async function businessDetail(id: string) {
   if (!b) throw notFound('Negocio');
   const [pub, staff, invitations, stats, auditRows] = await Promise.all([
     getBusinessById(id),
-    getPool().query(
+    q(
       `SELECT m.id, m.role, m.active, u.email, u.display_name, m.created_at, u.disabled_at, u.must_change_password,
               (u.locked_until IS NOT NULL AND u.locked_until > now()) AS locked,
               (SELECT max(s.created_at) FROM staff_sessions s WHERE s.membership_id = m.id) AS last_login,
@@ -287,7 +287,7 @@ export async function setBusinessStatus(admin: AdminSession, id: string, raw: un
 
 export async function updateSubscription(admin: AdminSession, id: string, raw: unknown) {
   const s = subscriptionSchema.parse(raw);
-  return withTx(async (tx) => {
+  return withTenant(id, async (tx) => {
     if (!(await tx.query('SELECT 1 FROM businesses WHERE id = $1', [id])).rowCount) throw notFound('Negocio');
     // Solo registro comercial: cambiar a "suspendido" o "vencido" NO apaga el servicio (no hay política aprobada).
     await tx.query(
@@ -317,7 +317,7 @@ export async function updatePlan(admin: AdminSession, code: string, raw: unknown
 }
 
 export async function platformAuditLog(limit: number) {
-  return (await getPool().query(
+  return (await q(
     `SELECT e.id, e.action, e.created_at, e.entity_type, e.details, b.name AS business_name, a.display_name AS admin_name
        FROM platform_audit_events e LEFT JOIN businesses b ON b.id = e.business_id LEFT JOIN platform_admins a ON a.id = e.admin_id
       ORDER BY e.created_at DESC LIMIT $1`, [limit],

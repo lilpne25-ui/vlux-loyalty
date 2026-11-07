@@ -1,0 +1,4 @@
+Base: PostgreSQL 17.11 aislado (Docker), 400 consultas, loopback.
+1 viaje sin alcance:   p50 0.55 ms, p95 1.08 ms
+q() con alcance auth:  p50 0.72 ms, p95 1.37 ms
+Latencia real Vercel<->Supabase: NOT MEASURED

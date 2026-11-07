@@ -70,3 +70,47 @@ Los pasos 1, 3, 5 y 6 pueden hacerse en paralelo.
 - Medición real de latencia y capacidad en Supabase Pro; decisión de PITR.
 - Soporte medido < 30 min/negocio/mes; onboarding ≤ 2 h.
 - Facturación (CFDI) y cobro operando.
+
+---
+## Adenda 2026-11-07 · Protección de datos, respaldos sintéticos y negocio real
+Veredicto **sin cambios**: DEMO = GO · PILOTO CONTROLADO = **NO-GO** · GA = NO-GO. Esta auditoría añade evidencia pero no cierra ningún bloqueo crítico.
+
+### Estados de verificación de respaldo (no se sustituyen entre sí)
+| Estado | Resultado | Evidencia |
+|---|---|---|
+| **BACKUP SYNTHETIC VERIFIED** | ✅ **PASS** | `BACKUP_TEST_REPORT.md`, `RESTORE_TEST_REPORT.md`, `evidencia/simulacro-sintetico-2026-11-07.txt`: 10 negocios × 300 clientes, hash por tabla 34/34 idéntico, 13/13 pruebas funcionales y de aislamiento sobre la copia, 6 fallos inducidos detectados |
+| **BACKUP PREVIEW VERIFIED** | ver actualización 2026-11-07 (más abajo) | histórico de esta adenda: aún no se había ejecutado |
+| **BACKUP PRODUCTION VERIFIED** | **NOT TESTED** | no existe producción |
+
+### Cambios en los bloqueos
+| # | Antes | Ahora | Motivo |
+|---|---|---|---|
+| 2 Respaldos con restauración comprobada | BLOCKED | **BLOCKED** (más acotado) | el procedimiento está probado con datos sintéticos; falta autorización, aviso legal y primer respaldo de Preview/producción |
+| 1 Seguridad | PASS | PASS + hallazgo H-1 (medio, `TENANT_ISOLATION_AUDIT.md`) | 9 tablas con `business_id` y política `USING (true)`: el aislamiento ahí depende del código; sin ruta cruzada encontrada |
+| 7 Privacidad | BLOCKED | **BLOCKED (agravado)** | Preview contiene datos de un negocio real; aviso de privacidad en borrador sin aprobación legal |
+
+### Hallazgos nuevos
+- **Riesgo alto de datos:** Preview contiene datos personales de un negocio real y contactos de origen no confirmado (`DATA_PROTECTION_PLAN.md` §1). Detalle solo en documentación privada.
+- `ops/backup-verify.sh` corregido: rechaza destino Supabase y origen = destino; falla si el origen tiene funciones con `EXECUTE` a PUBLIC. Pendiente reexportar a `vlux-ops` (`ops/vlux-ops/export.sh`).
+- `vlux-ops`: privado, scripts idénticos al repo principal, workflow activo sin ejecuciones. **No verificado** (herramientas sin acceso): existencia de secretos y ausencia de `BACKUP_SCHEDULE` (`VLUX_OPS_AUDIT.md`).
+- Observación: el proyecto de Preview reporta `release_channel: withdrawn` para Postgres 17.11.0.016; revisar en el panel de Supabase si requiere actualización.
+
+### Qué falta para activar los respaldos comerciales
+1. Respuestas legales (`DATA_PROTECTION_PLAN.md` §2) y carta de encargo. 2. Confirmar secretos y variables de `vlux-ops` y reexportar los scripts. 3. Autorizar el origen del respaldo (Preview hoy; producción después) y ejecutar el primer respaldo manual + simulacro (→ BACKUP PREVIEW VERIFIED). 4. Segunda copia cifrada fuera de GitHub. 5. Producción separada y su propio respaldo (→ BACKUP PRODUCTION VERIFIED).
+
+### Qué falta para READY FOR CONTROLLED PILOT
+Los 6 bloqueos abiertos de arriba (#2–#4, #6–#8) más: respuesta al hallazgo H-1 (prueba de lista permitida), restauración ensayada en un proyecto Supabase nuevo (RTO real), decisión sobre el registro de negocio definitivo y migración autorizada del negocio real (`PRODUCTION_DATA_MIGRATION_PLAN.md`).
+
+
+## Actualización 2026-11-07 (rama de endurecimiento RLS · migración 0016)
+- **DEMO = GO · PILOTO = NO-GO · GA = NO-GO** (sin cambio).
+- H-1 (nueve tablas `USING (true)`) y las funciones `SECURITY DEFINER` de plataforma están **corregidas en código y migración y verificadas en PostgreSQL 17 local** (202/202 integración, 76/76 unitarias). **No aplicada en Preview** (`0016_pegar_en_supabase.sql`, tras desplegar el código y con autorización de Vlux).
+- Siguen abiertos: producción separada y planes de pago, respaldo real restaurado, pruebas físicas, revisión legal, monitor externo, credenciales separadas plataforma/tenant (R-1), identidad global (R-2). Resolver RLS no habilita el piloto por sí solo.
+- PR #3 (retirar el respaldo del repositorio público): ver informe; veredicto a nivel de diff SAFE TO MERGE con condiciones.
+
+
+## Actualización 2026-11-07 (tarde) · respaldo real de Preview y estado de la rama de endurecimiento
+- **BACKUP PREVIEW VERIFIED: reconocido.** Existe un respaldo real, cifrado, de Preview con restauración independiente verificada (informado por Vlux). Corroboración que sí pude hacer en `vlux-ops` (solo metadatos de ejecución, sin leer artefactos ni registros de datos): el flujo «Respaldo diario verificado» terminó en éxito (ejecución 4, manual) tras corregir la comparación de conteos por nombre de tabla, y «Verificar restauración del archivo cifrado» terminó en éxito (ejecución 1, manual). **No verificado por mí:** el contenido del artefacto y la restauración manual independiente (declaración de Vlux).
+- Alcance de ese respaldo: esquema hasta 0015. Tras aplicar 0016 hay que **sincronizar `ops/grants.sql` de `vlux-ops`** (`parches/vlux-ops-sincronizar-0016.patch`; conserva la corrección de conteos por tabla) y repetir respaldo + restauración sobre 0016. La restauración con 0016 se probó solo en PostgreSQL local sintético (13/13).
+- Bloqueo #2 (respaldos): **parcialmente resuelto**. Pendiente: `BACKUP_SCHEDULE` (sigue apagado), segunda copia fuera de GitHub, respaldo y restauración sobre 0016, producción separada con su propio respaldo.
+- Veredicto sin cambio: DEMO = GO · PILOTO = NO-GO · GA = NO-GO.

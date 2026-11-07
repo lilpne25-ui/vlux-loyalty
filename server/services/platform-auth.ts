@@ -27,11 +27,13 @@ export const acceptAdminInviteSchema = z.object({ token: z.string().min(20).max(
 const invalid = () => new AppError(401, 'invalid_credentials', 'Correo o contraseña incorrectos.');
 
 /** Bitácora global de la plataforma. Nunca recibe contraseñas, tokens ni códigos. */
-export async function platformAudit(q: Tx | ReturnType<typeof getPool>, adminId: string | null, action: string, opts: { businessId?: string | null; entityType?: string; entityId?: string | null; details?: Record<string, unknown> } = {}) {
-  await q.query(
-    'INSERT INTO platform_audit_events (admin_id, action, business_id, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5, $6)',
-    [adminId, action, opts.businessId ?? null, opts.entityType ?? null, opts.entityId ?? null, JSON.stringify(opts.details ?? {})],
-  );
+export async function platformAudit(conn: Tx | ReturnType<typeof getPool>, adminId: string | null, action: string, opts: { businessId?: string | null; entityType?: string; entityId?: string | null; details?: Record<string, unknown> } = {}) {
+  const sql = 'INSERT INTO platform_audit_events (admin_id, action, business_id, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5, $6)';
+  const params = [adminId, action, opts.businessId ?? null, opts.entityType ?? null, opts.entityId ?? null, JSON.stringify(opts.details ?? {})];
+  // 0016: la bitácora es de solo escritura (INSERT abierto, lectura solo con alcance platform). Una conexión suelta del pool
+  // no puede asumir contexto, así que se escribe dentro de una transacción corta.
+  if ('release' in conn) await conn.query(sql, params);
+  else await withTx((tx) => tx.query(sql, params));
 }
 
 // ---------- Primer administrador ----------

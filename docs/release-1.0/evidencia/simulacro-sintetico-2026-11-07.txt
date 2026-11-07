@@ -1,0 +1,64 @@
+== Simulacro sintético 2026-11-07T10:25:33Z · commit c15afbc · postgres (PostgreSQL) 17.11 (Debian 17.11-1.pgdg13+2)
+== 1) Migraciones 0001–0015
+base vlux_synth creada
+rol vlux_app listo
+aplicada 0014_access_push
+aplicada 0015_release_hardening
+== 2) Datos sintéticos (10 negocios x 300 clientes)
+psql:scripts/synthetic/seed-synthetic.sql:79: NOTICE:  Base sintética generada: 3000 clientes
+siembra_s=5.8
+== 3) Respaldo + restauración aislada + verificación (ops/backup-verify.sh)
+1) Respaldo lógico (pg_dump formato custom, solo esquema public)
+cfde22d686c7d34d8194be050f8609ac0bd09392eecc939c2fbf7875060048ed  /backups/vlux-20261107T102540Z.dump
+2) Restauración en base AISLADA: vlux_restore_20261107102540
+3) Verificación de integridad (origen vs restaurada)
+   origen antes:   audit_events=10 businesses=10 business_subscriptions=10 cards=3000 customers=3000 migrations=15 platform_admins=0 platform_audit_events=0 purchases=32945 reward_rules=10 rewards=2848 staff_memberships=30 staff_users=30 stamp_events=34838 visits=32945
+   restaurada:     audit_events=10 businesses=10 business_subscriptions=10 cards=3000 customers=3000 migrations=15 platform_admins=0 platform_audit_events=0 purchases=32945 reward_rules=10 rewards=2848 staff_memberships=30 staff_users=30 stamp_events=34838 visits=32945
+   origen después: audit_events=10 businesses=10 business_subscriptions=10 cards=3000 customers=3000 migrations=15 platform_admins=0 platform_audit_events=0 purchases=32945 reward_rules=10 rewards=2848 staff_memberships=30 staff_users=30 stamp_events=34838 visits=32945
+   tarjetas con saldo distinto a su libro mayor: 0
+   tablas sin RLS tras restaurar: 0
+   tarjetas con más de un premio disponible: 0
+   permisos mínimos de vlux_app tras restaurar: t
+   permisos de vlux_app idénticos al origen: sí
+   funciones ejecutables por PUBLIC tras restaurar: 0
+   prueba funcional como vlux_app: rls-ok escritura-ok
+4) Registro del último respaldo verificado
+RESPALDO Y RESTAURACIÓN VERIFICADOS: /backups/vlux-20261107T102540Z.dump
+backup_verify_total_s=2.3
+== 4) Cifrado AES-256 + verificación de integridad + simulacro desde el archivo cifrado (ops/restore-drill.sh)
+gpg: directory '/root/.gnupg' created
+gpg: keybox '/root/.gnupg/pubring.kbx' created
+integridad del cifrado: ok
+93f843048d69f75c845666ed7855defc0f6680221a55f9bd3b5e9614e96b90cf  vlux-20261107T102540Z.dump.gpg
+1) Integridad del archivo cifrado
+vlux-20261107T102540Z.dump.gpg: OK
+2) Descifrado (AES-256, frase desde la variable de entorno)
+   archivo de pg_dump válido
+3) Restauración en base AISLADA: vlux_drill_20261107102543
+4) Verificaciones
+   última migración: 0015_release_hardening (15)
+   tarjetas con saldo distinto al libro mayor: 0
+   tablas sin RLS: 0
+   funciones ejecutables por PUBLIC: 0
+   llaves foráneas sin validar: 0
+   conteos: audit_events=10 businesses=10 cards=3000 purchases=32945 stamp_events=34838
+   prueba como vlux_app: rls-ok
+5) Resultado: descifrado+restauración 1 s · verificación 1 s · total 2 s · base: vlux_drill_20261107102543 (bórrala al terminar la revisión)
+SIMULACRO DE RESTAURACIÓN OK
+cifrado_y_simulacro_s=3.0
+== 5) Prueba funcional de la aplicación sobre la copia restaurada + aislamiento
+PASS dueño sintético 1 inicia sesión y consulta su panel sobre la copia restaurada
+PASS el panel del dueño 1 lista exactamente 300 clientes (solo los suyos)
+PASS caja/dueño 1 identifica una tarjeta de su negocio
+PASS registra una compra sintética nueva en la copia restaurada
+PASS la compra quedó en la base (+1) con saldo coherente
+PASS saldo = libro mayor en todas las tarjetas tras la operación
+PASS dueño 2 no ve ningún cliente del negocio 1
+PASS dueño 2 no puede identificar tarjeta del negocio 1 (HTTP 404)
+PASS dueño 2 no puede registrar compra en tarjeta del negocio 1 (HTTP 404)
+PASS dueño 2 no puede ver la tarjeta del negocio 1 (HTTP 404)
+PASS dueño 2 no puede exportar un cliente del negocio 1 (HTTP 404)
+PASS ningún intento cruzado escribió datos en el negocio 2 ni en el 1
+PASS el dueño 1 solo ve su propio negocio en el selector
+
+RESULTADO: 13 verificaciones PASS
