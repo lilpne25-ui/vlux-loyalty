@@ -41,5 +41,21 @@ Rama `release/1.0.0-rc1` desde `v0.4.6` (`338c9dc`). Etiqueta propuesta: `v1.0.0
 ## Procedimientos operativos
 `PRODUCTION_ARCHITECTURE.md` (despliegue y reversión) · `RUNBOOK.md` (monitoreo e incidentes) · `BACKUP_RECOVERY.md` · `DEVICE_TESTS.md` · `PILOT_GUIDE.md`.
 
-## Despliegue del candidato (solo Preview)
-Ver la sección al final de este documento (se completa al desplegar).
+## Despliegue del candidato (solo Preview, target staging, 2026-11-07 09:00 UTC)
+Commit desplegado: `994efc9` (código idéntico a `202f0b1`; el resto son documentos). Sin Production, sin merge a `main`.
+| Proyecto | Deployment | URL fija | Alias de rama |
+|---|---|---|---|
+| Interno (Control Center, Vercel SSO) | `dpl_E5nLvUJS7zLULbMjqX3kUL49bDJZ` · READY | https://vlux-loyalty-425izmlfq-vlux-s-projects.vercel.app | https://vlux-loyalty-git-release-100-rc1-vlux-s-projects.vercel.app |
+| Público (demo) | `dpl_C7Vp3Lfch4Jr8gJomNCzScAWznjj` · READY | https://vlux-loyalty-demo-o78prg6d5-vlux-s-projects.vercel.app | https://vlux-loyalty-demo-git-release-100-rc1-vlux-s-projects.vercel.app |
+
+Verificación remota (solo lectura; sin crear datos, sin correos, sin avisos):
+| # | Prueba | Interno | Público |
+|---|---|---|---|
+| R1 | `GET /api/health?db=1` | PASS `{"ok":true,"db":true,"version":"1.0.0-rc.1"}` | PASS (igual) |
+| R2 | `GET /api/public/push-config` (Web Push congelado) | PASS `{"enabled":false}` | PASS `{"enabled":false}` |
+| R3 | Encabezados: CSP sin `script-src` inline, HSTS, `frame-ancestors 'none'`, `noindex` | PASS | PASS |
+| R4 | `/api/admin/*` en el público | — | PASS 404 |
+| R5 | Programa público de `cafe-demo-toluca` | — | PASS 200 (datos sintéticos, `privacyNoticeVersion: borrador-2026-10`) |
+| R6 | Alta pública `/n/cafe-demo-toluca` sirve la app | — | PASS 200 |
+| R7 | `/api/public/demo` | — | PASS habilitado (`vlux-demo`) |
+| R8 | Control Center en el interno | NOT TESTED: requiere la sesión de Vlux (SSO + 2FA) | — |

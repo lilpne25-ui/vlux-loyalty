@@ -42,7 +42,7 @@ Resumen: 2 PASS · 2 FAIL · 3 BLOCKED · 1 NOT TESTED.
 | Rendimiento | 300 negocios simultáneos sin errores (local) | PASS | p95 18.4 ms, p99 40.7 ms |
 | Rendimiento | Latencia real Vercel↔Supabase desde México | NOT TESTED | requiere infraestructura de pago aislada |
 | Alcance | Funciones opcionales congeladas y no activables desde la web | PASS | `FEATURE_FLAGS.md` |
-| Preview | RC desplegado y verificado en ambos proyectos | ver `RELEASE_NOTES.md` § Despliegue | |
+| Preview | RC desplegado y verificado en ambos proyectos (solo lectura) | PASS (Control Center interno: NOT TESTED, requiere sesión de Vlux) | `RELEASE_NOTES.md` § Despliegue |
 | Dispositivos | iPhone / Android / caja | NOT TESTED | `DEVICE_TESTS.md` |
 | Legal | Aviso, términos, contrato | BLOCKED | `LEGAL_DRAFTS.md` |
 | Comercial | Modelo de costos y márgenes | PASS (modelo) | `FINANCIAL_MODEL.md`; precios = hipótesis |
