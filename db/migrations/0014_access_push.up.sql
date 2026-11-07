@@ -149,3 +149,29 @@ DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN EXECUTE 'REVOKE ALL ON FUNCTION notification_due_businesses(integer) FROM authenticated'; END IF;
 END $$;
 GRANT EXECUTE ON FUNCTION notification_due_businesses(integer) TO vlux_app;
+
+-- Respaldo por negocio (0011): nunca incluye el hash del código presencial. Las suscripciones push NO se respaldan:
+-- son direcciones y llaves de dispositivos (equivalen a credenciales) y no se pueden restaurar sin un nuevo consentimiento.
+CREATE OR REPLACE FUNCTION platform_business_export(p_business uuid)
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT jsonb_build_object(
+    'business', (SELECT to_jsonb(b) - 'logo_data_url' - 'logo_original_data_url' FROM businesses b WHERE b.id = p_business),
+    'subscription', (SELECT to_jsonb(s) FROM business_subscriptions s WHERE s.business_id = p_business),
+    'rewardRules', (SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.version), '[]') FROM reward_rules r WHERE r.business_id = p_business),
+    'customers', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.created_at), '[]') FROM customers x WHERE x.business_id = p_business),
+    'cards', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.created_at), '[]') FROM cards x WHERE x.business_id = p_business),
+    'visits', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.started_at), '[]') FROM visits x WHERE x.business_id = p_business),
+    'purchases', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.created_at), '[]') FROM purchases x WHERE x.business_id = p_business),
+    'rewards', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.unlocked_at), '[]') FROM rewards x WHERE x.business_id = p_business),
+    'stampEvents', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.id), '[]') FROM stamp_events x WHERE x.business_id = p_business),
+    'reviewEvents', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.id), '[]') FROM review_events x WHERE x.business_id = p_business),
+    'staff', (SELECT coalesce(jsonb_agg(jsonb_build_object('membershipId', m.id, 'role', m.role, 'active', m.active, 'email', u.email, 'displayName', u.display_name, 'createdAt', m.created_at)), '[]')
+                FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id WHERE m.business_id = p_business),
+    'invitations', (SELECT coalesce(jsonb_agg(to_jsonb(i) - 'token_hash' - 'access_code_hash'), '[]') FROM staff_invitations i WHERE i.business_id = p_business),
+    'notificationSettings', (SELECT to_jsonb(n) FROM notification_settings n WHERE n.business_id = p_business),
+    'appointments', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.starts_at), '[]') FROM appointments x WHERE x.business_id = p_business),
+    'notifications', (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.created_at), '[]') FROM notification_outbox x WHERE x.business_id = p_business),
+    'auditEvents', (SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.id), '[]') FROM audit_events a WHERE a.business_id = p_business)
+  );
+$$;
+
