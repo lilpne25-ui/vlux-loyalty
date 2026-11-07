@@ -70,3 +70,33 @@ Los pasos 1, 3, 5 y 6 pueden hacerse en paralelo.
 - Medición real de latencia y capacidad en Supabase Pro; decisión de PITR.
 - Soporte medido < 30 min/negocio/mes; onboarding ≤ 2 h.
 - Facturación (CFDI) y cobro operando.
+
+---
+## Adenda 2026-11-07 · Protección de datos, respaldos sintéticos y negocio real
+Veredicto **sin cambios**: DEMO = GO · PILOTO CONTROLADO = **NO-GO** · GA = NO-GO. Esta auditoría añade evidencia pero no cierra ningún bloqueo crítico.
+
+### Estados de verificación de respaldo (no se sustituyen entre sí)
+| Estado | Resultado | Evidencia |
+|---|---|---|
+| **BACKUP SYNTHETIC VERIFIED** | ✅ **PASS** | `BACKUP_TEST_REPORT.md`, `RESTORE_TEST_REPORT.md`, `evidencia/simulacro-sintetico-2026-11-07.txt`: 10 negocios × 300 clientes, hash por tabla 34/34 idéntico, 13/13 pruebas funcionales y de aislamiento sobre la copia, 6 fallos inducidos detectados |
+| **BACKUP PREVIEW VERIFIED** | **NOT TESTED** | el workflow no se ejecutó (origen con datos personales reales o de origen desconocido; falta autorización y base legal) |
+| **BACKUP PRODUCTION VERIFIED** | **NOT TESTED** | no existe producción |
+
+### Cambios en los bloqueos
+| # | Antes | Ahora | Motivo |
+|---|---|---|---|
+| 2 Respaldos con restauración comprobada | BLOCKED | **BLOCKED** (más acotado) | el procedimiento está probado con datos sintéticos; falta autorización, aviso legal y primer respaldo de Preview/producción |
+| 1 Seguridad | PASS | PASS + hallazgo H-1 (medio, `TENANT_ISOLATION_AUDIT.md`) | 9 tablas con `business_id` y política `USING (true)`: el aislamiento ahí depende del código; sin ruta cruzada encontrada |
+| 7 Privacidad | BLOCKED | **BLOCKED (agravado)** | confirmado un negocio real de vertical de salud en Preview con aviso en borrador |
+
+### Hallazgos nuevos
+- **Riesgo alto de datos:** datos del negocio real solo en Preview, sin respaldo verificado (`ODALEX_DATA_PROTECTION_PLAN.md` §1). 11 clientes: **ninguno** clasificable como sintético con certeza.
+- `ops/backup-verify.sh` corregido: rechaza destino Supabase y origen = destino; falla si el origen tiene funciones con `EXECUTE` a PUBLIC. Pendiente reexportar a `vlux-ops` (`ops/vlux-ops/export.sh`).
+- `vlux-ops`: privado, scripts idénticos al repo principal, workflow activo sin ejecuciones. **No verificado** (herramientas sin acceso): existencia de secretos y ausencia de `BACKUP_SCHEDULE` (`VLUX_OPS_AUDIT.md`).
+- Observación: el proyecto de Preview reporta `release_channel: withdrawn` para Postgres 17.11.0.016; revisar en el panel de Supabase si requiere actualización.
+
+### Qué falta para activar los respaldos comerciales
+1. Respuestas legales (`ODALEX_DATA_PROTECTION_PLAN.md` §2) y carta de encargo. 2. Confirmar secretos y variables de `vlux-ops` y reexportar los scripts. 3. Autorizar el origen del respaldo (Preview hoy; producción después) y ejecutar el primer respaldo manual + simulacro (→ BACKUP PREVIEW VERIFIED). 4. Segunda copia cifrada fuera de GitHub. 5. Producción separada y su propio respaldo (→ BACKUP PRODUCTION VERIFIED).
+
+### Qué falta para READY FOR CONTROLLED PILOT
+Los 6 bloqueos abiertos de arriba (#2–#4, #6–#8) más: respuesta al hallazgo H-1 (prueba de lista permitida), restauración ensayada en un proyecto Supabase nuevo (RTO real), decisión sobre el registro de negocio definitivo y migración autorizada del negocio real (`PRODUCTION_DATA_MIGRATION_PLAN.md`).

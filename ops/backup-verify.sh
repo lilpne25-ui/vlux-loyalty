@@ -9,6 +9,10 @@
 # (KEEP_RESTORE=1 para conservarla).
 set -euo pipefail
 : "${SOURCE_URL:?Falta SOURCE_URL}"; : "${RESTORE_ADMIN_URL:?Falta RESTORE_ADMIN_URL}"
+# Salvaguarda (auditoría de datos 2026-11-07): el destino de la prueba jamás puede ser Supabase ni el mismo servidor del origen.
+case "$RESTORE_ADMIN_URL" in *supabase.co*|*pooler.supabase.com*) echo "Rechazado: RESTORE_ADMIN_URL apunta a Supabase. Usa un servidor aislado."; exit 1;; esac
+hostport() { printf '%s' "$1" | sed -E 's#^[a-z]+://[^@]*@##; s#[/?].*$##'; }
+[ "$(hostport "$SOURCE_URL")" != "$(hostport "$RESTORE_ADMIN_URL")" ] || { echo "Rechazado: origen y destino son el mismo servidor."; exit 1; }
 BACKUP_DIR="${BACKUP_DIR:-./backups}"; mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 FILE="$BACKUP_DIR/vlux-$STAMP.dump"
@@ -68,6 +72,10 @@ PQ="SELECT string_agg(x, ' ' ORDER BY x) FROM (
   UNION ALL SELECT p.proname || '()' || (CASE WHEN has_function_privilege('vlux_app', p.oid, 'EXECUTE') THEN 'x' ELSE '' END)
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')) y"
 if [ "$(psql "$SOURCE_URL" -Atc "$PQ")" = "$(psql "$RESTORE_URL" -Atc "$PQ")" ]; then echo "   permisos de vlux_app idénticos al origen: sí"; else echo "FALLA: permisos de vlux_app distintos al origen (actualiza ops/grants.sql)"; exit 1; fi
+PUBQ="SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e') AND EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee = 0)"
+# La copia restaurada se endurece con grants.sql, así que la deriva real solo se ve en el ORIGEN.
+SRCPUB="$(psql "$SOURCE_URL" -Atc "$PUBQ")"
+echo "   funciones ejecutables por PUBLIC en el ORIGEN: $SRCPUB"; [ "$SRCPUB" = "0" ] || { echo "FALLA: el origen tiene funciones con EXECUTE a PUBLIC"; exit 1; }
 PUB="$(psql "$RESTORE_URL" -Atc "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e') AND EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee = 0)")"
 echo "   funciones ejecutables por PUBLIC tras restaurar: $PUB"; [ "$PUB" = "0" ] || { echo "FALLA: EXECUTE a PUBLIC"; exit 1; }
 
