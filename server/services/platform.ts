@@ -1,6 +1,7 @@
 // V0.3 · Operaciones de VLUX sobre toda la plataforma (Control Center).
 // Reglas: los datos de cada negocio se leen con withTenant (RLS); las métricas globales salen de funciones
 // SECURITY DEFINER que solo devuelven conteos. Toda escritura queda en la bitácora del negocio y en la global.
+import { APP_VERSION, SCHEMA_VERSION } from '../version';
 import { z } from 'zod';
 import { config } from '../config';
 import { getPool, withTenant, withTx } from '../db';
@@ -196,7 +197,7 @@ export async function overview() {
       environment: process.env.VERCEL_ENV || (config.isProduction ? 'production' : 'development'),
       region: process.env.VERCEL_REGION || 'local',
       node: process.version,
-      database: { ok: true, latencyMs: dbMs, schema: 'V0.4.6 (0014_access_push)' },
+      database: { ok: true, latencyMs: dbMs, schema: `${APP_VERSION} (${SCHEMA_VERSION})` },
       emailProvider: (() => { const e = emailState(); return e.state === 'configured' ? (e.provider === 'smtp' ? `SMTP propio configurado (${e.from}); solo se confirma “aceptado por el servidor”, la entrega final no es verificable por SMTP` : `Resend configurado (${e.from}); webhook ${e.webhook ? 'firmado activo' : 'sin configurar: no se sabrá la entrega final'}`) : e.state === 'mock' ? 'simulado (solo pruebas)' : 'no configurado (las invitaciones se entregan copiando el enlace)'; })(),
       wallet: {
         google: walletLabel(GoogleWalletProvider.fromEnv().status()),

@@ -7,6 +7,7 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { ZodError } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { config } from './config';
+import { APP_VERSION } from './version';
 import { AppError, forbidden, notFound, unauthorized } from './errors';
 import { rateLimit } from './ratelimit';
 import { loginSchema, reviewEventSchema, slugSchema, uuidSchema } from './validation';
@@ -165,9 +166,9 @@ export function buildApp() {
   api.use('*', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next(); });
 
   api.get('/health', async (c) => {
-    if (c.req.query('db') !== '1') return c.json({ ok: true });
+    if (c.req.query('db') !== '1') return c.json({ ok: true, version: APP_VERSION });
     await ensureSafeRole();
-    return c.json({ ok: true, db: true });
+    return c.json({ ok: true, db: true, version: APP_VERSION });
   });
 
   // ---------- Público ----------
