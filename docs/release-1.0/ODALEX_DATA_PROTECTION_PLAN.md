@@ -9,8 +9,8 @@ Los datos reales del negocio (y 8 contactos de origen no confirmado) viven **sol
 | # | Pregunta | Por qué importa |
 |---|---|---|
 | 1 | ¿Los 3 clientes son personas reales? ¿Qué aviso vieron y qué aceptaron? | consentimiento y base legal |
-| 2 | ¿Quién es el **responsable** de esos datos (Odalex) y quién el **encargado** (VLUX)? ¿Hay contrato o carta de encargo? | LFPDPPP: el encargado trata datos por cuenta del responsable bajo instrucciones |
-| 3 | ¿Odalex autorizó que VLUX **haga copias** y las guarde en GitHub? ¿Dónde pueden residir? | transferencia/almacenamiento fuera de México |
+| 2 | ¿Quién es el **responsable** de esos datos (el negocio real) y quién el **encargado** (VLUX)? ¿Hay contrato o carta de encargo? | LFPDPPP: el encargado trata datos por cuenta del responsable bajo instrucciones |
+| 3 | ¿el negocio real autorizó que VLUX **haga copias** y las guarde en GitHub? ¿Dónde pueden residir? | transferencia/almacenamiento fuera de México |
 | 4 | ¿Cuánto tiempo conservar respaldos? (propuesta: 30 días, igual que el artefacto) | minimización |
 | 5 | ¿Quién tendrá acceso al repo `vlux-ops` y a la frase? (propuesta: solo el propietario) | control de acceso |
 | 6 | ¿Cuál de los dos registros de negocio es el definitivo? | evitar restaurar o migrar el equivocado |
@@ -22,7 +22,7 @@ Solo cifrado (AES-256, frase de 40+ caracteres en gestor de contraseñas, nunca 
 ## 4. Pasos (cada uno requiere la acción o autorización indicada)
 | Paso | Quién | Estado |
 |---|---|---|
-| 1. Responder la sección 2; aprobar por escrito el tratamiento (carta de encargo) | Vlux + Odalex (+ abogado) | pendiente |
+| 1. Responder la sección 2; aprobar por escrito el tratamiento (carta de encargo) | Vlux + el negocio real (+ abogado) | pendiente |
 | 2. Confirmar en `vlux-ops` → Settings: secretos `SUPABASE_BACKUP_URL` y `BACKUP_PASSPHRASE` presentes, variable `BACKUP_SCHEDULE` **ausente**, y colaboradores = solo el propietario | Vlux | pendiente |
 | 3. Aplicar `ops/backup-verify.sh` corregido (guardas nuevas): `ops/vlux-ops/export.sh` y copiar a `vlux-ops` | Vlux | pendiente |
 | 4. Confirmar que `SUPABASE_BACKUP_URL` = rol dueño del esquema (`postgres.<ref>`, Session Pooler 5432) de **Preview** y que ese es el origen autorizado | Vlux (**autorización explícita**) | pendiente |
@@ -38,7 +38,7 @@ Solo cifrado (AES-256, frase de 40+ caracteres en gestor de contraseñas, nunca 
 - **Retención:** respaldos 30 días; sesiones y tokens expiran; no conservar respaldos de un negocio dado de baja más allá de ese plazo.
 - **Restaurar sin mezclar negocios:** restaurar siempre a una base nueva y aislada; extraer un negocio con `platform_business_export(uuid)`/consultas por `business_id`; nunca `pg_restore` sobre la base viva. Reaplicar solicitudes ARCO posteriores a la fecha del respaldo.
 - **Acceso a respaldos:** el artefacto está cifrado; quien tenga la frase + acceso al repo puede leer todo. Dos llaves separadas: acceso a GitHub y frase en gestor.
-- **Incidente:** si se filtran artefacto y frase, tratar como brecha de datos (notificar a Odalex; ver `LEGAL_DRAFTS.md`).
+- **Incidente:** si se filtran artefacto y frase, tratar como brecha de datos (notificar al negocio real; ver `LEGAL_DRAFTS.md`).
 
 ## 6. Qué no se hará sin permiso expreso
-Borrar, suspender, anonimizar o modificar Odalex; copiar sus datos a la base sintética; usarlo como demostración; exportarlo con datos identificables; enviar correos o notificaciones (hay 1 invitación y 1 correo pendientes: **no enviar**).
+Borrar, suspender, anonimizar o modificar al negocio real; copiar sus datos a la base sintética; usarlo como demostración; exportarlo con datos identificables; enviar correos o notificaciones (hay 1 invitación y 1 correo pendientes: **no enviar**).
