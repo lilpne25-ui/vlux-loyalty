@@ -125,6 +125,8 @@ async function sql(q, params = []) {
   await owner.fill('#inv-pass', PASSWORD);
   await owner.fill('#inv-pass2', PASSWORD);
   await owner.click('button:has-text("Crear cuenta y entrar")');
+  // V0.4.6: tras activar, el dueño ve la bienvenida con 3 acciones; se cierra con «Abrir mi panel».
+  await owner.waitForSelector('[data-testid=owner-welcome]', { timeout: 8000 }).then(() => owner.click('[data-testid=welcome-open-panel]')).catch(() => undefined);
   await owner.waitForSelector('[data-testid=owner-onboarding]');
   ok('T35a el dueño nuevo ve "Primeros pasos" (opcional)', /Primeros pasos/.test(await owner.textContent('[data-testid=owner-onboarding]')));
   await shot(owner, 'T35-primeros-pasos');

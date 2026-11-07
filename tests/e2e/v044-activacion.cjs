@@ -187,8 +187,10 @@ async function visitorPrepares(browser, name, finish = 'black', shots = false) {
   await owner.waitForSelector('#inv-pass');
   await owner.fill('#inv-pass', PASSWORD); await owner.fill('#inv-pass2', PASSWORD);
   await owner.click('button:has-text("Crear cuenta y entrar")');
+  // V0.4.6: tras activar, el dueño ve la bienvenida con 3 acciones; se cierra con «Abrir mi panel».
+  await owner.waitForSelector('[data-testid=owner-welcome]', { timeout: 8000 }).then(() => owner.click('[data-testid=welcome-open-panel]')).catch(() => undefined);
   await owner.waitForSelector('[data-testid=kpi-purchases-value]');
-  ok('T13 el dueño abre su panel con la invitación generada', owner.url().endsWith('/panel'), owner.url());
+  ok('T13 el dueño abre su panel con la invitación generada', new URL(owner.url()).pathname === '/panel', owner.url()); // V0.4.6: /panel?negocio=<slug>
   await owner.click('button[role=tab]:has-text("Equipo")');
   await owner.fill('#emp-name', 'Caja Activación');
   await owner.fill('#emp-email', `caja-${run}@ejemplo.e2e.test`);

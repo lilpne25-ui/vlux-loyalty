@@ -240,6 +240,23 @@ export async function cancelAppointment(session: StaffSession, id: string) {
   });
 }
 
+/**
+ * Ventana del recordatorio de cita según cada cuánto corre la tarea programada (NOTIFICATION_JOB_INTERVAL_HOURS).
+ * Cada hora (Vercel Pro o programador externo): 20–28 h antes. Una vez al día (Vercel Hobby): 12–36 h antes, para que
+ * ninguna cita quede fuera. El texto dice "hoy", "mañana" o el día de la semana, nunca una fecha equivocada.
+ */
+export function appointmentWindow(intervalHours = Number(process.env.NOTIFICATION_JOB_INTERVAL_HOURS) || 1) {
+  const i = Math.min(24, Math.max(1, intervalHours));
+  return i <= 8 ? { from: 20, to: 28 } : { from: 12, to: 12 + Math.max(24, i) };
+}
+function mxDate(d: Date) { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
+export function dayWord(when: Date, now = new Date()) {
+  const diff = Math.round((Date.parse(mxDate(when)) - Date.parse(mxDate(now))) / 86400_000);
+  if (diff === 0) return 'hoy';
+  if (diff === 1) return 'mañana';
+  return `el ${new Intl.DateTimeFormat('es-MX', { timeZone: TZ, weekday: 'long' }).format(when)}`;
+}
+
 /** Recordatorios programados de un negocio: regreso (una vez por ausencia) y citas confirmadas (20–28 h antes). */
 export async function scheduleDue(tx: Tx, businessId: string) {
   const s = await loadSettings(tx);
@@ -258,17 +275,20 @@ export async function scheduleDue(tx: Tx, businessId: string) {
     }
   }
   if (s.appointmentsEnabled) {
+    const win = appointmentWindow();
     const rows = (await tx.query(
       `SELECT a.id, a.card_id, a.starts_at FROM appointments a JOIN cards c ON c.id = a.card_id
         WHERE a.status = 'confirmed' AND a.reminder_sent_at IS NULL AND c.status = 'active'
-          AND a.starts_at BETWEEN now() + interval '20 hours' AND now() + interval '28 hours'
+          AND a.starts_at BETWEEN now() + make_interval(hours => $1) AND now() + make_interval(hours => $2)
           AND EXISTS (SELECT 1 FROM push_subscriptions s WHERE s.card_id = a.card_id AND s.disabled_at IS NULL AND s.cat_reminders)
-        LIMIT 500`,
+        LIMIT 500`, [win.from, win.to],
     )).rows;
     for (const r of rows) {
-      const hour = new Intl.DateTimeFormat('es-MX', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(r.starts_at));
+      const when = new Date(r.starts_at);
+      const hour = new Intl.DateTimeFormat('es-MX', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(when);
+      const day = dayWord(when);
       // Recordatorio genérico: solo hora y negocio. Nunca motivo, servicio ni datos de salud.
-      if (await enqueue(tx, { businessId, cardId: r.card_id, category: 'reminders', template: 'appointment', dedupeKey: `appt:${r.id}`, title: clip(`${b.name}: tu cita es mañana`, 60), body: `Te esperamos mañana a las ${hour}.`, url: `/n/${b.slug}`, expiresHours: 20 })) queued++;
+      if (await enqueue(tx, { businessId, cardId: r.card_id, category: 'reminders', template: 'appointment', dedupeKey: `appt:${r.id}`, title: clip(`${b.name}: tu cita es ${day}`, 60), body: `Te esperamos ${day} a las ${hour}.`, url: `/n/${b.slug}`, expiresHours: 10 })) queued++;
       await tx.query('UPDATE appointments SET reminder_sent_at = now() WHERE id = $1', [r.id]);
     }
   }
@@ -335,11 +355,12 @@ export async function dispatchBusiness(businessId: string, opts: { cardId?: stri
     return { ready, slug };
   });
 
-  for (const n of claimed.ready) {
+  // Varios avisos a la vez (cada uno con sus dispositivos), sin rebasar el presupuesto de tiempo.
+  await mapLimit(claimed.ready, 6, async (n) => {
     if (opts.budgetMs && Date.now() - started > opts.budgetMs) {
       // Sin tiempo: vuelve a la cola para la siguiente ejecución.
       await withTenant(businessId, (tx) => tx.query("UPDATE notification_outbox SET status = 'queued', attempts = greatest(0, attempts - 1) WHERE id = $1", [n.id]));
-      continue;
+      return;
     }
     const subs = await withTenant(businessId, async (tx) => (await tx.query(
       `SELECT s.id, s.endpoint, s.p256dh, s.auth FROM push_subscriptions s JOIN cards c ON c.id = s.card_id
@@ -348,7 +369,7 @@ export async function dispatchBusiness(businessId: string, opts: { cardId?: stri
     if (!subs.length) {
       await withTenant(businessId, (tx) => tx.query("UPDATE notification_outbox SET status = 'skipped', skip_reason = 'no_subscribers' WHERE id = $1", [n.id]));
       result.skipped++;
-      continue;
+      return;
     }
     const payload = { title: n.title, body: n.body, url: n.url, tag: `${n.template}`, icon: `/api/pwa/${claimed.slug}/icon/192.png` };
     const ttl = n.template === 'appointment' ? 12 * 3600 : 24 * 3600;
@@ -376,7 +397,7 @@ export async function dispatchBusiness(businessId: string, opts: { cardId?: stri
     });
     result.sent += ok;
     result.failed += bad;
-  }
+  });
   return result;
 }
 

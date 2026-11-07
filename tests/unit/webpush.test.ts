@@ -127,3 +127,13 @@ test('U-PUSH-8 · horas de silencio (rango que cruza la medianoche y rango diurn
   assert.ok(inQuietHours(14, 13, 15));
   assert.ok(!inQuietHours(12, 12, 12));
 });
+
+test('U-PUSH-9 · ventana del recordatorio de cita según la frecuencia de la tarea y texto del día', async () => {
+  const { appointmentWindow, dayWord } = await import('../../server/services/notifications');
+  assert.deepEqual(appointmentWindow(1), { from: 20, to: 28 });
+  assert.deepEqual(appointmentWindow(24), { from: 12, to: 36 }, 'diario: ninguna cita queda fuera');
+  const now = new Date('2026-11-07T18:00:00Z'); // 12:00 en el centro de México
+  assert.equal(dayWord(new Date('2026-11-07T23:00:00Z'), now), 'hoy');
+  assert.equal(dayWord(new Date('2026-11-08T17:00:00Z'), now), 'mañana');
+  assert.equal(dayWord(new Date('2026-11-09T17:00:00Z'), now), 'el lunes');
+});

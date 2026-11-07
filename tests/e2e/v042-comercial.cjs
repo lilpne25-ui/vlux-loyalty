@@ -138,7 +138,7 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   await cashier.goto(BASE + '/');
   await cashier.waitForSelector('[data-testid=exp-caja]');
   await cashier.click('[data-testid=exp-caja]');
-  await cashier.waitForURL('**/caja');
+  await cashier.waitForURL(/\/caja(\?|$)/);
   await cashier.click('button:has-text("Escribir")');
   await cashier.fill('#manual-id', code);
 

@@ -126,8 +126,10 @@ async function resetAdminsIfAsked() {
   await owner.fill('#inv-pass', PASSWORD);
   await owner.fill('#inv-pass2', PASSWORD);
   await owner.click('button:has-text("Crear cuenta y entrar")');
+  // V0.4.6: tras activar, el dueño ve la bienvenida con 3 acciones; se cierra con «Abrir mi panel».
+  await owner.waitForSelector('[data-testid=owner-welcome]', { timeout: 8000 }).then(() => owner.click('[data-testid=welcome-open-panel]')).catch(() => undefined);
   await owner.waitForSelector('[data-testid=kpi-purchases-value]');
-  ok('B2 el dueño queda dentro de su panel', owner.url().endsWith('/panel'), owner.url());
+  ok('B2 el dueño queda dentro de su panel', new URL(owner.url()).pathname === '/panel', owner.url()); // V0.4.6: /panel?negocio=<slug>
   const reuse = await (await browser.newContext(desktop)).newPage(); watch(reuse, 'reuso (409 esperado)');
   await reuse.goto(invite1);
   await reuse.waitForSelector('text=No se pudo abrir la invitación');
@@ -161,7 +163,7 @@ async function resetAdminsIfAsked() {
   await emp.fill('#inv-pass2', PASSWORD);
   await emp.click('button:has-text("Crear cuenta y entrar")');
   await emp.waitForSelector('text=Panel del empleado');
-  ok('D1 el empleado entra a la caja con su invitación', emp.url().endsWith('/caja'), emp.url());
+  ok('D1 el empleado entra a la caja con su invitación', new URL(emp.url()).pathname === '/caja', emp.url()); // V0.4.6: /caja?negocio=<slug>&bienvenida=1
   const empPanel = await emp.goto(BASE + '/panel').then(() => emp.waitForSelector('text=Solo el dueño puede ver este panel'));
   ok('D2 el empleado no ve el panel del dueño', !!empPanel);
   await emp.goto(BASE + '/caja');
@@ -233,6 +235,8 @@ async function resetAdminsIfAsked() {
   await owner2.fill('#inv-pass', PASSWORD);
   await owner2.fill('#inv-pass2', PASSWORD);
   await owner2.click('button:has-text("Crear cuenta y entrar")');
+  // V0.4.6: tras activar, el dueño ve la bienvenida con 3 acciones; se cierra con «Abrir mi panel».
+  await owner2.waitForSelector('[data-testid=owner-welcome]', { timeout: 8000 }).then(() => owner2.click('[data-testid=welcome-open-panel]')).catch(() => undefined);
   await owner2.waitForSelector('[data-testid=kpi-purchases-value]');
   const k2 = (await owner2.textContent('[data-testid=kpi-purchases-value]')).trim();
   const api2 = (p, method = 'GET', body) => owner2.evaluate(async ([p, method, body]) => {

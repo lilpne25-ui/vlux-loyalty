@@ -181,6 +181,8 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   await owner.fill('#inv-pass', PASSWORD);
   await owner.fill('#inv-pass2', PASSWORD);
   await owner.click('button:has-text("Crear cuenta y entrar")');
+  // V0.4.6: tras activar, el dueño ve la bienvenida con 3 acciones; se cierra con «Abrir mi panel».
+  await owner.waitForSelector('[data-testid=owner-welcome]', { timeout: 8000 }).then(() => owner.click('[data-testid=welcome-open-panel]')).catch(() => undefined);
   await owner.waitForSelector('[data-testid=kpi-purchases-value]');
   const manifest = await owner.evaluate(() => document.querySelector('link[rel=manifest]')?.getAttribute('href'));
   ok('O1 el panel del dueño publica su propio manifiesto (agregar al teléfono)', manifest === `/api/pwa/${slug}/staff/panel/manifest.webmanifest`, manifest);
@@ -189,16 +191,17 @@ const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   ok('O3 el botón «Agregar panel a mi teléfono» está visible', await owner.isVisible('[data-testid=install-panel]'));
   await owner.click('[data-testid=install-panel]');
   await owner.waitForSelector('#install-staff-title, [role=dialog]');
-  ok('O4 la guía de instalación explica el paso a paso sin prometer Wallet', /Entendido/.test(await owner.textContent('[role=dialog]')) && /no sustituye a Apple Wallet/.test(await owner.textContent('[role=dialog]')));
+  // V0.4.6: la guía es la pantalla de instalación con la identidad del negocio («Ahora no» en lugar de «Entendido»).
+  ok('O4 la guía de instalación explica el paso a paso sin prometer Wallet', /Ahora no|Entendido/.test(await owner.textContent('[role=dialog]')) && /o sustituye a Apple Wallet/.test(await owner.textContent('[role=dialog]')));
   await shot(owner, 'O4-agregar-panel-guia');
-  await owner.click('[role=dialog] >> button:has-text("Entendido")');
+  await owner.click('[role=dialog] >> button:has-text("Ahora no")');
 
   await owner.click('button[role=tab]:has-text("Accesos")');
   await owner.waitForSelector('[data-testid=access-customer]');
   const cUrl = (await owner.textContent('[data-testid=access-customer-url]')).trim();
   const kUrl = (await owner.textContent('[data-testid=access-cashier-url]')).trim();
   const oUrl = (await owner.textContent('[data-testid=access-owner-url]')).trim();
-  ok('O5 el centro de accesos muestra cliente, caja y dueño con su dirección', cUrl.endsWith('/n/' + slug) && kUrl.endsWith('/caja') && oUrl.endsWith('/panel'), `${cUrl} · ${kUrl} · ${oUrl}`);
+  ok('O5 el centro de accesos muestra cliente, caja y dueño con su dirección', cUrl.endsWith('/n/' + slug) && kUrl.endsWith('/caja?negocio=' + slug) && oUrl.endsWith('/panel?negocio=' + slug), `${cUrl} · ${kUrl} · ${oUrl}`);
   ok('O6 cada acceso explica para qué sirve', /Pon este QR en el mostrador/.test(await owner.textContent('[data-testid=access-customer]')) && /Úsalo en el celular o tablet de caja/.test(await owner.textContent('[data-testid=access-cashier]')) && /Solo tú/.test(await owner.textContent('[data-testid=access-owner]')));
   const dl = owner.waitForEvent('download');
   await owner.click('[data-testid=access-customer] >> button:has-text("Descargar QR")');
