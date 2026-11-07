@@ -28,10 +28,16 @@ export async function dashboard(session: StaffSession, days = 14) {
          (SELECT count(*) FROM review_events WHERE kind = 'link_opened')::int AS review_clicks`,
     )).rows[0];
     const series = (await tx.query(
-      `SELECT d::date AS day,
-              (SELECT count(*) FROM visits v WHERE (v.started_at AT TIME ZONE $2)::date = d::date)::int AS visits,
-              (SELECT count(*) FROM purchases p WHERE p.voided_at IS NULL AND (p.created_at AT TIME ZONE $2)::date = d::date)::int AS purchases
+      // 1.0.0-rc.1: una sola pasada acotada por fecha (usa los índices (business_id, started_at/created_at)).
+      // Antes se recorría todo el historial una vez por día mostrado: ~1 s con un año de datos de un negocio.
+      `WITH v AS (SELECT (started_at AT TIME ZONE $2)::date AS day, count(*) AS n FROM visits
+                   WHERE started_at >= ((((now() AT TIME ZONE $2)::date - ($1::int - 1))::timestamp) AT TIME ZONE $2) GROUP BY 1),
+            p AS (SELECT (created_at AT TIME ZONE $2)::date AS day, count(*) AS n FROM purchases
+                   WHERE voided_at IS NULL AND created_at >= ((((now() AT TIME ZONE $2)::date - ($1::int - 1))::timestamp) AT TIME ZONE $2) GROUP BY 1)
+       SELECT d::date AS day, coalesce(v.n, 0)::int AS visits, coalesce(p.n, 0)::int AS purchases
          FROM generate_series((now() AT TIME ZONE $2)::date - ($1::int - 1), (now() AT TIME ZONE $2)::date, interval '1 day') d
+         LEFT JOIN v ON v.day = d::date
+         LEFT JOIN p ON p.day = d::date
         ORDER BY d`,
       [days, TZ],
     )).rows.map((r) => ({ day: r.day.toISOString().slice(0, 10), visits: r.visits, purchases: r.purchases }));
