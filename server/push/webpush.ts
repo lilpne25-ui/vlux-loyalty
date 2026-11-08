@@ -16,10 +16,14 @@ export interface PushKeys { p256dh: string; auth: string }
 export interface VapidConfig { publicKey: string; privateKey: string; subject: string }
 
 /** Par de llaves VAPID nuevo (P-256): pública sin comprimir (65 bytes) y privada (32 bytes), ambas en base64url. */
+/** Escalar P-256 de 32 bytes exactos (relleno con ceros a la izquierda). */
+function pad32(b: Buffer): Buffer { return b.length >= 32 ? b : Buffer.concat([Buffer.alloc(32 - b.length), b]); }
+
 export function generateVapidKeys() {
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
-  return { publicKey: b64u.enc(ecdh.getPublicKey()), privateKey: b64u.enc(ecdh.getPrivateKey()) };
+  // getPrivateKey() omite ceros a la izquierda (≈1 de cada 256 llaves sale de 31 bytes): se rellena a 32.
+  return { publicKey: b64u.enc(ecdh.getPublicKey()), privateKey: b64u.enc(pad32(ecdh.getPrivateKey())) };
 }
 
 /** Valida llaves VAPID y asunto (mailto: o https:). Devuelve null si no hay configuración válida. */
@@ -27,14 +31,16 @@ export function vapidFromEnv(env = process.env): VapidConfig | null {
   const publicKey = env.VAPID_PUBLIC_KEY || '', privateKey = env.VAPID_PRIVATE_KEY || '', subject = env.VAPID_SUBJECT || '';
   if (!publicKey || !privateKey || !/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(subject)) return null;
   try {
-    const pub = b64u.dec(publicKey), priv = b64u.dec(privateKey);
-    if (pub.length !== 65 || pub[0] !== 4 || priv.length !== 32) return null;
+    const pub = b64u.dec(publicKey), raw = b64u.dec(privateKey);
+    // Se aceptan llaves de 31 bytes generadas por herramientas que omiten el cero inicial (se normalizan a 32).
+    if (pub.length !== 65 || pub[0] !== 4 || raw.length < 31 || raw.length > 32) return null;
+    const priv = pad32(raw);
     // La privada debe corresponder a la pública.
     const ecdh = createECDH('prime256v1');
     ecdh.setPrivateKey(priv);
     if (!ecdh.getPublicKey().equals(pub)) return null;
+    return { publicKey, privateKey: b64u.enc(priv), subject };
   } catch { return null; }
-  return { publicKey, privateKey, subject };
 }
 
 /** JWT ES256 de VAPID para el origen del servicio push. Vigencia máxima 24 h (usamos 12 h). */

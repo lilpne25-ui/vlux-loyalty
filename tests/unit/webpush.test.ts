@@ -137,3 +137,20 @@ test('U-PUSH-9 · ventana del recordatorio de cita según la frecuencia de la ta
   assert.equal(dayWord(new Date('2026-11-08T17:00:00Z'), now), 'mañana');
   assert.equal(dayWord(new Date('2026-11-09T17:00:00Z'), now), 'el lunes');
 });
+
+test('U-PUSH-10 · llaves VAPID cuyo escalar empieza con 0x00 (≈1/256): se generan de 32 bytes y una de 31 se acepta normalizada', () => {
+  let found = 0;
+  for (let i = 0; i < 4000 && found < 3; i++) {
+    const e = createECDH('prime256v1'); e.generateKeys();
+    const raw = e.getPrivateKey();
+    if (raw.length === 32) continue;
+    found++;
+    const short = { VAPID_PUBLIC_KEY: b64u.enc(e.getPublicKey()), VAPID_PRIVATE_KEY: b64u.enc(raw), VAPID_SUBJECT: 'mailto:a@b.mx' };
+    const v = vapidFromEnv(short);
+    assert.ok(v, 'llave de 31 bytes aceptada');
+    assert.equal(b64u.dec(v!.privateKey).length, 32);
+    assert.match(vapidAuthorization('https://fcm.googleapis.com/x', v!, 1_800_000_000), /^vapid t=/);
+  }
+  assert.ok(found > 0, 'en 4000 intentos debería aparecer al menos una');
+  for (let i = 0; i < 2000; i++) assert.equal(b64u.dec(generateVapidKeys().privateKey).length, 32);
+});
