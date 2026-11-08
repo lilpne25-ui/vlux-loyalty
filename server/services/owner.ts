@@ -7,6 +7,7 @@ import { audit } from './audit';
 import { loadHistory } from './cards';
 import { unlockIfEligible } from './loyalty';
 import { insertRule, loadActiveRule, publicProgram, ruleChanged } from './rules-store';
+import { redactRecoveryForCustomer } from './recovery';
 import type { StaffSession } from './auth';
 
 const TZ = 'America/Mexico_City';
@@ -175,6 +176,8 @@ export async function anonymizeCustomer(session: StaffSession, customerId: strin
     await tx.query("UPDATE push_subscriptions SET disabled_at = now(), disabled_reason = 'card_revoked' WHERE disabled_at IS NULL AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
     await tx.query("UPDATE appointments SET status = 'cancelled' WHERE status = 'confirmed' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
     await tx.query("UPDATE notification_outbox SET status = 'skipped', skip_reason = 'card_revoked' WHERE status = 'queued' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    // 1.0.x · Solicitudes de recuperación de ese cliente: contacto enmascarado y cerradas (sin 0017 no hace nada).
+    await redactRecoveryForCustomer(tx, customerId);
     await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'customer.anonymized', 'customer', customerId);
     return { customerId, alreadyAnonymized: false };
   });

@@ -27,6 +27,8 @@ import { buildManifest, buildStaffManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
 import { cancelAppointment, communicationOverview, createAppointment, createPromotion, dispatchBusiness, publicPushConfig, runNotificationJob, subscribe, subscriptionStatus, unsubscribe, updatePreferences, updateSettings } from './services/notifications';
+import { closeRecovery, issueRecoveryLink, listRecovery, publicHelp, requestRecovery, setBusinessWhatsapp } from './services/recovery';
+import { recordSupportReport } from './services/support';
 import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
 
 type Env = { Variables: { staff: StaffSession } };
@@ -200,6 +202,17 @@ export function buildApp() {
     setCookie(c, cardCookie(slug), r.token, cookieOpts(CARD_COOKIE_DAYS * 86400));
     // El enlace personal permite abrir la tarjeta en otro teléfono. Se muestra una sola vez.
     return c.json({ publicCode: r.publicCode, personalLink: `${publicBaseUrl(c)}/t#${r.token}` }, 201);
+  });
+
+  // 1.0.x · Ayuda del negocio para el cliente: ¿hay recuperación en línea? ¿WhatsApp público del negocio?
+  api.get('/public/businesses/:slug/help', async (c) => c.json(await publicHelp(slugSchema.parse(c.req.param('slug')))));
+
+  // 1.0.x · «Perdí mi acceso»: crea una solicitud para el negocio. Respuesta idéntica exista o no la tarjeta.
+  api.post('/public/businesses/:slug/recovery', async (c) => {
+    const slug = slugSchema.parse(c.req.param('slug'));
+    await rateLimit(`recovery-ip:${clientIp(c)}`, 5, 60 * 60_000);
+    await rateLimit(`recovery-biz:${slug}`, 60, 60 * 60_000);
+    return c.json(await requestRecovery(slug, await jsonBody(c)), 202);
   });
 
   // ---------- Cliente (cookie de su tarjeta) ----------
@@ -445,6 +458,12 @@ export function buildApp() {
     const r = await reissueCardLink(s, uuidSchema.parse(c.req.param('cardId')));
     return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}` });
   });
+  // 1.0.x · Reportar un problema a VLUX (dueño o caja): queda en la bitácora del negocio con su referencia.
+  staff.post('/support-report', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`support:${s.userId}`, 10, 60 * 60_000);
+    return c.json(await recordSupportReport(s, await jsonBody(c)), 201);
+  });
   api.route('/staff', staff);
 
   // ---------- Dueño ----------
@@ -515,6 +534,16 @@ export function buildApp() {
   });
   owner.post('/appointments', async (c) => c.json(await createAppointment(c.get('staff'), await jsonBody(c)), 201));
   owner.post('/appointments/:id/cancel', async (c) => c.json(await cancelAppointment(c.get('staff'), uuidSchema.parse(c.req.param('id')))));
+  // 1.0.x · Solicitudes de recuperación de acceso de clientes y WhatsApp público del negocio (requiere 0017).
+  owner.get('/recovery', async (c) => c.json(await listRecovery(c.get('staff'))));
+  owner.post('/recovery/:id/link', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`relink:${s.sessionId}`, 10, 60 * 60_000);
+    const r = await issueRecoveryLink(s, uuidSchema.parse(c.req.param('id')), await jsonBody(c));
+    return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}`, card: r.card, contact: r.contact, contactType: r.contactType });
+  });
+  owner.post('/recovery/:id/close', async (c) => c.json(await closeRecovery(c.get('staff'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
+  owner.put('/contact', async (c) => c.json(await setBusinessWhatsapp(c.get('staff'), await jsonBody(c))));
   api.route('/owner', owner);
 
   // ---------- Control Center (equipo VLUX) ----------
