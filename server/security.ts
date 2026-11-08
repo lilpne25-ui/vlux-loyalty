@@ -69,3 +69,21 @@ export function ipBucket(ip: string): string {
   const full = ip.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h;
   return full.slice(0, 4).map((x) => (x || '0').toLowerCase().replace(/^0+(?=.)/, '')).join(':') + '::/64';
 }
+
+/**
+ * Autenticación de tareas de servidor: `Authorization: Bearer <secreto>` contra uno o más secretos de entorno.
+ * Un secreto de menos de 32 caracteres se ignora (configuración insegura = cerrado). Comparación en tiempo constante
+ * contra TODOS los candidatos (no se corta en el primero). Nunca acepta el secreto por URL ni cookies.
+ */
+export function bearerMatchesAny(header: string | undefined, secrets: Array<string | undefined>): boolean {
+  const m = /^Bearer ([\x21-\x7e]{32,512})$/.exec(header ?? '');
+  if (!m) return false;
+  const got = Buffer.from(m[1]);
+  let ok = false;
+  for (const s of secrets) {
+    if (!s || s.length < 32) continue;
+    const exp = Buffer.from(s);
+    if (exp.length === got.length && timingSafeEqual(exp, got)) ok = true;
+  }
+  return ok;
+}

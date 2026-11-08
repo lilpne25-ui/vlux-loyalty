@@ -4,7 +4,8 @@
 -- (matriz probada en PostgreSQL 16 y 17 aislados: scripts/verify-migration-matrix.sh).
 -- Orden: puede pegarse antes o después de desplegar el código. Sin 0017, el código responde 503 en las rutas nuevas
 -- y el resto de la app sigue igual; con 0017 y código viejo, nada usa la tabla nueva.
--- Después: GET /api/internal/notifications/run (cron) aplica la retención; verifícala con 0017_verificar_retencion.sql.
+-- Después: la retención la aplica GET /api/internal/recovery/retention (tarea INDEPENDIENTE de los avisos; nunca envía
+-- mensajes). Primero ?dryRun=1. Verifícala con 0017_verificar_retencion.sql. Ver docs/release-1.0/TAREA_RETENCION_0017.md.
 -- Rollback: docs/release-1.0/0017_revertir_en_supabase.sql (borra solicitudes de recuperación y el WhatsApp de cada negocio).
 -- Generado por scripts/gen-0017-paste.mjs. Checksum sha256 de db/migrations/0017_recovery_support.up.sql: a36831feee21b3d2c04cd27e8613389e26970009480810aaaac6d78835a15db7
 BEGIN;

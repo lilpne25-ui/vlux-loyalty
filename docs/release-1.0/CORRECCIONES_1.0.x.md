@@ -42,7 +42,7 @@ Otros cambios:
 ### 2.2 Riesgos residuales (no se eliminan con código)
 1. **El dueño ve el enlace** y la casilla de identidad la marca él mismo. La protección es de proceso, no criptográfica. Mitigación: la bitácora registra quién y cuándo, y el enlace solo va al contacto registrado.
 2. **Saturación con muchas IP:** con unas 60 IPv4 se agota el freno de 300/h de un negocio durante una hora. Mientras tanto el cliente ve «pídelo en caja», y el negocio sigue operando en mostrador. Mitigaciones futuras: desafío ligero o reglas de WAF en Vercel.
-3. **Tarea programada:** el barrido global depende de que `GET /api/internal/notifications/run` esté programado con `CRON_SECRET`. No lo pude verificar en el panel de Vercel. Mientras no corra, la app barre cuando hay actividad de recuperación y la lectura nunca muestra contactos vencidos, pero un negocio sin actividad conservaría filas vencidas en la base y en los respaldos. Cómo comprobarlo: `0017_verificar_retencion.sql`.
+3. **Tarea de retención (actualizado, §8):** la retención ya **no** corre en la ruta de avisos. Es una tarea independiente, `GET /api/internal/recovery/retention`, que nunca envía mensajes; se programa con Vercel Schedules, preparada y **apagada**. Mientras no se programe, la app barre cuando hay actividad de recuperación y la lectura nunca muestra contactos vencidos. Pero un negocio sin actividad conservaría filas vencidas en la base y en los respaldos hasta correrla a mano. Cómo comprobarlo: `0017_verificar_retencion.sql`.
 4. **`grants.sql` de `vlux-ops` sin sincronizar:** con 0017 aplicada y el `grants.sql` viejo, una restauración deja la recuperación sin permisos. `backup-verify.sh` **lo detecta** (probado: «permisos de vlux_app distintos al origen»). `restore-drill.sh` por sí solo **no** lo detecta. Por eso el parche va en el mismo paso que 0017.
 5. `require_scope('worker')` en el barrido ordena el uso pero no es una barrera, porque `vlux_app` puede fijarse el alcance. Es aceptable porque la función solo reduce datos y devuelve conteos.
 
@@ -135,7 +135,7 @@ Estado de partida (según el registro del proyecto): la **Fase 1 de 0016 ya se e
 
 1. **Desplegar 1.0.x (este PR) en los dos proyectos de Preview**, con el mismo procedimiento y la misma reversión que la Fase 1. Es compatible con 0015, que es el estado actual. El esquema sigue en 0015. Las pantallas de recuperación muestran «pídelo en caja» y el resto funciona igual, como en la matriz 0015.
    - Antes de compilar, definir `VITE_VLUX_LANDING_URL` si ya hay una landing comercial. Si no, el botón usa WhatsApp comercial.
-   - Confirmar que existe la tarea programada a `/api/internal/notifications/run` con `CRON_SECRET`.
+   - **No** agregar `CRON_SECRET` ni programar nada en este paso. La retención es una tarea aparte (§8); el procedimiento exacto está en `TAREA_RETENCION_0017.md` §5.
 2. **Fase 2 de 0016 (sin cambios):** pegar `0016_pegar_en_supabase.sql` y verificar con `0016_verificar_solo_lectura.sql`. Sincronizar `vlux-ops` con el parche de 0016.
 3. **0017**, como paso independiente, en cualquier momento después de la Fase 1:
    1. Respaldo manual fresco desde `vlux-ops` (sin tocar `BACKUP_SCHEDULE`).
@@ -143,6 +143,7 @@ Estado de partida (según el registro del proyecto): la **Fase 1 de 0016 ya se e
    3. Pegar `0017_verificar_retencion.sql`: todas las filas deben decir «sí».
    4. Aplicar `parches/vlux-ops-sincronizar-0017.patch` en `vlux-ops` (o ejecutar `ops/vlux-ops/export.sh`) **en el mismo paso**. Después, un respaldo manual con `backup-verify.sh` verde.
    5. Prueba de humo: pedir recuperación desde un teléfono de prueba en un negocio de demostración (no Odalex), generar el enlace y cerrarlo.
+   6. Retención: `RECOVERY_RETENTION_SECRET` en el proyecto interno → `?dryRun=1` → corrida real → `0017_verificar_retencion.sql`. Programarla con Vercel Schedules es opcional y va aparte (`TAREA_RETENCION_0017.md` §6).
 
    La matriz cubre también el orden inverso, 0017 antes de 0016 (`0015+0017+0016`).
 4. Pruebas físicas (§6.4) antes de ofrecerlo a negocios reales.
@@ -170,10 +171,23 @@ No hay cambios en Odalex, secretos, programación de respaldos, Production ni `m
 | Decisión | Veredicto | Condición |
 |---|---|---|
 | Código 1.0.x listo para desplegar en **Preview** (con autorización) | **GO** | Verificaciones de este informe en verde. Sin regresiones en 10 combinaciones de esquema × motor. Dos revisiones independientes; la última, «aprobado con reservas», con todas sus reservas atendidas o documentadas como residuales |
-| Pegar **0017** en Supabase Preview | **GO técnico, condicionado** | Se cumplen tres cosas: (a) respaldo manual fresco; (b) parche de `vlux-ops` en el mismo paso; (c) confirmar que la tarea programada `/api/internal/notifications/run` existe. Sin (c), la retención depende de la actividad (riesgo residual 3) |
+| Pegar **0017** en Supabase Preview | **GO técnico, condicionado** | Se cumplen tres cosas: (a) respaldo manual fresco; (b) parche de `vlux-ops` en el mismo paso; (c) correr la tarea independiente de retención (primero `dryRun`) y decidir si se programa. Sin programarla, la retención depende de la actividad o de correrla a mano (riesgo residual 3). Activarla **no** dispara avisos (§8) |
 | Ofrecerlo a **negocios reales** (piloto comercial) | **NO-GO** | Faltan cuatro cosas: (1) pruebas en iPhone, Android e impresora **físicos** (§6.4); (2) humo manual de la Fase 1 y la Fase 2 de 0016, que siguen pendientes según el registro del proyecto; (3) decidir y publicar `VITE_VLUX_LANDING_URL`, o aceptar el WhatsApp comercial; (4) aviso de privacidad que mencione las solicitudes de recuperación y su retención (30/7/90 días) |
 | Production / `main` | **Fuera de alcance** | No se tocó |
 
 No se declara terminado lo que no se verificó:
-- Safari con WebKit real, impresión física, WhatsApp real y la tarea programada en Vercel quedan **pendientes**.
+- Safari con WebKit real, impresión física y WhatsApp real quedan **pendientes**.
+- La schedule de Vercel queda **preparada pero sin probar en Vercel**: es beta pública y no se activó por instrucción de Vlux.
 - Latencia y bloqueos de 0017 en Supabase **no medidos**: es aditiva y no reescribe tablas, así que se esperan bloqueos breves, pero no está medido.
+
+## 8. Tarea de retención independiente (2026-11-08, a petición de Vlux)
+
+Vlux pidió que habilitar la limpieza de datos no pueda disparar avisos a los negocios existentes (en especial Odalex). Detalle, procedimiento y despliegue paso a paso: **`TAREA_RETENCION_0017.md`**.
+
+- `GET /api/internal/notifications/run` quedó **idéntica** a `9220227` (sin retención). Nueva `GET /api/internal/recovery/retention`: solo `recovery_retention_sweep()`; Bearer de servidor (`RECOVERY_RETENTION_SECRET` o `CRON_SECRET`, ≥32); `limit` 1..2000; 3 s / 1 s / 5 s de tiempos en la base; candado contra solapes; `dryRun` que ejecuta y deshace.
+- **Pruebas nuevas:** 10 de integración (RT-01…RT-10) y 3 unitarias. RT-03 demuestra que no sale ningún aviso, correo ni push con una notificación lista en cola, y su control positivo la envía por la ruta de avisos.
+- **Matriz con la tarea nueva (PG 16.15 y 17.11):** 0015 168 ✓ / 62 ✗ · 0015+0017 194 / 42 · 0016 210 / 20 · 0016+0017 **236/236** · 0015+0017+0016 **236/236**. El clasificador informa «SIN REGRESIONES»: las fallas son las mismas esperadas (exigen 0016 o 0017). Las RT pasan en todas; las que exigen 0017 se omiten donde no existe.
+- **Parche `vlux-ops-sincronizar-0017.patch` antes de 0017:** se aplica limpio sobre el `grants.sql` de `9220227` (el sincronizado con 0016), es reversible y el resultado es idéntico al `ops/grants.sql` de la rama. Con ese archivo, `backup-verify.sh` y `restore-drill.sh` pasan en las bases **0015** y **0016** (sin 0017) y también con 0017 (`verify-backups-0017.sh`: «TODO OK», permisos finos idénticos, el rol de la app en la copia lee y barre).
+- **Regresión:** unitarias 96/96, integración 236/236, E2E de UX 43/43, regresión v0.4.3–v0.4.6 OK.
+- **Revisión independiente `msa-lud-dev`:** `REVISION_INDEPENDIENTE_MSA_LUD_DEV.md` §3 (aprobado con reservas; H1, H3, H4, H5, H6 y H9 corregidos; H2, H7, H8 documentados o por verificar antes de activar).
+- **Vercel Schedules:** declaración preparada y **apagada** en `scripts/build-vercel.mjs` (bandera + Preview). No se activó nada ni se desplegó.

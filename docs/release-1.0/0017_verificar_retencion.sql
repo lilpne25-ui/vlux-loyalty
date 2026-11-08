@@ -1,7 +1,8 @@
 -- VLUX Loyalty 1.0.x · Verificación de SOLO LECTURA de la política de retención de recovery_requests (0017).
 -- Se puede pegar en el editor SQL de Supabase en cualquier momento: no modifica nada. Todas las filas deben decir «sí».
--- Si «abiertas vencidas en claro» > 0, la tarea programada no ha corrido: ejecuta GET /api/internal/notifications/run
--- (con CRON_SECRET) o espera a la siguiente ejecución; la app nunca muestra esos contactos (los enmascara al leer).
+-- Si «abiertas vencidas en claro» > 0, la tarea de retención no ha corrido: ejecuta GET /api/internal/recovery/retention
+-- (Bearer RECOVERY_RETENTION_SECRET o CRON_SECRET; primero con ?dryRun=1). Es independiente de los avisos: no envía
+-- mensajes. La app nunca muestra esos contactos (los enmascara al leer). Ver TAREA_RETENCION_0017.md.
 SELECT 'tabla recovery_requests presente' AS verificacion, CASE WHEN to_regclass('public.recovery_requests') IS NOT NULL THEN 'sí' ELSE 'NO (0017 no aplicada)' END AS resultado
 UNION ALL SELECT 'restricción de minimizado activa', CASE WHEN EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'recovery_requests_minimized' AND convalidated) THEN 'sí' ELSE 'NO' END
 UNION ALL SELECT 'cerradas con contacto en claro = 0', CASE WHEN count(*) = 0 THEN 'sí' ELSE 'NO: ' || count(*) END FROM recovery_requests WHERE status NOT IN ('pending','link_issued') AND position('***' in contact) = 0

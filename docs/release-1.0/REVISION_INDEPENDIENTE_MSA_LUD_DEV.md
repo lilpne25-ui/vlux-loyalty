@@ -54,3 +54,24 @@ Comprobaciones que ejecutó: `npm run typecheck` (sin errores) y `npm run test:u
 | B2 | — | Descripción en bitácora inmutable. | Ya no se guarda: solo `descriptionLength`; el texto viaja únicamente en el WhatsApp a soporte. |
 
 Riesgo que el agente deja explícito y que no se elimina con código: el dueño ve y puede copiar el enlace, y `identityVerified` es una casilla que marca el propio dueño. La protección es de proceso (QR en persona / contacto registrado), no criptográfica.
+
+## 3. Tercera revisión · 2026-11-08 · tarea de retención separada de los avisos (cambios sobre `24b7097`)
+
+Agente `msa-lud-dev`, **solo lectura** (sin editar archivos ni usar red). Comprobaciones que ejecutó: `npm run typecheck` (sin errores), `npm run test:unit` (96/96) y `tests/integration/v1-retention-task.test.ts` en la base local (10/10); además comprobó que no queden candados asesores ni sesiones «idle in transaction» tras las pruebas. No ejecutó la matriz ni el E2E.
+**Veredicto del agente: APROBADO CON RESERVAS.** Cumple los 7 requisitos; ningún hallazgo crítico ni alto.
+
+| ID | Sev. | Hallazgo (resumen del agente) | Resolución |
+|---|---|---|---|
+| H1 | Medio | La bandera de la schedule se lee al compilar sin importar el entorno: creada para «todos los entornos», un build de Production la declararía. | **Corregido:** doble llave, la bandera **y** `VERCEL_ENV=preview`; documentado «solo Preview». Verificado compilando con 4 combinaciones. |
+| H2 | Medio (operación) | La schedule necesita `CRON_SECRET`, que también abre la ruta de avisos; hoy no es explotable (sin VAPID/SMTP en Preview). | **Documentado** como decisión de Vlux, con advertencia en `.env.example` y en `TAREA_RETENCION_0017.md`; alternativa: destino `function` privado (no implementada). |
+| H3 | Bajo | El `curl` de prueba apuntaba a la demo, pero el secreto va en el interno. | **Corregido:** `vercel curl` contra el proyecto interno. |
+| H4 | Bajo | La schedule coincidía con el respaldo diario (09:17 UTC). | **Corregido:** 08:47 UTC, antes del respaldo. |
+| H5 | Bajo | `Number()` aceptaba `1e3`, `0x10`. | **Corregido:** solo `^\d{1,4}$`. |
+| H6 | Bajo | Un secreto con espacios o no ASCII da 401 silencioso. | **Documentado** en `.env.example`. |
+| H7 | Bajo (por verificar) | No se sabe si una Schedule atraviesa la protección de despliegue del proyecto interno. | **Pendiente de comprobar en Vercel** (`vercel schedules invoke`) antes de habilitar. |
+| H8 | Bajo (por verificar) | Forma exacta del objeto de la schedule (`timezone`, `requestMethod`) no confirmada sin red. | **Pendiente:** la documentación oficial consultada lo muestra así; revisar con `vercel schedules list` al activarla. |
+| H9 | Bajo | Faltaba `--test-concurrency=1` en el comando documentado. | **Corregido.** |
+
+Nota del agente fuera de alcance: la ruta de avisos acepta el secreto sin el prefijo «Bearer» (`.replace(/^Bearer /,'')`). Se **dejó idéntica** a propósito, porque el requisito es mantenerla intacta; queda como mejora futura.
+
+Lo que el agente verificó como correcto: ruta de avisos idéntica a `9220227` línea por línea; la retención no toca mensajería y su control positivo funciona (RT-03); la ruta de avisos ya no barre (RT-04); autenticación en tiempo constante, sin token por URL ni cookie, el secreto dedicado no abre avisos; tiempos y candados (el candado asesor se libera al cerrar la transacción; fila bloqueada falla en <4 s); `dryRun` no persiste nada (huella md5); límites 1..2000; sin disparadores que escriban en avisos o correos; schedule apagada por omisión y sin `crons` que la dupliquen; los cambios en archivos de 0017 son solo comentarios (el checksum no cambia).

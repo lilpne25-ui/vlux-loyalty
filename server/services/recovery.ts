@@ -13,7 +13,8 @@
 // el mismo. Si el contacto no coincide, el dueño debe confirmar que verificó la identidad en persona.
 //
 // Retención: ver db/migrations/0017_recovery_support.up.sql (30 días abiertas, 7 días tras generar el enlace,
-// enmascarado al cerrar, borrado a los 90 días). retentionSweep() la aplica a todos los negocios.
+// enmascarado al cerrar, borrado a los 90 días). runRetentionTask() (tarea programada) y retentionSweep() (respaldo
+// oportunista desde la app) la aplican a todos los negocios.
 import { z } from 'zod';
 import { runWithScope, withTenant, withTx, type Tx } from '../db';
 import { AppError, notFound } from '../errors';
@@ -110,23 +111,61 @@ async function retryDeadlock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 let lastSweep = 0;
+/** Señal interna para deshacer el barrido en modo de prueba (dryRun): la transacción termina en ROLLBACK. */
+class DryRunRollback extends Error {}
+
 /**
- * Barrido de retención de TODOS los negocios (vence y borra). Lo llama la tarea programada; la app además lo dispara
- * como máximo cada 10 min cuando hay actividad de recuperación, para no depender solo del programador.
+ * Una pasada de recovery_retention_sweep() acotada: máximo 3 s de sentencia, 1 s esperando bloqueos y sin quedar
+ * «idle in transaction». Un candado asesor de transacción impide dos barridos a la vez (programador + app): si ya hay
+ * uno corriendo devuelve 'busy' sin esperar. Con dryRun la función corre completa y luego se DESHACE (ROLLBACK): sirve
+ * para ver cuántas filas vencería/borraría sin modificar datos. Sin 0017 lanza 42883 y `guarded` lo convierte en null.
+ */
+async function sweepOnce(limit: number, dryRun: boolean): Promise<{ expired: number; deleted: number } | 'busy'> {
+  let out: { expired: number; deleted: number } | 'busy' = 'busy';
+  try {
+    await runWithScope('worker', () => withTx(async (tx) => {
+      await tx.query("SET LOCAL statement_timeout = '3s'; SET LOCAL idle_in_transaction_session_timeout = '5s'; SET LOCAL lock_timeout = '1s'");
+      const lock = await tx.query("SELECT pg_try_advisory_xact_lock(hashtext('vlux.recovery_retention_sweep')) AS ok");
+      if (!lock.rows[0].ok) return;
+      out = (await tx.query('SELECT recovery_retention_sweep($1) AS j', [limit])).rows[0].j as { expired: number; deleted: number };
+      if (dryRun) throw new DryRunRollback();
+    }));
+  } catch (e) {
+    if (!(e instanceof DryRunRollback)) throw e;
+  }
+  return out;
+}
+
+/**
+ * Barrido de retención de TODOS los negocios (vence y borra). Lo dispara la app como máximo cada 10 min cuando hay
+ * actividad de recuperación (respaldo del programador); la tarea programada usa runRetentionTask().
  */
 export async function retentionSweep(opts: { force?: boolean; limit?: number } = {}): Promise<{ expired: number; deleted: number } | null> {
   if (!opts.force && Date.now() - lastSweep < 10 * 60_000) return null;
   lastSweep = Date.now();
   if (!(await recoverySchemaReady())) return null;
-  return guarded(async () => {
-    // Siempre ESPERADO (nunca en segundo plano: en Vercel la instancia puede congelarse con la transacción abierta) y
-    // acotado: máximo 3 s y sin quedar «idle in transaction».
-    const r = await runWithScope('worker', () => withTx(async (tx) => {
-      await tx.query("SET LOCAL statement_timeout = '3s'; SET LOCAL idle_in_transaction_session_timeout = '5s'; SET LOCAL lock_timeout = '1s'");
-      return tx.query('SELECT recovery_retention_sweep($1) AS j', [opts.limit ?? 2000]);
-    }));
-    return r.rows[0].j as { expired: number; deleted: number };
-  }, () => null);
+  // Siempre ESPERADO (nunca en segundo plano: en Vercel la instancia puede congelarse con la transacción abierta).
+  const r = await guarded(() => sweepOnce(opts.limit ?? 2000, false), () => null);
+  return r === 'busy' ? null : r;
+}
+
+export const RETENTION_LIMIT = { min: 1, max: 2000, default: 500 } as const;
+export type RetentionTaskResult = { available: boolean; busy: boolean; dryRun: boolean; limit: number; expired: number; deleted: number; ms: number };
+/**
+ * 1.0.x · Tarea programada INDEPENDIENTE de retención (GET /api/internal/recovery/retention). Solo toca
+ * recovery_requests: no lee ni escribe avisos, correos ni suscripciones push, y no importa el motor de notificaciones.
+ * Sin 0017 responde available:false (no falla). Con 0016 corre con alcance «worker».
+ */
+export async function runRetentionTask(opts: { limit: number; dryRun: boolean }): Promise<RetentionTaskResult> {
+  const t0 = Date.now();
+  const limit = Math.min(RETENTION_LIMIT.max, Math.max(RETENTION_LIMIT.min, Math.trunc(opts.limit)));
+  const base = { dryRun: opts.dryRun, limit, expired: 0, deleted: 0 };
+  if (!(await recoverySchemaReady())) return { ...base, available: false, busy: false, ms: Date.now() - t0 };
+  const r = await guarded(() => sweepOnce(limit, opts.dryRun), () => null);
+  if (r === null) return { ...base, available: false, busy: false, ms: Date.now() - t0 };
+  if (r === 'busy') return { ...base, available: true, busy: true, ms: Date.now() - t0 };
+  if (!opts.dryRun) lastSweep = Date.now();
+  return { ...base, ...r, available: true, busy: false, ms: Date.now() - t0 };
 }
 /** Barrido oportunista desde una ruta real (no demo): esperado, pequeño y sin romper la respuesta si falla. */
 const opportunisticSweep = async () => { await retentionSweep({ limit: 200 }).catch((e) => { console.error('[recovery] barrido de retención falló', (e as Error).message); return null; }); };

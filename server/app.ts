@@ -6,7 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { ZodError } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
-import { ipBucket } from './security';
+import { bearerMatchesAny, ipBucket } from './security';
 import { config } from './config';
 import { APP_VERSION } from './version';
 import { AppError, forbidden, notFound, unauthorized } from './errors';
@@ -28,7 +28,7 @@ import { buildManifest, buildStaffManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
 import { cancelAppointment, communicationOverview, createAppointment, createPromotion, dispatchBusiness, publicPushConfig, runNotificationJob, subscribe, subscriptionStatus, unsubscribe, updatePreferences, updateSettings } from './services/notifications';
-import { closeRecovery, issueRecoveryLink, listRecovery, publicHelp, requestRecovery, retentionSweep, setBusinessWhatsapp } from './services/recovery';
+import { closeRecovery, issueRecoveryLink, listRecovery, publicHelp, requestRecovery, RETENTION_LIMIT, runRetentionTask, setBusinessWhatsapp } from './services/recovery';
 import { recordSupportReport } from './services/support';
 import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
 
@@ -263,12 +263,26 @@ export function buildApp() {
     if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
     c.header('Cache-Control', 'no-store');
     // La función de Vercel corta a los 15 s (maxDuration en build-vercel.mjs): el presupuesto queda por debajo.
-    // 1.0.x · Retención de solicitudes de recuperación (todos los negocios) ANTES de los avisos, con tope de 3 s, para que
-    // nunca se quede sin tiempo. Sin 0017 devuelve null y no falla.
-    const t0 = Date.now();
-    const recovery = await retentionSweep({ force: true }).catch((e) => { console.error('[recovery] barrido falló', (e as Error).message); return null; });
-    const job = await runNotificationJob({ budgetMs: Math.max(2000, jobBudgetMs() - (Date.now() - t0)) });
-    return c.json({ ...job, recoveryRetention: recovery });
+    return c.json(await runNotificationJob({ budgetMs: jobBudgetMs() }));
+  });
+
+  // 1.0.x · Retención de «Perdí mi acceso» (0017) como tarea INDEPENDIENTE de los avisos: solo llama a
+  // recovery_retention_sweep(); nunca ejecuta runNotificationJob(), correos ni push. Autenticación de servidor:
+  // Bearer con RECOVERY_RETENTION_SECRET (pruebas manuales, no sirve para avisos) o CRON_SECRET (el que envía Vercel
+  // Schedules). Ambos ≥32 caracteres. ?limit=1..2000 (500 por omisión) · ?dryRun=1 ejecuta y DESHACE (no cambia datos).
+  api.get('/internal/recovery/retention', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    if (!bearerMatchesAny(c.req.header('authorization'), [process.env.RECOVERY_RETENTION_SECRET, process.env.CRON_SECRET])) throw unauthorized();
+    const rawLimit = c.req.query('limit');
+    const limit = rawLimit === undefined ? RETENTION_LIMIT.default : /^\d{1,4}$/.test(rawLimit) ? Number(rawLimit) : NaN;
+    if (!Number.isInteger(limit) || limit < RETENTION_LIMIT.min || limit > RETENTION_LIMIT.max) {
+      throw new AppError(422, 'invalid_limit', `limit debe ser un entero entre ${RETENTION_LIMIT.min} y ${RETENTION_LIMIT.max}.`);
+    }
+    const rawDry = c.req.query('dryRun');
+    if (rawDry !== undefined && !['0', '1', 'true', 'false'].includes(rawDry)) throw new AppError(422, 'invalid_dry_run', 'dryRun debe ser 1 o 0.');
+    const r = await runRetentionTask({ limit, dryRun: rawDry === '1' || rawDry === 'true' });
+    console.log('[recovery] retención', JSON.stringify(r));
+    return c.json(r);
   });
 
   // ---------- PWA: vincular la app instalada (V0.2.2) ----------
