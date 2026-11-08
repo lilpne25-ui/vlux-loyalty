@@ -5,6 +5,7 @@
 //   /acceso       inicio de sesión del personal
 //   /caja         panel del empleado (empleado o dueño)
 //   /panel        panel del dueño (solo dueño)
+//   /panel/cartel cartel del QR para imprimir a tamaño carta o A5 (1.0.x, solo dueño)
 //   /cuenta       cambio de contraseña del personal
 //   /t#token      abre la tarjeta desde el enlace personal
 //   /restablecer#token  contraseña nueva con enlace de un solo uso
@@ -25,6 +26,7 @@ import { LandingView } from './views/Landing';
 import { LoginView } from './views/Login';
 import { CardLinkView, ChangePasswordPanel, ResetPasswordView } from './views/Account';
 import { ActivateWithCodeView, InvitationView } from './views/Invitation';
+import PosterPrintView from './views/PosterPrint';
 
 const AdminApp = lazy(() => import('./admin/AdminApp'));
 const PersonalizarView = lazy(() => import('./views/Personalizar'));
@@ -108,6 +110,11 @@ function Shell() {
     return <BusinessGate wanted={wanted} session={session} onSwitched={async (role) => { await loadSession(); navigate(home(role, wanted), { replace: true }); }}
       onLogout={async () => { await api('POST', '/staff/logout', {}).catch(() => undefined); setS({ loading: false, session: null, colors: null }); navigate(`/acceso?negocio=${encodeURIComponent(wanted)}`, { replace: true }); }}
       onStay={() => navigate(home(session.role, session.business.slug), { replace: true })} />;
+  }
+
+  // 1.0.x · Ruta de impresión del cartel: sin barra superior ni pestañas (solo el cartel y sus botones).
+  if (path === '/panel/cartel' && session.role === 'OWNER' && !session.mustChangePassword) {
+    return <PosterPrintView initialSize={search.get('tam') === 'a5' ? 'a5' : 'letter'} />;
   }
 
   const logout = async () => {

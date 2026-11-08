@@ -17,8 +17,14 @@ import { CommunicationTab } from './Communication';
 import { downloadQrPng } from '../lib/qr';
 import { HistoryTable } from './Employee';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
+import { buildPosterSpec, PosterDownloads, SizePicker, sizeParam } from './PosterPrint';
+import type { PosterSize } from '../lib/poster';
+import { navigate } from '../lib/router';
+import { RecoveryInbox, BusinessWhatsappForm, type RecoveryData } from '../components/RecoveryInbox';
+import { ReportProblemButton } from '../components/ReportProblem';
 
 type Tab = 'resumen' | 'clientes' | 'config' | 'equipo' | 'accesos' | 'comunicacion';
+const TAB_LABEL: Record<Tab, string> = { resumen: 'Resumen', clientes: 'Clientes', config: 'Programa', equipo: 'Equipo', accesos: 'Accesos', comunicacion: 'Comunicación' };
 interface Dashboard {
   kpis: { customers: number; newCustomers7d: number; visits: number; purchases: number; stamps: number; recurring: number; rewardsUnlocked: number; redemptions: number; rewardsPending: number; reviewPrompts: number; reviewClicks: number };
   series: { day: string; visits: number; purchases: number }[];
@@ -34,6 +40,8 @@ export function OwnerView({ onBusinessChanged, welcome }: { onBusinessChanged: (
   const biz = usePolling(() => api<FullBusiness>('GET', '/staff/business'), 60_000, []);
   useStaffAppHead(biz.data?.slug, 'panel', biz.data?.name, biz.data?.primaryColor);
   const [showWelcome, setShowWelcome] = useState(!!welcome);
+  // 1.0.x · Solicitudes «Perdí mi acceso»: el número pendiente se ve en la pestaña Accesos y en el resumen.
+  const recovery = usePolling(() => api<RecoveryData>('GET', '/owner/recovery'), 60_000, []);
   if (biz.error && !biz.data) return <div className="gutter py-10"><ErrorBox message={biz.error.message} onRetry={biz.refresh} /></div>;
   if (!biz.data) return <Loading />;
   const b = biz.data;
@@ -51,8 +59,17 @@ export function OwnerView({ onBusinessChanged, welcome }: { onBusinessChanged: (
               <span>{b.program.stampsRequired} {units(b.program, b.program.stampsRequired)} = {b.program.rewardDescription.toLowerCase()}</span>
             </div>
           </div>
-          <InstallAppButton app="panel" business={{ slug: b.slug, name: b.name, logoUrl: b.logoUrl }} />
+          <div className="flex flex-wrap items-center gap-2">
+            <ReportProblemButton businessName={b.name} slug={b.slug} view={`Panel › ${TAB_LABEL[tab]}`} />
+            <InstallAppButton app="panel" business={{ slug: b.slug, name: b.name, logoUrl: b.logoUrl }} />
+          </div>
         </header>
+        {(recovery.data?.pending ?? 0) > 0 && tab !== 'accesos' && (
+          <button type="button" onClick={() => setTab('accesos')} data-testid="recovery-banner"
+            className="no-print text-left rounded-xl border border-[#FEDF89] bg-[#FFFAEB] px-4 py-2.5 text-[13px] text-[#B54708]">
+            {recovery.data!.pending === 1 ? 'Un cliente pidió recuperar su acceso.' : `${recovery.data!.pending} clientes pidieron recuperar su acceso.`} <span className="underline underline-offset-2">Revisar en Accesos</span>
+          </button>
+        )}
 
         <nav className="flex gap-1 border-b border-line -mb-1 overflow-x-auto no-scrollbar" role="tablist" aria-label="Secciones del panel">
           {([
@@ -60,7 +77,7 @@ export function OwnerView({ onBusinessChanged, welcome }: { onBusinessChanged: (
             ['clientes', 'Clientes', <ListChecks size={15} key="b" />],
             ['config', 'Programa', <Settings2 size={15} key="c" />],
             ['equipo', 'Equipo', <Users size={15} key="d" />],
-            ['accesos', 'Accesos', <QrCode size={15} key="e" />],
+            ['accesos', <>Accesos{(recovery.data?.pending ?? 0) > 0 && <span className="ml-1 inline-flex h-[18px] min-w-[18px] px-1 items-center justify-center rounded-full bg-[#F79009] text-white text-[11px]" data-testid="recovery-tab-badge">{recovery.data!.pending}</span>}</>, <QrCode size={15} key="e" />],
             ['comunicacion', 'Comunicación', <BellRing size={15} key="f" />],
           ] as const).map(([k, label, icon]) => (
             <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx('h-10 px-3 -mb-px inline-flex items-center gap-1.5 text-[13.5px] font-medium border-b-2 whitespace-nowrap transition shrink-0', tab === k ? 'border-ink text-ink' : 'border-transparent text-slate2 hover:text-ink')}>
@@ -73,7 +90,7 @@ export function OwnerView({ onBusinessChanged, welcome }: { onBusinessChanged: (
         {tab === 'clientes' && <Customers />}
         {tab === 'config' && <Settings business={b} onSaved={() => { biz.refresh(); onBusinessChanged(); }} />}
         {tab === 'equipo' && <Team />}
-        {tab === 'accesos' && <AccessTab business={b} onSeen={() => markStep(b.slug, 'qr')} />}
+        {tab === 'accesos' && <AccessTab business={b} onSeen={() => markStep(b.slug, 'qr')} recovery={recovery.data} refreshRecovery={recovery.refresh} />}
         {tab === 'comunicacion' && <CommunicationTab business={b} />}
       </div>
       {showWelcome && <OwnerWelcome business={b} onClose={() => { setShowWelcome(false); const u = new URL(location.href); u.searchParams.delete('bienvenida'); history.replaceState(null, '', u.pathname + u.search); }} onQr={() => markStep(b.slug, 'qr')} />}
@@ -607,13 +624,19 @@ function Team() {
   );
 }
 
-function AccessTab({ business: b, onSeen }: { business: FullBusiness; onSeen?: () => void }) {
+function AccessTab({ business: b, onSeen, recovery, refreshRecovery }: { business: FullBusiness; onSeen?: () => void; recovery: RecoveryData | null; refreshRecovery: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { onSeen?.(); }, []);
   const [links, setLinks] = useState<Links | null>(null);
   useEffect(() => { api<Links>('GET', `/public/businesses/${b.slug}/access`).then(setLinks).catch(() => setLinks(null)); }, [b.slug]);
   return (
     <div className="flex flex-col gap-8">
+      {recovery?.available && (
+        <div className="grid gap-4 lg:grid-cols-[1fr,320px] items-start no-print">
+          <RecoveryInbox data={recovery} businessName={b.name} refresh={refreshRecovery} />
+          <BusinessWhatsappForm key={recovery.businessWhatsapp ?? ''} value={recovery.businessWhatsapp} onSaved={refreshRecovery} />
+        </div>
+      )}
       {links && <AccessCenter businessName={b.name} slug={b.slug} links={links} logoUrl={b.logoUrl} />}
       <div>
         <h2 className="text-[18px] font-semibold text-ink mb-1">Cartel para el mostrador</h2>
@@ -626,9 +649,11 @@ function AccessTab({ business: b, onSeen }: { business: FullBusiness; onSeen?: (
 
 function CounterQr({ business: b }: { business: FullBusiness }) {
   const url = businessQrValue(b.slug);
+  const [size, setSize] = useState<PosterSize>('letter');
+  const spec = useMemo(() => buildPosterSpec(b), [b]);
   return (
-    <section className="flex flex-col items-center gap-4">
-      <div className="print-area w-full max-w-[420px] rounded-[28px] p-8 text-center text-[color:var(--cream)] shadow-xl" data-vertical={b.vertical} style={{ ...brandVars(b.primaryColor, b.accentColor, b.cardFinish), background: 'var(--brand)' }}>
+    <section className="flex flex-col items-center gap-4" data-testid="counter-qr">
+      <div className="w-full max-w-[420px] rounded-[28px] p-8 text-center text-[color:var(--cream)] shadow-xl" data-vertical={b.vertical} style={{ ...brandVars(b.primaryColor, b.accentColor, b.cardFinish), background: 'var(--brand)' }}>
         <div className="flex justify-center"><BusinessLogo name={b.name} size={56} src={b.logoUrl} /></div>
         <div className="mt-3 font-display text-[24px] leading-tight">{b.name}</div>
         <div className="mt-1 text-[14px] opacity-80">Escanea y obtén tu tarjeta de recompensas</div>
@@ -638,7 +663,13 @@ function CounterQr({ business: b }: { business: FullBusiness }) {
         <div className="mt-5 flex justify-center"><VluxMark tone="chip" className="text-[color:var(--cream)] opacity-90" /></div>
       </div>
       <p className="text-[12.5px] text-slate2 font-mono break-all text-center">{url}</p>
-      <Button variant="secondary" onClick={() => window.print()}><Printer size={16} /> Imprimir</Button>
+      <div className="w-full max-w-[520px] panel p-4 flex flex-col items-center gap-3 no-print">
+        <div className="flex flex-wrap items-center justify-center gap-2 text-[13px] text-slate2"><span>Tamaño de hoja</span><SizePicker size={size} onChange={setSize} /></div>
+        <a href={`/panel/cartel?negocio=${encodeURIComponent(b.slug)}&tam=${sizeParam(size)}`} onClick={(e) => { e.preventDefault(); navigate(`/panel/cartel?negocio=${encodeURIComponent(b.slug)}&tam=${sizeParam(size)}`); }}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl bg-ink text-white text-[14px] font-medium" data-testid="poster-open-print"><Printer size={16} /> Imprimir cartel</a>
+        <PosterDownloads spec={spec} slug={b.slug} size={size} />
+        <p className="text-[11.5px] text-slate2 text-center leading-snug max-w-[420px]">El cartel sale a tamaño {size === 'letter' ? 'carta' : 'A5'} con el QR grande y su margen blanco. Desde el celular, lo más confiable es <strong>Descargar PDF</strong> e imprimirlo desde tus archivos.</p>
+      </div>
     </section>
   );
 }

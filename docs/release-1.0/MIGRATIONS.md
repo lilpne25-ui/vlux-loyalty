@@ -60,3 +60,4 @@ El código del RC **no depende** de 0015 (solo permisos e índices): el Preview 
 - Nunca correr `scripts/migrate.ts down` contra Preview ni producción: es solo para desarrollo.
 
 | 0016_tenant_isolation | Aislamiento por RLS en nueve tablas, alcances `app.scope`, envolturas de funciones de plataforma, UPDATE por columnas. **No aplicada en Preview.** Pegar `0016_pegar_en_supabase.sql` DESPUÉS de desplegar el código. Reversa: `0016_tenant_isolation.down.sql`. |
+| 0017_recovery_support | Solicitudes de recuperación de acceso (`recovery_requests`, RLS por negocio, sin DELETE) y `businesses.contact_whatsapp`. Aditiva, independiente de 0016 (sirve sobre 0015 o 0016). **No aplicada en Preview.** Pegar `0017_pegar_en_supabase.sql` (antes o después del código). Reversa: `0017_revertir_en_supabase.sql`. Ver `UX_OPERATIVO_1.0.x.md`. |
