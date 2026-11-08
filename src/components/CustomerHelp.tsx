@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle2, ExternalLink, KeyRound, LifeBuoy, MessageCircle, ShieldCheck, Store } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
-import { VLUX_LANDING_URL, businessRecoveryText, mxToIntl, vluxSupportLink, waLink } from '../lib/support';
+import { VLUX_LANDING_URL, businessRecoveryText, mxToIntl, vluxLearnMoreLink, vluxSupportLink, waLink } from '../lib/support';
 import { Button, Field, inputCls, VluxMark, cx } from './ui';
 
 type Help = { recovery: boolean; businessWhatsapp: string | null };
@@ -106,7 +106,8 @@ export function VluxHelp({ businessName }: { businessName: string }) {
           className="inline-flex items-center justify-center gap-1.5 h-10 rounded-xl border border-cafe-line bg-white text-[12.5px] font-medium text-cafe-ink hover:bg-cafe-cream/60">
           <MessageCircle size={15} /> Soporte por WhatsApp
         </a>
-        <a href={VLUX_LANDING_URL} target="_blank" rel="noopener" data-testid="vlux-help-landing"
+        {/* Landing comercial configurada (VITE_VLUX_LANDING_URL) o, si no hay, conversación comercial con VLUX por WhatsApp. */}
+        <a href={vluxLearnMoreLink(businessName)} target="_blank" rel="noopener noreferrer" data-testid="vlux-help-landing" data-kind={VLUX_LANDING_URL ? 'landing' : 'whatsapp'}
           className="inline-flex items-center justify-center gap-1.5 h-10 rounded-xl border border-cafe-line bg-white text-[12.5px] font-medium text-cafe-ink hover:bg-cafe-cream/60">
           Conocer VLUX Loyalty <ExternalLink size={13} />
         </a>

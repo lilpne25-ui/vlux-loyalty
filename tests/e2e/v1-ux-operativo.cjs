@@ -1,5 +1,7 @@
 // E2E 1.0.x · Pulido UX operativo: cartel QR (impresión/descargas), recuperación de acceso, ayuda VLUX y reporte de
-// problemas. Chromium de escritorio y móvil EMULADO (390×844): no sustituye pruebas en teléfonos e impresoras reales.
+// problemas. Chromium de escritorio y móvil EMULADO: «iPhone» = Chromium con viewport/UA de iPhone (NO es el motor
+// WebKit de Safari) y «Android» = Chromium con viewport/UA de Pixel 7 (mismo motor que Chrome Android, sin el sistema
+// de impresión de Android). No sustituye pruebas en teléfonos e impresoras reales.
 // Verifica que el QR se LEE después de «imprimir»: PDF de impresión de Chromium y PDF/PNG descargados se rasterizan
 // (pdftoppm + Pillow) y se decodifican con jsQR.
 // Uso local (BD desechable): scripts/e2e-v1-ux.sh
@@ -82,6 +84,9 @@ async function download(page, testid) {
   const browser = await chromium.launch();
   const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, acceptDownloads: true,
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1' };
+  const android = { viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true, acceptDownloads: true,
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36' };
+  const noHScroll = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
   const desk = await (await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true })).newPage(); watch(desk, 'dueño-escritorio');
   const phoneOwnerCtx = await browser.newContext(mobile);
   const phoneOwner = await phoneOwnerCtx.newPage(); watch(phoneOwner, 'dueño-móvil');
@@ -166,11 +171,16 @@ async function download(page, testid) {
   const expected = `https://wa.me/527441452048?text=${encodeURIComponent(`Hola, necesito ayuda con mi tarjeta de lealtad de ${name}.`)}`;
   ok('R3-01 bienvenida: soporte WhatsApp con número y mensaje correctos', waHref === expected, waHref);
   const landHref = await cust.getAttribute('[data-testid=vlux-help-landing]', 'href');
-  ok('R3-02 «Conocer VLUX Loyalty» lleva a la presentación pública', !!landHref && (landHref.startsWith('/') || landHref.startsWith('https://')), landHref);
+  // Compilado SIN VITE_VLUX_LANDING_URL: nunca una ruta interna; abre la conversación comercial con VLUX.
+  const landKind = await cust.getAttribute('[data-testid=vlux-help-landing]', 'data-kind');
+  const landRel = await cust.getAttribute('[data-testid=vlux-help-landing]', 'rel');
+  ok('R3-02 «Conocer VLUX Loyalty» sin landing configurada → WhatsApp comercial de VLUX (no ruta interna), noreferrer',
+    landKind === 'whatsapp' && landHref.startsWith('https://wa.me/527441452048?text=') && decodeURIComponent(landHref).includes(`vi VLUX Loyalty en la tarjeta de ${name}`) && /noreferrer/.test(landRel), landHref);
   const [land] = await Promise.all([custCtx.waitForEvent('page'), cust.click('[data-testid=vlux-help-landing]')]);
   await land.waitForLoadState();
-  ok('R3-03 la presentación abre en otra pestaña y la tarjeta sigue abierta', land.url().startsWith(BASE + '/') && !land.url().includes('/n/') && cust.url() === customerUrl, land.url());
+  ok('R3-03 se abre en otra pestaña y la tarjeta sigue abierta', land.url().startsWith('https://wa.me/') && cust.url() === customerUrl, land.url());
   await land.close();
+  ok('R7-01 iPhone emulado: bienvenida del cliente sin desplazamiento horizontal', await noHScroll(cust));
   const box = await cust.locator('[data-testid=vlux-help-wa]').boundingBox();
   ok('R3-04 botón de soporte cómodo de tocar en móvil (≥ 40 px de alto)', box && box.height >= 40, `${box && Math.round(box.height)} px`);
   await cust.locator('[data-testid=vlux-help]').scrollIntoViewIfNeeded();
@@ -248,6 +258,69 @@ async function download(page, testid) {
   await third.waitForSelector('[data-testid=recover-wa-business]');
   ok('R2-10 con WhatsApp configurado, el cliente puede escribir al negocio', (await third.getAttribute('[data-testid=recover-wa-business]', 'href')).startsWith('https://wa.me/527221002000?text='));
   await shot(third, 'R2-cliente-whatsapp-negocio');
+
+  // Suplantación: alguien escribe OTRO número diciendo ser Lucía. El dueño elige la tarjeta de Lucía a mano:
+  // se exige confirmar identidad en persona y el enlace solo puede ir al número REGISTRADO de Lucía.
+  const impostor = await (await browser.newContext(mobile)).newPage(); watch(impostor, 'suplantador');
+  await impostor.goto(customerUrl);
+  await impostor.click('[data-testid=recover-open]');
+  await impostor.fill('#rec-contact', '7229998888');
+  await impostor.fill('#rec-name', 'Lucía');
+  await impostor.click('[data-testid=recover-submit]');
+  await impostor.waitForSelector('[data-testid=recover-sent]');
+  await desk.reload();
+  await desk.click('button[role=tab]:has-text("Accesos")');
+  await desk.waitForSelector('[data-testid=recovery-inbox]');
+  const impItem = desk.locator('[data-testid=recovery-item]').filter({ hasText: '722 999 8888' });
+  await impItem.locator('[data-testid=recovery-pick]').click();
+  await desk.fill('#pick-q', code);
+  await desk.click("form:has(#pick-q) button[type=submit]");
+  await desk.click('button:has-text("Usar esta")');
+  await desk.waitForSelector('[data-testid=recovery-confirm]');
+  const goDisabled = await desk.isDisabled('[data-testid=recovery-confirm-go]');
+  const tokensBefore = (await sql("SELECT count(*)::int AS n FROM card_access_tokens t JOIN cards c ON c.id = t.card_id WHERE c.public_code = $1 AND t.revoked_at IS NULL", [code]))[0].n;
+  ok('R2-11 contacto distinto: se pide confirmar identidad en persona antes de rotar (nada revocado aún)', goDisabled && tokensBefore >= 1);
+  await shot(desk, 'R2-dueno-confirmar-identidad');
+  await desk.check('[data-testid=recovery-confirm-check]');
+  await desk.click('[data-testid=recovery-confirm-go]');
+  await desk.waitForSelector('[data-testid=recovery-issued]');
+  const impWa = await desk.getAttribute('[data-testid=recovery-send-wa]', 'href');
+  ok('R2-12 el enlace se envía al número REGISTRADO de Lucía, nunca al del solicitante', impWa.startsWith('https://wa.me/527225550199?text=') && !(await desk.textContent('[data-testid=recovery-issued]')).includes('999 8888'), impWa.slice(0, 40));
+  await desk.click('[data-testid=recovery-mark-sent]');
+  await desk.waitForTimeout(600);
+  const impAudit = await sql("SELECT details FROM audit_events a JOIN businesses b ON b.id = a.business_id WHERE b.slug = $1 AND action = 'recovery.link_issued' ORDER BY a.id DESC LIMIT 1", [slug]);
+  ok('R2-13 bitácora: identidad verificada y contacto no coincidente', impAudit[0].details.identityVerified === true && impAudit[0].details.contactMatches === false);
+  const closedRow = await sql("SELECT r.contact, r.name_hint FROM recovery_requests r JOIN businesses b ON b.id = r.business_id WHERE b.slug = $1 AND r.status = 'resolved'", [slug]);
+  ok('R2-14 al cerrar, la base ya no guarda contactos en claro', closedRow.length >= 2 && closedRow.every((x) => x.contact.includes('***') && x.name_hint === null), closedRow.map((x) => x.contact).join(','));
+
+  // ---------------- R7 · Android (Chromium emulado como Pixel 7) ----------------
+  const andCtx = await browser.newContext(android);
+  await andCtx.route(/wa\.me/, (route) => route.fulfill({ status: 200, body: 'wa' }));
+  const andOwner = await andCtx.newPage(); watch(andOwner, 'dueño-android');
+  await login(andOwner, ownerEmail);
+  await andOwner.click('button[role=tab]:has-text("Accesos")');
+  await andOwner.waitForSelector('[data-testid=counter-qr]');
+  ok('R7-02 Android emulado: panel Accesos sin desplazamiento horizontal', await noHScroll(andOwner));
+  await shot(andOwner, 'R7-android-panel-accesos');
+  await andOwner.click('[data-testid=poster-open-print]');
+  await andOwner.waitForSelector('[data-testid=poster-image]');
+  await andOwner.waitForFunction(() => { const i = document.querySelector('[data-testid=poster-image]'); return i && i.complete && i.naturalWidth > 0; });
+  await andOwner.emulateMedia({ media: 'print' });
+  const andPdf = path.join(TMP, 'impresion-android-carta.pdf');
+  await andOwner.pdf({ path: andPdf, preferCSSPageSize: true, printBackground: true });
+  await andOwner.emulateMedia({ media: 'screen' });
+  const ap = decodePdf(andPdf, 100);
+  const ap72 = decodePdf(andPdf, 72);
+  ok('R7-03 Android emulado: imprimir cartel = 1 hoja carta y QR legible (100 y 72 ppp)', ap.pages === 1 && ap.w === 850 && ap.data === customerUrl && ap72.data === customerUrl, `${ap.pages} pág · ${ap.w}×${ap.h}`);
+  const andDl = await download(andOwner, 'poster-png');
+  ok('R7-04 Android emulado: descargar PNG funciona y el QR se lee', decodePng(andDl).data === customerUrl);
+  const andCust = await andCtx.newPage(); watch(andCust, 'cliente-android');
+  await andCust.goto(customerUrl);
+  await andCust.waitForSelector('[data-testid=vlux-help]');
+  await andCust.click('[data-testid=recover-open]');
+  await andCust.waitForSelector('[data-testid=recover-screen]');
+  ok('R7-05 Android emulado: «Perdí mi acceso» sin desplazamiento horizontal y botón ≥ 44 px', await noHScroll(andCust) && ((await andCust.locator('[data-testid=recover-submit]').boundingBox())?.height ?? 0) >= 44);
+  await shot(andCust, 'R7-android-recuperar');
 
   // ---------------- R4 · Reportar problema ----------------
   await phoneOwner.goto(`${BASE}/panel?negocio=${slug}`);

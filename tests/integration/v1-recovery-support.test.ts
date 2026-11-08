@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import { closePool } from '../../server/db';
 import { resetRateLimits } from '../../server/ratelimit';
-import { resetRecoverySchemaCache, maskContact } from '../../server/services/recovery';
+import { resetRecoverySchemaCache, maskContact, retentionSweep } from '../../server/services/recovery';
 import { Device, loggedIn, newBusiness, withEmployee } from './helpers';
 
 const db = new pg.Pool({ connectionString: process.env.DATABASE_ADMIN_URL, max: 2 });
@@ -63,7 +63,9 @@ test('R2-03: generar enlace revoca el anterior, abre la tarjeta en otro teléfon
   assert.equal(link.status, 200, JSON.stringify(link.json));
   assert.match(link.json.personalLink, /\/t#[A-Za-z0-9_-]{40,}$/);
   assert.equal(link.json.card.publicCode, c.publicCode);
-  assert.equal(link.json.contact, '7221110000');
+  // Se entrega al contacto REGISTRADO (coincide con el de la solicitud).
+  assert.deepEqual(link.json.deliverTo, { contact: '7221110000', contactType: 'whatsapp' });
+  assert.equal(link.json.contact, undefined, 'la API ya no devuelve el contacto de la solicitud');
   // El enlace viejo deja de servir; el nuevo abre la tarjeta.
   const oldToken = c.personalLink.split('#')[1];
   assert.equal((await new Device('viejo').post('/api/card-access', { token: oldToken })).status, 404);
@@ -90,9 +92,17 @@ test('R2-04: sin coincidencia, el dueño elige la tarjeta a mano y se le avisa q
   assert.equal(noCard.status, 422);
   assert.equal(noCard.json.error.code, 'card_required');
   const cardId = (await b.owner.post('/api/staff/cards/lookup', { code: c.publicCode })).json.cardId;
-  const r = await b.owner.post(`/api/owner/recovery/${reqId}/link`, { cardId });
+  // Contacto distinto al registrado: sin confirmación de identidad no se rota nada.
+  const blocked = await b.owner.post(`/api/owner/recovery/${reqId}/link`, { cardId });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.json.error.code, 'identity_check_required');
+  assert.equal((await new Device('viejo').post('/api/card-access', { token: c.personalLink.split('#')[1] })).status, 200, 'el enlace anterior sigue vivo');
+  const r = await b.owner.post(`/api/owner/recovery/${reqId}/link`, { cardId, identityVerified: true });
   assert.equal(r.status, 200);
   assert.equal(r.json.card.contactMatches, false);
+  // Sin contacto registrado: entrega en persona (nunca al 7220001111 que escribió el solicitante).
+  assert.equal(r.json.deliverTo, null);
+  assert.ok(!JSON.stringify(r.json).includes('7220001111'));
 });
 
 test('R2-05: aislamiento: un dueño no ve ni actúa sobre solicitudes de otro negocio', async () => {
@@ -152,9 +162,15 @@ test('R2-09: vencidas a los 30 días se enmascaran; anonimizar al cliente enmasc
   const customerId = (await db.query('SELECT customer_id FROM cards WHERE public_code = $1', [c2.publicCode])).rows[0].customer_id;
   assert.equal((await b.owner.post(`/api/owner/customers/${customerId}/anonymize`, {})).status, 200);
   const after = (await b.owner.get('/api/owner/recovery')).json.requests.find((x: any) => x.contactType === 'email');
-  assert.equal(after.contact, 'b***@ejemplo.test');
+  assert.equal(after.contact, 'b***@e***.test');
   assert.equal(after.status, 'dismissed');
-  assert.equal(maskContact('ana@x.mx', 'email'), 'a***@x.mx');
+  assert.equal(maskContact('ana@x.mx', 'email'), 'a***@x***.mx');
+  // Misma regla en SQL y en TypeScript.
+  const sqlMask = (await db.query("SELECT recovery_mask('ana@x.mx', 'email') AS e, recovery_mask('7226667777', 'whatsapp') AS w")).rows[0];
+  assert.deepEqual([sqlMask.e, sqlMask.w], [maskContact('ana@x.mx', 'email'), maskContact('7226667777', 'whatsapp')]);
+  // En la base ya no queda nada en claro de esas dos solicitudes.
+  const raw = (await db.query('SELECT contact, name_hint FROM recovery_requests WHERE business_id = $1', [b.businessId])).rows;
+  for (const x of raw) { assert.ok(x.contact.includes('***')); assert.equal(x.name_hint, null); }
 });
 
 test('R2-10: compatibilidad: sin 0017 la app sigue funcionando y estas rutas responden 503 / disponible=false', async () => {
@@ -174,6 +190,194 @@ test('R2-10: compatibilidad: sin 0017 la app sigue funcionando y estas rutas res
     assert.equal((await b.owner.post(`/api/owner/customers/${customerId}/anonymize`, {})).status, 200);
   } finally {
     await db.query('ALTER TABLE recovery_requests_tmp RENAME TO recovery_requests');
+    resetRecoverySchemaCache();
+  }
+});
+
+// ---------- Correcciones 1.0.x (revisión independiente) ----------
+const tokenOf = (link: string) => link.split('#')[1];
+const activeTokens = async (publicCode: string) => (await db.query(
+  'SELECT count(*)::int AS n FROM card_access_tokens t JOIN cards c ON c.id = t.card_id WHERE c.public_code = $1 AND t.revoked_at IS NULL', [publicCode])).rows[0].n as number;
+
+test('R2-12: atomicidad: si falla el cierre de la solicitud, NO se revoca el enlace anterior ni queda token nuevo', async () => {
+  const b = await setup();
+  const c = await register(b.slug, '7225550001');
+  await recover(b.slug, { contact: '7225550001' });
+  const reqId = (await b.owner.get('/api/owner/recovery')).json.requests[0].id;
+  const tokensBefore = (await db.query('SELECT count(*)::int AS n FROM card_access_tokens t JOIN cards c ON c.id = t.card_id WHERE c.public_code = $1', [c.publicCode])).rows[0].n;
+  // Fallo inyectado DESPUÉS de revocar e insertar el token (el UPDATE de la solicitud es el último paso).
+  await db.query(`CREATE OR REPLACE FUNCTION test_fail_link() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+                    IF NEW.status = 'link_issued' THEN RAISE EXCEPTION 'fallo inyectado'; END IF; RETURN NEW; END $$;
+                  CREATE TRIGGER test_fail_link BEFORE UPDATE ON recovery_requests FOR EACH ROW EXECUTE FUNCTION test_fail_link();`);
+  try {
+    const r = await b.owner.post(`/api/owner/recovery/${reqId}/link`, {});
+    assert.equal(r.status, 500);
+  } finally {
+    await db.query('DROP TRIGGER test_fail_link ON recovery_requests; DROP FUNCTION test_fail_link();');
+  }
+  assert.equal((await new Device('viejo').post('/api/card-access', { token: tokenOf(c.personalLink) })).status, 200, 'el cliente conserva su acceso');
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM card_access_tokens t JOIN cards c ON c.id = t.card_id WHERE c.public_code = $1', [c.publicCode])).rows[0].n, tokensBefore, 'no quedó token nuevo');
+  assert.equal((await db.query('SELECT status FROM recovery_requests WHERE id = $1', [reqId])).rows[0].status, 'pending');
+  const audit = (await db.query("SELECT action FROM audit_events WHERE business_id = $1 AND action IN ('card.link_reissued','recovery.link_issued')", [b.businessId])).rows;
+  assert.equal(audit.length, 0, 'la bitácora no registra una rotación que no ocurrió');
+  // Después del fallo, el reintento funciona normal.
+  assert.equal((await b.owner.post(`/api/owner/recovery/${reqId}/link`, {})).status, 200);
+});
+
+test('R2-13: concurrencia: dos «Generar enlace» simultáneos → uno gana, el otro 409; queda UN solo enlace vigente y es el entregado', async () => {
+  const b = await setup();
+  const c = await register(b.slug, '7225550002');
+  await recover(b.slug, { contact: '7225550002' });
+  const reqId = (await b.owner.get('/api/owner/recovery')).json.requests[0].id;
+  const results = await Promise.all([1, 2, 3].map(() => b.owner.post(`/api/owner/recovery/${reqId}/link`, {})));
+  const ok = results.filter((r) => r.status === 200);
+  assert.equal(ok.length, 1, JSON.stringify(results.map((r) => [r.status, r.json?.error?.code])));
+  for (const r of results.filter((x) => x.status !== 200)) assert.equal(r.json.error.code, 'recovery_link_recent');
+  assert.equal(await activeTokens(c.publicCode), 1);
+  assert.equal((await new Device('nuevo').post('/api/card-access', { token: tokenOf(ok[0].json.personalLink) })).status, 200);
+  // Cerrar y generar a la vez: el estado final es coherente (nunca «link_issued» tras un cierre exitoso posterior).
+  await recover(b.slug, { contact: '7225550002' });
+  const req2 = (await b.owner.get('/api/owner/recovery')).json.requests.find((x: any) => x.status === 'pending').id;
+  const [l, cl] = await Promise.all([b.owner.post(`/api/owner/recovery/${req2}/link`, {}), b.owner.post(`/api/owner/recovery/${req2}/close`, { resolution: 'spam' })]);
+  const final = (await db.query('SELECT status FROM recovery_requests WHERE id = $1', [req2])).rows[0].status;
+  if (cl.status === 200 && l.status === 409) assert.equal(final, 'dismissed');
+  else assert.ok(['dismissed', 'link_issued'].includes(final), `estado ${final} con link=${l.status} close=${cl.status}`);
+  assert.equal(await activeTokens(c.publicCode), 1);
+});
+
+test('R2-14: suplantación: con contacto distinto, el enlace va al contacto REGISTRADO, nunca al del solicitante', async () => {
+  const b = await setup();
+  const c = await register(b.slug, 'maria@ejemplo.test', 'María López');
+  await recover(b.slug, { contact: '7229990000', name: 'María López' });
+  const reqId = (await b.owner.get('/api/owner/recovery')).json.requests[0].id;
+  const cardId = (await b.owner.post('/api/staff/cards/lookup', { code: c.publicCode })).json.cardId;
+  assert.equal((await b.owner.post(`/api/owner/recovery/${reqId}/link`, { cardId })).json.error.code, 'identity_check_required');
+  assert.equal(await activeTokens(c.publicCode), 1);
+  const r = await b.owner.post(`/api/owner/recovery/${reqId}/link`, { cardId, identityVerified: true });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.deliverTo, { contact: 'maria@ejemplo.test', contactType: 'email' });
+  assert.ok(!JSON.stringify(r.json).includes('7229990000'));
+  const ev = (await db.query("SELECT details FROM audit_events WHERE business_id = $1 AND action = 'recovery.link_issued'", [b.businessId])).rows[0].details;
+  assert.equal(ev.identityVerified, true);
+  assert.equal(ev.contactMatches, false);
+});
+
+test('R2-15: retención verificable: cerrar enmascara y cambia el hash; la base rechaza cerradas en claro; el barrido vence y borra', async () => {
+  const b = await setup();
+  await register(b.slug, '7225550003');
+  await recover(b.slug, { contact: '7225550003', name: 'Rita' });
+  const reqId = (await b.owner.get('/api/owner/recovery')).json.requests[0].id;
+  const h0 = (await db.query('SELECT contact_hash FROM recovery_requests WHERE id = $1', [reqId])).rows[0].contact_hash as Buffer;
+  assert.equal((await b.owner.post(`/api/owner/recovery/${reqId}/close`, { resolution: 'in_person' })).status, 200);
+  const closed = (await db.query('SELECT contact, name_hint, contact_hash FROM recovery_requests WHERE id = $1', [reqId])).rows[0];
+  assert.equal(closed.contact, '******0003');
+  assert.equal(closed.name_hint, null);
+  assert.ok(!h0.equals(closed.contact_hash), 'hash reemplazado: no se puede re-identificar');
+  // Restricción de la base: una cerrada con contacto en claro es imposible (incluso para el dueño del esquema).
+  await recover(b.slug, { contact: '7225550004' });
+  const open = (await db.query("SELECT id FROM recovery_requests WHERE business_id = $1 AND status = 'pending'", [b.businessId])).rows[0].id;
+  await assert.rejects(db.query("UPDATE recovery_requests SET status = 'resolved' WHERE id = $1", [open]), /recovery_requests_minimized/);
+  // Barrido global: abierta caducada → vencida y enmascarada; cerrada de hace 91 días → borrada.
+  await db.query("UPDATE recovery_requests SET expires_at = now() - interval '1 second' WHERE id = $1", [open]);
+  await db.query("UPDATE recovery_requests SET resolved_at = now() - interval '91 days' WHERE id = $1", [reqId]);
+  const sweep = await retentionSweep({ force: true });
+  assert.ok(sweep && sweep.expired >= 1 && sweep.deleted >= 1, JSON.stringify(sweep));
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM recovery_requests WHERE id = $1', [reqId])).rows[0].n, 0);
+  const exp = (await db.query('SELECT status, contact FROM recovery_requests WHERE id = $1', [open])).rows[0];
+  assert.deepEqual([exp.status, exp.contact], ['expired', '******0004']);
+  // Verificación de solo lectura (la misma consulta que docs/release-1.0/0017_verificar_retencion.sql).
+  const v = (await db.query(`SELECT count(*) FILTER (WHERE status IN ('pending','link_issued') AND expires_at < now())::int AS clear_expired,
+                                    count(*) FILTER (WHERE status NOT IN ('pending','link_issued') AND position('***' in contact) = 0)::int AS clear_closed,
+                                    count(*) FILTER (WHERE status NOT IN ('pending','link_issued') AND coalesce(resolved_at, expires_at) < now() - interval '90 days')::int AS overdue
+                               FROM recovery_requests`)).rows[0];
+  assert.deepEqual(v, { clear_expired: 0, clear_closed: 0, overdue: 0 });
+  // Con 0016, el barrido exige alcance «worker»: vlux_app con un negocio fijado no puede llamarlo.
+  const has0016 = (await db.query("SELECT to_regprocedure('public.require_scope(text)') IS NOT NULL AS ok")).rows[0].ok;
+  if (has0016) {
+    const app = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await app.connect();
+    try {
+      await app.query('BEGIN'); await app.query("SELECT set_config('app.business_id', $1, true)", [b.businessId]);
+      await assert.rejects(app.query('SELECT recovery_retention_sweep(10)'), /alcance de trabajo requerido/);
+    } finally { await app.query('ROLLBACK').catch(() => undefined); await app.end(); }
+  }
+});
+
+test('R2-16: generar enlace acorta la retención a 7 días; vencida no se puede usar para generar enlace', async () => {
+  const b = await setup();
+  await register(b.slug, '7225550005');
+  await recover(b.slug, { contact: '7225550005' });
+  const reqId = (await b.owner.get('/api/owner/recovery')).json.requests[0].id;
+  assert.equal((await b.owner.post(`/api/owner/recovery/${reqId}/link`, {})).status, 200);
+  const days = (await db.query('SELECT extract(epoch FROM expires_at - now()) / 86400 AS d FROM recovery_requests WHERE id = $1', [reqId])).rows[0].d;
+  assert.ok(days <= 7.01 && days > 6.9, String(days));
+  await db.query("UPDATE recovery_requests SET expires_at = now() - interval '1 second', resolved_at = now() - interval '1 minute' WHERE id = $1", [reqId]);
+  const r = await b.owner.post(`/api/owner/recovery/${reqId}/link`, {});
+  assert.equal(r.status, 409);
+  assert.equal(r.json.error.code, 'recovery_closed');
+  const item = (await b.owner.get('/api/owner/recovery')).json.requests.find((x: any) => x.id === reqId);
+  assert.equal(item.status, 'expired');
+  assert.equal(item.contact, '******0005');
+});
+
+test('R2-17: anonimizar alcanza solicitudes SIN tarjeta vinculada (pedidas antes de registrarse o sin coincidencia)', async () => {
+  const b = await setup();
+  await recover(b.slug, { contact: 'tarde@ejemplo.test', name: 'Tardía' });
+  const c = await register(b.slug, 'tarde@ejemplo.test', 'Tardía');
+  const row0 = (await db.query('SELECT matched_card_id FROM recovery_requests WHERE business_id = $1', [b.businessId])).rows[0];
+  assert.equal(row0.matched_card_id, null, 'la solicitud quedó sin vincular');
+  const other = await register(b.slug, '7225550006');
+  await recover(b.slug, { contact: '7225550006' });
+  const customerId = (await db.query('SELECT customer_id FROM cards WHERE public_code = $1', [c.publicCode])).rows[0].customer_id;
+  assert.equal((await b.owner.post(`/api/owner/customers/${customerId}/anonymize`, {})).status, 200);
+  const rows = (await db.query('SELECT contact, status, name_hint FROM recovery_requests WHERE business_id = $1 ORDER BY created_at', [b.businessId])).rows;
+  assert.deepEqual(rows[0], { contact: 't***@e***.test', status: 'dismissed', name_hint: null });
+  assert.equal(rows[1].contact, '7225550006', 'no toca solicitudes de otros clientes');
+  assert.ok(other.publicCode);
+});
+
+test('R2-18: reversa de 0017 con la app encendida y caché caliente: 503 / disponible=false y anonimizar sigue funcionando', async () => {
+  const b = await setup();
+  const c = await register(b.slug, '7225550007');
+  // Calienta la caché («sí, 0017 está»), SIN reiniciarla después: así queda una instancia real tras la reversa.
+  assert.equal((await new Device('c').get(`/api/public/businesses/${b.slug}/help`)).json.recovery, true);
+  await recover(b.slug, { contact: '7225550007' });
+  const reqId = (await b.owner.get('/api/owner/recovery')).json.requests[0].id;
+  await db.query('ALTER TABLE recovery_requests RENAME TO recovery_requests_rev; ALTER TABLE businesses RENAME COLUMN contact_whatsapp TO contact_whatsapp_rev;');
+  try {
+    assert.deepEqual((await new Device('c').get(`/api/public/businesses/${b.slug}/help`)).json, { recovery: false, businessWhatsapp: null });
+    // La caché se recalienta sola si algo la marca como lista: cada ruta debe degradar por sí misma.
+    for (const call of [
+      () => recover(b.slug, { contact: '7225550007' }),
+      () => b.owner.post(`/api/owner/recovery/${reqId}/link`, {}),
+      () => b.owner.post(`/api/owner/recovery/${reqId}/close`, { resolution: 'spam' }),
+      () => b.owner.req('PUT', '/api/owner/contact', { whatsapp: '7225550000' }),
+    ]) {
+      const r = await call();
+      assert.equal(r.status, 503, JSON.stringify(r.json));
+      assert.equal(r.json.error.code, 'recovery_unavailable');
+    }
+    assert.equal((await b.owner.get('/api/owner/recovery')).json.available, false);
+    const customerId = (await db.query('SELECT customer_id FROM cards WHERE public_code = $1', [c.publicCode])).rows[0].customer_id;
+    assert.equal((await b.owner.post(`/api/owner/customers/${customerId}/anonymize`, {})).status, 200, 'la anonimización (ARCO) no depende de 0017');
+    assert.equal((await db.query('SELECT anonymized_at IS NOT NULL AS ok FROM customers WHERE id = $1', [customerId])).rows[0].ok, true);
+    assert.equal(await retentionSweep({ force: true }), null);
+  } finally {
+    await db.query('ALTER TABLE recovery_requests_rev RENAME TO recovery_requests; ALTER TABLE businesses RENAME COLUMN contact_whatsapp_rev TO contact_whatsapp;');
+    resetRecoverySchemaCache();
+  }
+});
+
+test('R2-19: caché con anonimizar: si la tabla falta a mitad de la transacción, SAVEPOINT y la anonimización termina', async () => {
+  // Cubierto por R2-18 con caché caliente; aquí se fuerza la ruta del error (la comprobación ve la tabla pero el UPDATE no).
+  const b = await setup();
+  const c = await register(b.slug, '7225550008');
+  const customerId = (await db.query('SELECT customer_id FROM cards WHERE public_code = $1', [c.publicCode])).rows[0].customer_id;
+  await db.query('ALTER TABLE recovery_requests RENAME COLUMN contact_hash TO contact_hash_rev');
+  try {
+    assert.equal((await b.owner.post(`/api/owner/customers/${customerId}/anonymize`, {})).status, 200);
+  } finally {
+    await db.query('ALTER TABLE recovery_requests RENAME COLUMN contact_hash_rev TO contact_hash');
     resetRecoverySchemaCache();
   }
 });

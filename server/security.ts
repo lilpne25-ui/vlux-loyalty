@@ -57,3 +57,15 @@ export function parseScannedCode(raw: string): { kind: 'card' | 'reward'; code: 
   if (REWARD_CODE_RE.test(s)) return { kind: 'reward', code: s };
   return null;
 }
+
+/** Llave de límite por red: IPv4 completa; IPv6 por su prefijo /64 (una sola red de cliente). */
+export function ipBucket(ip: string): string {
+  if (!ip.includes(':')) return ip;
+  const v4 = /::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (v4) return v4[1];
+  const [head, tail = ''] = ip.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const full = ip.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h;
+  return full.slice(0, 4).map((x) => (x || '0').toLowerCase().replace(/^0+(?=.)/, '')).join(':') + '::/64';
+}

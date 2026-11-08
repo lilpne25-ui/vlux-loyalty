@@ -6,6 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { ZodError } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
+import { ipBucket } from './security';
 import { config } from './config';
 import { APP_VERSION } from './version';
 import { AppError, forbidden, notFound, unauthorized } from './errors';
@@ -27,7 +28,7 @@ import { buildManifest, buildStaffManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
 import { cancelAppointment, communicationOverview, createAppointment, createPromotion, dispatchBusiness, publicPushConfig, runNotificationJob, subscribe, subscriptionStatus, unsubscribe, updatePreferences, updateSettings } from './services/notifications';
-import { closeRecovery, issueRecoveryLink, listRecovery, publicHelp, requestRecovery, setBusinessWhatsapp } from './services/recovery';
+import { closeRecovery, issueRecoveryLink, listRecovery, publicHelp, requestRecovery, retentionSweep, setBusinessWhatsapp } from './services/recovery';
 import { recordSupportReport } from './services/support';
 import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
 
@@ -210,8 +211,11 @@ export function buildApp() {
   // 1.0.x · «Perdí mi acceso»: crea una solicitud para el negocio. Respuesta idéntica exista o no la tarjeta.
   api.post('/public/businesses/:slug/recovery', async (c) => {
     const slug = slugSchema.parse(c.req.param('slug'));
-    await rateLimit(`recovery-ip:${clientIp(c)}`, 5, 60 * 60_000);
-    await rateLimit(`recovery-biz:${slug}`, 60, 60 * 60_000);
+    // IPv6 se agrupa por /64 (rotar direcciones dentro de una misma red no evade el límite).
+    await rateLimit(`recovery-ip:${ipBucket(clientIp(c))}`, 5, 60 * 60_000);
+    // Freno de tormenta por negocio, alto a propósito: un atacante con pocas IP no debe bloquear a los clientes reales.
+    // El almacenamiento lo protege MAX_OPEN_REQUESTS y el dueño ve en su bandeja si se descartaron solicitudes.
+    await rateLimit(`recovery-biz:${slug}`, 300, 60 * 60_000);
     return c.json(await requestRecovery(slug, await jsonBody(c)), 202);
   });
 
@@ -259,7 +263,10 @@ export function buildApp() {
     if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
     c.header('Cache-Control', 'no-store');
     // La función de Vercel corta a los 15 s (maxDuration en build-vercel.mjs): el presupuesto queda por debajo.
-    return c.json(await runNotificationJob({ budgetMs: jobBudgetMs() }));
+    const job = await runNotificationJob({ budgetMs: jobBudgetMs() });
+    // 1.0.x · Retención de solicitudes de recuperación (todos los negocios). Sin 0017 devuelve null y no falla.
+    const recovery = await retentionSweep({ force: true }).catch((e) => { console.error('[recovery] barrido falló', (e as Error).message); return null; });
+    return c.json({ ...job, recoveryRetention: recovery });
   });
 
   // ---------- PWA: vincular la app instalada (V0.2.2) ----------
@@ -540,7 +547,8 @@ export function buildApp() {
     const s = c.get('staff');
     await rateLimit(`relink:${s.sessionId}`, 10, 60 * 60_000);
     const r = await issueRecoveryLink(s, uuidSchema.parse(c.req.param('id')), await jsonBody(c));
-    return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}`, card: r.card, contact: r.contact, contactType: r.contactType });
+    // deliverTo es SIEMPRE el contacto registrado del cliente (o null: entrega en persona), nunca el de la solicitud.
+    return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}`, card: r.card, deliverTo: r.deliverTo });
   });
   owner.post('/recovery/:id/close', async (c) => c.json(await closeRecovery(c.get('staff'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
   owner.put('/contact', async (c) => c.json(await setBusinessWhatsapp(c.get('staff'), await jsonBody(c))));

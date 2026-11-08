@@ -6,13 +6,37 @@
 export const VLUX_SUPPORT_WHATSAPP = '527441452048';
 export const VLUX_SUPPORT_DISPLAY = '744 145 2048';
 
-/** Página pública de VLUX Loyalty. Configurable al compilar (VITE_VLUX_LANDING_URL); por omisión, la presentación de esta misma app. */
-export const VLUX_LANDING_URL: string = (() => {
-  try {
-    const v = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_VLUX_LANDING_URL?.trim();
-    if (v && /^https:\/\/[^\s]+$/.test(v)) return v;
-  } catch { /* fuera de Vite (pruebas) */ }
-  return '/?ref=tarjeta';
+/**
+ * Valida la URL de la landing comercial de VLUX (VITE_VLUX_LANDING_URL, se fija al compilar). Solo acepta https://,
+ * sin usuario ni contraseña, con un dominio real (no IP ni localhost) y de 200 caracteres como máximo. Si la lista
+ * VITE_VLUX_LANDING_HOSTS está definida (separada por comas), el dominio debe estar en ella. Cualquier otra cosa → null.
+ */
+export function safeLandingUrl(raw: string | null | undefined, allowedHosts?: string | null): string | null {
+  const v = (raw ?? '').trim();
+  if (!v || v.length > 200) return null;
+  let u: URL;
+  try { u = new URL(v); } catch { return null; }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return null;
+  const host = u.hostname.toLowerCase();
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) || /^[0-9.]+$/.test(host) || host === 'localhost' || host.endsWith('.local')) return null;
+  const allow = (allowedHosts ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+  if (allow.length && !allow.includes(host)) return null;
+  if (!u.searchParams.has('ref')) u.searchParams.set('ref', 'tarjeta');
+  return u.toString();
+}
+
+const viteEnv = (): Record<string, string | undefined> => {
+  try { return (import.meta.env ?? {}) as Record<string, string | undefined>; } catch { return {}; }
+};
+
+/**
+ * Destino de «Conocer VLUX Loyalty». Con VITE_VLUX_LANDING_URL válida: esa landing comercial. Sin ella: null y el botón
+ * abre una conversación comercial por WhatsApp con VLUX (vluxSalesLink). Nunca se usa una ruta interna de la app, porque
+ * la portada de la app es una presentación con datos de demostración, no una landing comercial.
+ */
+export const VLUX_LANDING_URL: string | null = (() => {
+  const env = viteEnv();
+  return safeLandingUrl(env.VITE_VLUX_LANDING_URL, env.VITE_VLUX_LANDING_HOSTS);
 })();
 
 /** 10 dígitos de México → formato internacional para wa.me. Devuelve null si no es válido. */
@@ -31,6 +55,11 @@ export function waLink(intlNumber: string, text: string): string {
 
 export const customerSupportText = (businessName: string) => `Hola, necesito ayuda con mi tarjeta de lealtad de ${businessName}.`;
 export const vluxSupportLink = (businessName: string) => waLink(VLUX_SUPPORT_WHATSAPP, customerSupportText(businessName));
+/** Conversación comercial con VLUX (cuando no hay landing configurada). */
+export const vluxSalesText = (businessName: string) => `Hola, vi VLUX Loyalty en la tarjeta de ${businessName} y quiero información para mi negocio.`;
+export const vluxSalesLink = (businessName: string) => waLink(VLUX_SUPPORT_WHATSAPP, vluxSalesText(businessName));
+/** Destino real del botón «Conocer VLUX Loyalty». */
+export const vluxLearnMoreLink = (businessName: string, landing: string | null = VLUX_LANDING_URL) => landing ?? vluxSalesLink(businessName);
 
 /** Mensaje del cliente al negocio tras pedir recuperar su tarjeta (sin datos sensibles: el negocio ya ve su número). */
 export const businessRecoveryText = (businessName: string, name?: string) =>

@@ -49,7 +49,7 @@ function ReportProblemModal({ businessName, slug, view, onClose }: { businessNam
   return (
     <Modal open onClose={onClose} title="Reportar un problema a VLUX" labelledBy="report-title">
       <div className="flex flex-col gap-4" data-testid="report-modal">
-        <Field label="¿Qué pasó?" htmlFor="report-desc" hint="Ej. «No se imprime el QR desde mi celular». Puedes enviarlo vacío y escribir en WhatsApp.">
+        <Field label="¿Qué pasó?" htmlFor="report-desc" hint="Ej. «No se imprime el QR desde mi celular». No escribas datos de tus clientes (teléfonos, correos): queda en la bitácora, que no se puede borrar.">
           <textarea id="report-desc" className={inputCls + ' min-h-[96px] py-2'} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
         <dl className="rounded-xl bg-[#F6F7F9] px-3.5 py-3 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-[12.5px]" data-testid="report-context">

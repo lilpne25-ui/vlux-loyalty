@@ -4,7 +4,7 @@
 //  - reemisión del enlace personal de una tarjeta (revoca los anteriores),
 //  - anulación auditada de una compra registrada por error.
 import { z } from 'zod';
-import { getPool, q, runWithScope, withTenant, withTx } from '../db';
+import { getPool, q, runWithScope, withTenant, withTx, type Tx } from '../db';
 import { AppError, notFound } from '../errors';
 import { hashPassword, newToken, sha256, verifyPassword } from '../security';
 import { passwordSchema } from '../validation';
@@ -100,18 +100,24 @@ export async function resetPasswordWithToken(raw: unknown) {
 }
 
 /** Reemite el enlace personal de una tarjeta (cliente cambió de teléfono o lo perdió). Revoca los anteriores. */
-export async function reissueCardLink(session: StaffSession, cardId: string) {
+/**
+ * Rota el enlace personal de una tarjeta DENTRO de la transacción del llamador: bloquea la tarjeta, revoca los
+ * enlaces vigentes, crea uno nuevo y deja la bitácora. Si algo posterior falla, el ROLLBACK deja vivo el enlace
+ * anterior (el cliente nunca se queda sin acceso a medias). Devuelve el token en claro una sola vez.
+ */
+export async function rotateCardLinkTx(tx: Tx, session: StaffSession, cardId: string): Promise<string> {
+  const card = (await tx.query("SELECT id FROM cards WHERE id = $1 AND status = 'active' FOR UPDATE", [cardId])).rows[0];
+  if (!card) throw notFound('Tarjeta');
   const token = newToken();
-  await withTenant(session.businessId, async (tx) => {
-    const card = (await tx.query("SELECT id FROM cards WHERE id = $1 AND status = 'active' FOR UPDATE", [cardId])).rows[0];
-    if (!card) throw notFound('Tarjeta');
-    await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'card.link_reissued', 'card', cardId);
-  });
-  await withTenant(session.businessId, async (tx) => {
-    await tx.query('UPDATE card_access_tokens SET revoked_at = now() WHERE card_id = $1 AND business_id = $2 AND revoked_at IS NULL', [cardId, session.businessId]);
-    await tx.query('INSERT INTO card_access_tokens (token_hash, card_id, business_id) VALUES ($1, $2, $3)', [sha256(token), cardId, session.businessId]);
-  });
-  return { token };
+  await tx.query('UPDATE card_access_tokens SET revoked_at = now() WHERE card_id = $1 AND business_id = $2 AND revoked_at IS NULL', [cardId, session.businessId]);
+  await tx.query('INSERT INTO card_access_tokens (token_hash, card_id, business_id) VALUES ($1, $2, $3)', [sha256(token), cardId, session.businessId]);
+  await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'card.link_reissued', 'card', cardId);
+  return token;
+}
+
+/** Enlace nuevo para una tarjeta (revoca los anteriores). Una sola transacción: todo o nada. */
+export async function reissueCardLink(session: StaffSession, cardId: string) {
+  return withTenant(session.businessId, async (tx) => ({ token: await rotateCardLinkTx(tx, session, cardId) }));
 }
 
 /**
