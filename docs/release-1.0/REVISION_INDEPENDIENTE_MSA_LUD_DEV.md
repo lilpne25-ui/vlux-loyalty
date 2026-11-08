@@ -26,6 +26,31 @@ Comprobaciones que ejecutó: `npm run typecheck` (sin errores) y `npm run test:u
 
 Lo que el agente verificó como correcto: respuesta idéntica exista o no la tarjeta, RLS y permisos por columna de 0017, compatibilidad por lectura con 0015/0016, `ops/grants.sql` condicional, checksum del archivo para pegar, purga de negocio en cascada, CSRF, ausencia de XSS, tokens fuera de bitácora y capturas, permisos por rol, PDF de una página con QR vectorial y zona de silencio.
 
-## 2. Segunda revisión · sobre `0ee0aa5`
+## 2. Segunda revisión · 2026-11-08 · commit `0ee0aa5`
 
-Ver la sección añadida al terminar la segunda pasada.
+Comprobaciones que ejecutó: `npm run typecheck` (sin errores) y `npm run test:unit` (92/92). No ejecutó integración, E2E ni la matriz (sin base de datos).
+**Veredicto del agente: APROBADO CON RESERVAS.** 7 de los 10 hallazgos previos cerrados, 3 parciales (M2, M4, B2); ningún alto ni crítico nuevo; corregir N1 y N2 antes de pegar 0017.
+
+| Previo | Dictamen del agente |
+|---|---|
+| A1, A2, A3, M3, M5 | CERRADO |
+| M1 | CERRADO con condición (que la tarea programada exista y corra) |
+| M2 | PARCIAL aceptable (hash sin secreto solo mientras el contacto está en claro en la misma fila) |
+| M4 | PARCIAL (300/h por negocio bloqueable con ~60 IPv4; bandeja llena con respuesta «ok») |
+| B2 | PARCIAL (solo aviso; la descripción seguía en la bitácora) |
+
+| Nuevo | Sev. | Hallazgo | Corrección en `90b5811` |
+|---|---|---|---|
+| N1 | Medio | Barrido en segundo plano (`void`) podía congelarse en Vercel con la transacción abierta y bloqueos. | Siempre **esperado**, con `statement_timeout 3s`, `lock_timeout 1s`, `idle_in_transaction_session_timeout 5s`; desde rutas solo 200 filas y nunca en sesiones demo. |
+| N2 | Bajo | En el cron corría después de los avisos y podía quedarse sin tiempo. | Corre **antes** y el presupuesto de avisos descuenta lo que tardó. |
+| N3 | Bajo | Con `grants.sql` viejo, 42501 abortaba la anonimización. | La anonimización termina y deja `recovery.redact_failed` en la bitácora (prueba R2-20). Compromiso aceptado: las solicitudes de ese cliente quedan sin redactar hasta sincronizar permisos; por eso el plan exige sincronizar `vlux-ops` en el mismo paso que 0017. |
+| N4 | Bajo | Interbloqueo posible (`expireTenant` antes del bloqueo asesor). | Bloqueo asesor primero. |
+| N5 | Bajo | Interbloqueo posible generar enlace ↔ reenvío del cliente (FK). | Reintento automático ante 40P01/40001 (2 veces). |
+| N6 | Bajo | `require_scope` ordena el uso pero no es barrera; demo disparaba el barrido. | Documentado como orden de uso (la función solo reduce datos); demo ya no lo dispara. |
+| N7 | Bajo | Anonimizar A podía descartar la solicitud de B si comparten número. | Solicitudes sin vincular solo se redactan si ningún otro cliente activo tiene ese contacto (prueba R2-21). |
+| N8 | Bajo | Guarda de 15 s con `now()` (inicio de la transacción). | `clock_timestamp()`. |
+| N9 | Bajo | Comentario contradictorio sobre `contact_hash`; 42703 genérico → 503. | Comentario corregido; el 503 ante 42703 se mantiene a propósito (degradación controlada). |
+| M4 | — | Bandeja llena con respuesta «ok». | `queued:false` → el cliente ve «pídelo en caja» (no revela si es cliente; prueba R2-22). El límite de 300/h por negocio sigue siendo bloqueable con ~60 IPv4: **riesgo residual** (mitigación posible: desafío ligero o WAF de Vercel). |
+| B2 | — | Descripción en bitácora inmutable. | Ya no se guarda: solo `descriptionLength`; el texto viaja únicamente en el WhatsApp a soporte. |
+
+Riesgo que el agente deja explícito y que no se elimina con código: el dueño ve y puede copiar el enlace, y `identityVerified` es una casilla que marca el propio dueño. La protección es de proceso (QR en persona / contacto registrado), no criptográfica.
