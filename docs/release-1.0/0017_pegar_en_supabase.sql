@@ -6,7 +6,7 @@
 -- y el resto de la app sigue igual; con 0017 y código viejo, nada usa la tabla nueva.
 -- Después: GET /api/internal/notifications/run (cron) aplica la retención; verifícala con 0017_verificar_retencion.sql.
 -- Rollback: docs/release-1.0/0017_revertir_en_supabase.sql (borra solicitudes de recuperación y el WhatsApp de cada negocio).
--- Generado por scripts/gen-0017-paste.mjs. Checksum sha256 de db/migrations/0017_recovery_support.up.sql: de07e6721a58d61e33de96dab2c6754d18cdc3ac9182a0115211215b8f627c69
+-- Generado por scripts/gen-0017-paste.mjs. Checksum sha256 de db/migrations/0017_recovery_support.up.sql: a36831feee21b3d2c04cd27e8613389e26970009480810aaaac6d78835a15db7
 BEGIN;
 DO $$ BEGIN IF EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0017_recovery_support') THEN RAISE EXCEPTION '0017 ya está registrada: no la pegues otra vez'; END IF; IF (SELECT count(*) FROM schema_migrations WHERE version <= '0015_release_hardening') <> 15 THEN RAISE EXCEPTION 'Faltan migraciones 0001-0015 en el historial'; END IF; END $$;
 -- 1.0.x · Pulido operativo: recuperación de acceso del cliente y WhatsApp público del negocio.
@@ -78,7 +78,7 @@ DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN REVOKE ALL ON recovery_requests FROM authenticated; END IF;
 END $$;
 GRANT SELECT, INSERT ON recovery_requests TO vlux_app;
--- UPDATE solo en las columnas que el código modifica (business_id, id y contact_hash nunca).
+-- UPDATE solo en las columnas que el código modifica (business_id e id nunca; contact_hash solo para volverlo aleatorio).
 GRANT UPDATE (contact, contact_hash, name_hint, matched_card_id, status, resolution, request_count, last_requested_at, resolved_by, resolved_at, expires_at)
   ON recovery_requests TO vlux_app;
 
@@ -123,5 +123,5 @@ BEGIN
     EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO vlux_app', f);
   END LOOP;
 END $$;
-INSERT INTO schema_migrations (version, checksum) VALUES ('0017_recovery_support', 'de07e6721a58d61e33de96dab2c6754d18cdc3ac9182a0115211215b8f627c69');
+INSERT INTO schema_migrations (version, checksum) VALUES ('0017_recovery_support', 'a36831feee21b3d2c04cd27e8613389e26970009480810aaaac6d78835a15db7');
 COMMIT;

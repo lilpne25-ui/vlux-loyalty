@@ -1,5 +1,8 @@
 # VLUX Loyalty 1.0.x · Pulido UX operativo
 
+> **Actualización 2026-11-08 (correcciones tras revisión independiente):** varias decisiones de R2 y R3 de este informe cambiaron (enlace atómico y solo al contacto registrado, retención 30/7/90 días con barrido, límite 300/h por negocio y /64 en IPv6, «Conocer VLUX Loyalty» sin ruta interna). La versión vigente está en [`CORRECCIONES_1.0.x.md`](CORRECCIONES_1.0.x.md); este documento queda como historial de la primera entrega.
+
+
 Rama `claude/project-thread-bcmxkp`, a partir de `9220227` (estado desplegado en ambos Preview, PR #4).
 Sin cambios en `main`, Production, Supabase Preview ni secretos. Migración 0017 separada, con reversa, **no aplicada en ningún entorno remoto**.
 Metodología: MSA-LUD (átomos pequeños, cada uno con su prueba y su compuerta de calidad).

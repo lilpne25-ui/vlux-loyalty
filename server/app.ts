@@ -263,9 +263,11 @@ export function buildApp() {
     if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
     c.header('Cache-Control', 'no-store');
     // La función de Vercel corta a los 15 s (maxDuration en build-vercel.mjs): el presupuesto queda por debajo.
-    const job = await runNotificationJob({ budgetMs: jobBudgetMs() });
-    // 1.0.x · Retención de solicitudes de recuperación (todos los negocios). Sin 0017 devuelve null y no falla.
+    // 1.0.x · Retención de solicitudes de recuperación (todos los negocios) ANTES de los avisos, con tope de 3 s, para que
+    // nunca se quede sin tiempo. Sin 0017 devuelve null y no falla.
+    const t0 = Date.now();
     const recovery = await retentionSweep({ force: true }).catch((e) => { console.error('[recovery] barrido falló', (e as Error).message); return null; });
+    const job = await runNotificationJob({ budgetMs: Math.max(2000, jobBudgetMs() - (Date.now() - t0)) });
     return c.json({ ...job, recoveryRetention: recovery });
   });
 

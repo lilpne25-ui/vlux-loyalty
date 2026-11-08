@@ -31,7 +31,8 @@ test('R2-01: la respuesta es IDÉNTICA exista o no la tarjeta (sin enumeración 
   assert.equal(yes.status, 202);
   assert.equal(no.status, 202);
   assert.deepEqual(yes.json, no.json);
-  assert.deepEqual(Object.keys(yes.json).sort(), ['businessWhatsapp', 'ok']);
+  assert.deepEqual(Object.keys(yes.json).sort(), ['businessWhatsapp', 'ok', 'queued']);
+  assert.equal(yes.json.queued, true);
   assert.ok(!JSON.stringify(yes.json).includes('7221112233'));
 });
 
@@ -175,7 +176,9 @@ test('R2-09: vencidas a los 30 días se enmascaran; anonimizar al cliente enmasc
 
 test('R2-10: compatibilidad: sin 0017 la app sigue funcionando y estas rutas responden 503 / disponible=false', async () => {
   const b = await setup();
-  await db.query('ALTER TABLE recovery_requests RENAME TO recovery_requests_tmp');
+  // En una base SIN 0017 (matriz 0015 / 0016) se prueba el estado real; con 0017 se simula ocultando la tabla.
+  const has0017 = (await db.query("SELECT to_regclass('public.recovery_requests') IS NOT NULL AS ok")).rows[0].ok as boolean;
+  if (has0017) await db.query('ALTER TABLE recovery_requests RENAME TO recovery_requests_tmp');
   resetRecoverySchemaCache();
   try {
     assert.deepEqual((await new Device('c').get(`/api/public/businesses/${b.slug}/help`)).json, { recovery: false, businessWhatsapp: null });
@@ -189,7 +192,7 @@ test('R2-10: compatibilidad: sin 0017 la app sigue funcionando y estas rutas res
     const customerId = (await db.query('SELECT customer_id FROM cards WHERE public_code = $1', [c.publicCode])).rows[0].customer_id;
     assert.equal((await b.owner.post(`/api/owner/customers/${customerId}/anonymize`, {})).status, 200);
   } finally {
-    await db.query('ALTER TABLE recovery_requests_tmp RENAME TO recovery_requests');
+    if (has0017) await db.query('ALTER TABLE recovery_requests_tmp RENAME TO recovery_requests');
     resetRecoverySchemaCache();
   }
 });
@@ -291,7 +294,7 @@ test('R2-15: retención verificable: cerrar enmascara y cambia el hash; la base 
                                     count(*) FILTER (WHERE status NOT IN ('pending','link_issued') AND coalesce(resolved_at, expires_at) < now() - interval '90 days')::int AS overdue
                                FROM recovery_requests`)).rows[0];
   assert.deepEqual(v, { clear_expired: 0, clear_closed: 0, overdue: 0 });
-  // Con 0016, el barrido exige alcance «worker»: vlux_app con un negocio fijado no puede llamarlo.
+  // Con 0016, el barrido exige alcance «worker» (orden de uso, no barrera: la función solo reduce datos).
   const has0016 = (await db.query("SELECT to_regprocedure('public.require_scope(text)') IS NOT NULL AS ok")).rows[0].ok;
   if (has0016) {
     const app = new pg.Client({ connectionString: process.env.DATABASE_URL });
@@ -382,6 +385,50 @@ test('R2-19: caché con anonimizar: si la tabla falta a mitad de la transacción
   }
 });
 
+test('R2-20: restauración con permisos incompletos (grants.sql anterior a 0017): anonimizar sigue funcionando', async () => {
+  const b = await setup();
+  const c = await register(b.slug, '7225550009');
+  await recover(b.slug, { contact: '7225550009' });
+  const customerId = (await db.query('SELECT customer_id FROM cards WHERE public_code = $1', [c.publicCode])).rows[0].customer_id;
+  await db.query('REVOKE ALL ON recovery_requests FROM vlux_app');
+  try {
+    assert.equal((await b.owner.post(`/api/owner/customers/${customerId}/anonymize`, {})).status, 200);
+    const ev = (await db.query("SELECT details FROM audit_events WHERE business_id = $1 AND action = 'recovery.redact_failed'", [b.businessId])).rows;
+    assert.equal(ev.length, 1, 'queda constancia de que no se pudo redactar');
+  } finally {
+    await db.query(`GRANT SELECT, INSERT ON recovery_requests TO vlux_app;
+      GRANT UPDATE (contact, contact_hash, name_hint, matched_card_id, status, resolution, request_count, last_requested_at, resolved_by, resolved_at, expires_at) ON recovery_requests TO vlux_app`);
+    resetRecoverySchemaCache();
+  }
+});
+
+test('R2-21: anonimizar a un cliente no descarta la solicitud de OTRO cliente activo que comparte el contacto', async () => {
+  const b = await setup();
+  const a1 = await register(b.slug, '7225551111', 'Ana');
+  await recover(b.slug, { contact: '7225551111' });
+  // Se desvincula para simular una solicitud sin tarjeta, y otro cliente registra el mismo número (no es único).
+  await db.query('UPDATE recovery_requests SET matched_card_id = NULL WHERE business_id = $1', [b.businessId]);
+  await register(b.slug, '7225551111', 'Beto');
+  const id1 = (await db.query('SELECT customer_id FROM cards WHERE public_code = $1', [a1.publicCode])).rows[0].customer_id;
+  assert.equal((await b.owner.post(`/api/owner/customers/${id1}/anonymize`, {})).status, 200);
+  const r = (await db.query('SELECT status, contact FROM recovery_requests WHERE business_id = $1', [b.businessId])).rows[0];
+  assert.deepEqual([r.status, r.contact], ['pending', '7225551111'], 'la solicitud podría ser de Beto: no se toca');
+});
+
+test('R2-22: bandeja llena → queued=false (el cliente ve «pídelo en caja»), sin revelar si es cliente', async () => {
+  const b = await setup();
+  await register(b.slug, '7225552222');
+  await db.query(`INSERT INTO recovery_requests (business_id, contact, contact_type, contact_hash)
+                  SELECT $1::uuid, '72200' || lpad(g::text, 5, '0'), 'whatsapp', sha256(convert_to($2 || g::text, 'UTF8')) FROM generate_series(1, 200) g`, [b.businessId, b.businessId]);
+  const known = await recover(b.slug, { contact: '7225552222' });
+  const unknown = await recover(b.slug, { contact: '7225553333' });
+  assert.equal(known.status, 202);
+  assert.deepEqual(known.json, unknown.json);
+  assert.equal(known.json.queued, false);
+  assert.equal((await b.owner.get('/api/owner/recovery')).json.dropped24h, 2);
+  await resetRateLimits();
+});
+
 test('R2-11: RLS: vlux_app sin negocio fijado no ve solicitudes y no puede borrarlas', async () => {
   const b = await setup();
   await register(b.slug, '7228889999');
@@ -419,6 +466,7 @@ test('R4-02: la descripción se limita a 1000 caracteres y se quitan caracteres 
   const ok = await b.owner.post('/api/staff/support-report', { ref: 'VLX-AB23CF', view: 'Panel', description: 'hola\u0007mundo' });
   assert.equal(ok.status, 201);
   const d = (await db.query("SELECT details FROM audit_events WHERE business_id = $1 AND action = 'support.reported'", [b.businessId])).rows[0].details;
-  assert.equal(d.description, 'holamundo');
+  assert.equal(d.description, undefined, 'la descripción no queda en la bitácora inmutable');
+  assert.equal(d.descriptionLength, 'holamundo'.length);
 });
 

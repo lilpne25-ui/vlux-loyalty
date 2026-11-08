@@ -23,7 +23,9 @@ export async function recordSupportReport(session: StaffSession, raw: unknown) {
   // Las sesiones de demostración no escriben en la bitácora: se responde igual para no romper la experiencia.
   if (session.demo) return { ok: true, ref: input.ref, recorded: false };
   await withTenant(session.businessId, (tx) => audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'support.reported', null, null, {
-    ref: input.ref, view: input.view, description: input.description, device: input.device, appVersion: input.appVersion, role: session.role, channel: input.channel,
+    // La descripción NO se guarda: la bitácora es inmutable y el dueño podría escribir datos de clientes. Viaja solo en
+    // el WhatsApp a soporte; aquí queda la referencia para encontrarlo.
+    ref: input.ref, view: input.view, descriptionLength: input.description.length, device: input.device, appVersion: input.appVersion, role: session.role, channel: input.channel,
   }));
   return { ok: true, ref: input.ref, recorded: true };
 }

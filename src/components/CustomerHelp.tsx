@@ -31,7 +31,7 @@ export function RecoverScreen({ slug, businessName, onBack }: { slug: string; bu
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState<null | { businessWhatsapp: string | null }>(null);
+  const [sent, setSent] = useState<null | { businessWhatsapp: string | null; queued: boolean }>(null);
   const [offline, setOffline] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -39,8 +39,8 @@ export function RecoverScreen({ slug, businessName, onBack }: { slug: string; bu
     if (busy) return;
     setBusy(true); setError(null);
     try {
-      const r = await api<{ ok: true; businessWhatsapp: string | null }>('POST', `/public/businesses/${slug}/recovery`, { contact, name });
-      setSent({ businessWhatsapp: r.businessWhatsapp });
+      const r = await api<{ ok: true; queued?: boolean; businessWhatsapp: string | null }>('POST', `/public/businesses/${slug}/recovery`, { contact, name });
+      setSent({ businessWhatsapp: r.businessWhatsapp, queued: r.queued !== false });
     } catch (err) {
       const e2 = err as ApiError;
       if (e2.code === 'recovery_unavailable') setOffline(true);
@@ -54,7 +54,18 @@ export function RecoverScreen({ slug, businessName, onBack }: { slug: string; bu
   return (
     <div className="screen-in pt-6 sm:pt-10 flex flex-col gap-5" data-testid="recover-screen">
       <button type="button" onClick={onBack} className="self-start inline-flex items-center gap-1 text-[13px] text-cafe-muted hover:text-cafe-ink"><ArrowLeft size={14} /> Regresar</button>
-      {sent ? (
+      {sent && !sent.queued ? (
+        <section className="rounded-2xl bg-white border border-cafe-line p-5 flex flex-col gap-3" data-testid="recover-busy" role="status">
+          <div className="flex items-center gap-2 text-[16px] font-semibold text-cafe-ink"><Store size={18} /> Pídelo en caja</div>
+          <p className="text-[13.5px] text-cafe-body leading-relaxed">{businessName} tiene muchas solicitudes en este momento y no pudimos registrar la tuya. En caja te generan tu enlace nuevo en un momento.</p>
+          {waBusiness && (
+            <a href={waBusiness} target="_blank" rel="noopener noreferrer" data-testid="recover-wa-business"
+              className="inline-flex items-center justify-center gap-2 h-11 rounded-xl bg-[#128C7E] text-white text-[14px] font-medium">
+              <MessageCircle size={17} /> Escribir a {businessName} por WhatsApp
+            </a>
+          )}
+        </section>
+      ) : sent ? (
         <section className="rounded-2xl bg-white border border-cafe-line p-5 flex flex-col gap-3" data-testid="recover-sent" role="status">
           <div className="flex items-center gap-2 text-[16px] font-semibold text-cafe-ink"><CheckCircle2 size={20} className="text-[#12B76A]" /> Tu solicitud fue enviada a {businessName}</div>
           <p className="text-[13.5px] text-cafe-body leading-relaxed">Si tus datos coinciden con una tarjeta, el negocio te enviará un <strong>enlace nuevo</strong> o te ayudará en caja. Por seguridad no te confirmamos aquí si encontramos tu tarjeta.</p>

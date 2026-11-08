@@ -67,7 +67,7 @@ DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN REVOKE ALL ON recovery_requests FROM authenticated; END IF;
 END $$;
 GRANT SELECT, INSERT ON recovery_requests TO vlux_app;
--- UPDATE solo en las columnas que el código modifica (business_id, id y contact_hash nunca).
+-- UPDATE solo en las columnas que el código modifica (business_id e id nunca; contact_hash solo para volverlo aleatorio).
 GRANT UPDATE (contact, contact_hash, name_hint, matched_card_id, status, resolution, request_count, last_requested_at, resolved_by, resolved_at, expires_at)
   ON recovery_requests TO vlux_app;
 

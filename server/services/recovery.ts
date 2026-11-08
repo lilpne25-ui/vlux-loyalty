@@ -98,21 +98,38 @@ async function expireTenant(tx: Tx): Promise<number> {
   return r.rowCount ?? 0;
 }
 
+/** Reintenta una vez ante interbloqueo (40P01) o serialización (40001): la transacción completa se repite. */
+async function retryDeadlock<T>(fn: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      const code = (e as { code?: string } | null)?.code;
+      if (i < 2 && (code === '40P01' || code === '40001')) continue;
+      throw e;
+    }
+  }
+}
+
 let lastSweep = 0;
 /**
  * Barrido de retención de TODOS los negocios (vence y borra). Lo llama la tarea programada; la app además lo dispara
  * como máximo cada 10 min cuando hay actividad de recuperación, para no depender solo del programador.
  */
-export async function retentionSweep(opts: { force?: boolean } = {}): Promise<{ expired: number; deleted: number } | null> {
+export async function retentionSweep(opts: { force?: boolean; limit?: number } = {}): Promise<{ expired: number; deleted: number } | null> {
   if (!opts.force && Date.now() - lastSweep < 10 * 60_000) return null;
   lastSweep = Date.now();
   if (!(await recoverySchemaReady())) return null;
   return guarded(async () => {
-    const r = await runWithScope('worker', () => withTx((tx) => tx.query('SELECT recovery_retention_sweep(2000) AS j')));
+    // Siempre ESPERADO (nunca en segundo plano: en Vercel la instancia puede congelarse con la transacción abierta) y
+    // acotado: máximo 3 s y sin quedar «idle in transaction».
+    const r = await runWithScope('worker', () => withTx(async (tx) => {
+      await tx.query("SET LOCAL statement_timeout = '3s'; SET LOCAL idle_in_transaction_session_timeout = '5s'; SET LOCAL lock_timeout = '1s'");
+      return tx.query('SELECT recovery_retention_sweep($1) AS j', [opts.limit ?? 2000]);
+    }));
     return r.rows[0].j as { expired: number; deleted: number };
   }, () => null);
 }
-const sweepInBackground = () => { void retentionSweep().catch((e) => console.error('[recovery] barrido de retención falló', (e as Error).message)); };
+/** Barrido oportunista desde una ruta real (no demo): esperado, pequeño y sin romper la respuesta si falla. */
+const opportunisticSweep = async () => { await retentionSweep({ limit: 200 }).catch((e) => { console.error('[recovery] barrido de retención falló', (e as Error).message); return null; }); };
 
 /** Datos públicos de ayuda del negocio (para la vista del cliente). Nunca falla por falta de 0017. */
 export async function publicHelp(slug: string): Promise<{ recovery: boolean; businessWhatsapp: string | null }> {
@@ -129,7 +146,7 @@ export async function publicHelp(slug: string): Promise<{ recovery: boolean; bus
  * El cliente pide recuperar su acceso. Respuesta IDÉNTICA exista o no la tarjeta (no se puede usar para averiguar
  * quién es cliente). Repetir la solicitud no crea filas nuevas: suma al contador de la abierta.
  */
-export async function requestRecovery(slug: string, raw: unknown): Promise<{ ok: true; businessWhatsapp: string | null }> {
+export async function requestRecovery(slug: string, raw: unknown): Promise<{ ok: true; queued: boolean; businessWhatsapp: string | null }> {
   const biz = await getBusinessBySlug(slug);
   const input = recoveryRequestSchema.parse(raw);
   const c = normalizeContact(input.contact);
@@ -138,14 +155,17 @@ export async function requestRecovery(slug: string, raw: unknown): Promise<{ ok:
   if (!(await recoverySchemaReady())) throw unavailable();
   const name = input.name.replace(/\s+/g, ' ') || null;
   const hash = contactHash(biz.id, c.type, c.contact);
-  const out = await guarded(() => withTenant(biz.id, async (tx) => {
-    await expireTenant(tx);
-    // Serializa las solicitudes del mismo negocio: el tope de abiertas se respeta aun con llamadas simultáneas.
+  const out = await guarded(() => retryDeadlock(() => withTenant(biz.id, async (tx) => {
+    // Serializa las solicitudes del mismo negocio (ANTES de tocar filas, para no interbloquear): el tope de abiertas
+    // se respeta aun con llamadas simultáneas.
     await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('recovery:' || $1, 0))", [biz.id]);
+    await expireTenant(tx);
+    let queued = true;
     const open = (await tx.query("SELECT count(*)::int AS n FROM recovery_requests WHERE status = 'pending'")).rows[0].n as number;
     const already = (await tx.query("SELECT id FROM recovery_requests WHERE contact_hash = $1 AND status = 'pending'", [hash])).rows[0];
     if (!already && open >= MAX_OPEN_REQUESTS) {
       await audit(tx, biz.id, { type: 'customer', id: null }, 'recovery.dropped', null, null, { reason: 'inbox_full' });
+      queued = false;
     } else {
       const card = (await tx.query(
         `SELECT c.id FROM customers cu JOIN cards c ON c.customer_id = cu.id
@@ -167,9 +187,10 @@ export async function requestRecovery(slug: string, raw: unknown): Promise<{ ok:
       await audit(tx, biz.id, { type: 'customer', id: null }, 'recovery.requested', 'recovery_request', row.id, { matched: !!card, repeat: row.request_count > 1, contactType: c.type });
     }
     const w = (await tx.query('SELECT contact_whatsapp FROM businesses WHERE id = $1', [biz.id])).rows[0];
-    return { ok: true as const, businessWhatsapp: w?.contact_whatsapp ?? null };
-  }));
-  sweepInBackground();
+    // queued=false solo dice que la BANDEJA DEL NEGOCIO está llena (no revela si el contacto es cliente).
+    return { ok: true as const, queued, businessWhatsapp: w?.contact_whatsapp ?? null };
+  })));
+  await opportunisticSweep();
   return out;
 }
 
@@ -214,7 +235,7 @@ export async function listRecovery(session: StaffSession): Promise<{ available: 
       }),
     };
   }), off);
-  sweepInBackground();
+  if (!session.demo) await opportunisticSweep();
   return out;
 }
 
@@ -228,7 +249,7 @@ export async function listRecovery(session: StaffSession): Promise<{ available: 
 export async function issueRecoveryLink(session: StaffSession, requestId: string, raw: unknown) {
   if (!(await recoverySchemaReady())) throw unavailable();
   const { cardId, identityVerified } = issueRecoveryLinkSchema.parse(raw ?? {});
-  return guarded(() => withTenant(session.businessId, async (tx) => {
+  return guarded(() => retryDeadlock(() => withTenant(session.businessId, async (tx) => {
     // 1) Lectura sin bloqueo para saber qué tarjeta bloquear primero (mismo orden que la anonimización: tarjeta → solicitud).
     const peek = (await tx.query('SELECT matched_card_id FROM recovery_requests WHERE id = $1', [requestId])).rows[0];
     if (!peek) throw notFound('Solicitud');
@@ -244,7 +265,7 @@ export async function issueRecoveryLink(session: StaffSession, requestId: string
     // 2) Solicitud bloqueada y revalidada (otra llamada pudo cerrarla o generar enlace mientras tanto).
     const req = (await tx.query(
       `SELECT id, status, matched_card_id, contact, contact_type, expires_at < now() AS lapsed,
-              (status = 'link_issued' AND resolved_at > now() - make_interval(secs => $2)) AS just_issued
+              (status = 'link_issued' AND resolved_at > clock_timestamp() - make_interval(secs => $2)) AS just_issued
          FROM recovery_requests WHERE id = $1 FOR UPDATE`,
       [requestId, RELINK_GUARD_SECONDS],
     )).rows[0];
@@ -272,7 +293,7 @@ export async function issueRecoveryLink(session: StaffSession, requestId: string
       // Solo el contacto REGISTRADO del cliente. Sin contacto registrado: entrega en persona (QR).
       deliverTo,
     };
-  }));
+  })));
 }
 
 /** Cierra la solicitud: enlace enviado, atendida en persona, no es cliente o abuso. Al cerrar se enmascara. */
@@ -330,15 +351,24 @@ export async function redactRecoveryForCustomer(tx: Tx, businessId: string, cust
               resolution = CASE WHEN r.status IN ('pending','link_issued') THEN 'not_customer' ELSE r.resolution END,
               resolved_at = coalesce(r.resolved_at, now())
         WHERE r.matched_card_id IN (SELECT id FROM cards WHERE customer_id = $1)
-           OR r.contact_hash = $2
-           OR (r.contact = $3 AND r.contact_type = $4)`,
+           OR (r.matched_card_id IS NULL AND (r.contact_hash = $2 OR (r.contact = $3 AND r.contact_type = $4))
+               -- Si OTRO cliente activo comparte ese contacto, su solicitud no se toca (customers.contact no es único).
+               AND NOT EXISTS (SELECT 1 FROM customers o WHERE o.id <> $1 AND o.anonymized_at IS NULL AND o.contact = $3 AND o.contact_type = $4))`,
       [customerId, hash, contact.contact, contact.type],
     );
     await tx.query('RELEASE SAVEPOINT recovery_redact');
     return r.rowCount ?? 0;
   } catch (e) {
-    if (!isSchemaMissing(e)) throw e;
+    // Esquema ausente o permisos incompletos (p. ej. restauración con un grants.sql anterior a 0017): la anonimización
+    // del cliente (derecho ARCO) nunca debe fallar por la tabla de recuperación. Se registra y se sigue.
+    const code = (e as { code?: string } | null)?.code;
+    if (!isSchemaMissing(e) && code !== '42501') throw e;
     await tx.query('ROLLBACK TO SAVEPOINT recovery_redact');
+    if (code === '42501') {
+      // Queda constancia en la bitácora del negocio: las solicitudes de este cliente NO se pudieron redactar.
+      console.error('[recovery] sin permisos sobre recovery_requests: revisa ops/grants.sql (0017)');
+      await audit(tx, businessId, { type: 'system', id: null }, 'recovery.redact_failed', 'customer', customerId, { reason: 'permission_denied' });
+    }
     resetRecoverySchemaCache();
     return null;
   }
