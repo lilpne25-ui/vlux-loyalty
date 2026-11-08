@@ -7,7 +7,7 @@ import { formatDateTime, lowerFirst, cardQrValue, rewardQrValue, plural } from '
 import { usePolling } from '../lib/usePolling';
 import { getSeen, setSeen, getFlag, setFlag } from '../lib/seen';
 import { isPoints, programHow, rewardSentence, stampRule, units, unitTitle, welcomeHeadline } from '../lib/vertical';
-import { Button, Modal, QRCode, CopyButton, Field, inputCls, BusinessLogo, CupIllustration, PoweredByVlux, useToast, cx, Badge } from '../components/ui';
+import { Button, Modal, QRCode, CopyButton, Field, inputCls, BusinessLogo, CupIllustration, useToast, cx, Badge } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
 import { VerticalIcon } from '../components/VerticalIcon';
 import { sanitizeFit } from '../lib/logoFit';
@@ -16,6 +16,7 @@ import { SaveCardPanel, PairScreen, OfflineNotice } from '../components/SaveCard
 import { CustomerNotifications } from '../components/Notifications';
 import { NearbyCheck } from '../components/Nearby';
 import { applyBusinessAppHead, isStandalone, useOnline } from '../lib/pwa';
+import { RecoverLink, RecoverScreen, VluxHelp } from '../components/CustomerHelp';
 
 const POLL_MS = 4000;
 
@@ -23,7 +24,7 @@ const POLL_MS = 4000;
 export function CustomerApp({ slug }: { slug: string }) {
   const [pub, setPub] = useState<{ business: BusinessInfo; program: Program; privacyNoticeVersion: string } | null>(null);
   const [pubError, setPubError] = useState<string | null>(null);
-  const [screen, setScreen] = useState<'welcome' | 'register'>('welcome');
+  const [screen, setScreen] = useState<'welcome' | 'register' | 'recover'>('welcome');
   const [personalLink, setPersonalLink] = useState<string | null>(null);
   const card = usePolling(() => api<CustomerCardView | { card: null }>('GET', `/me/${slug}/card`), POLL_MS, [slug]);
 
@@ -59,10 +60,12 @@ export function CustomerApp({ slug }: { slug: string }) {
         {view && networkDown && <OfflineNotice hasData onRetry={card.refresh} />}
         {view ? (
           <CardScreen view={view} slug={slug} refresh={card.refresh} personalLink={personalLink} onLinkSeen={() => setPersonalLink(null)} />
+        ) : screen === 'recover' ? (
+          <><RecoverScreen slug={slug} businessName={b.name} onBack={() => setScreen('welcome')} /><div className="mt-8"><VluxHelp businessName={b.name} /></div></>
         ) : standalone && !wantsNew ? (
-          <PairScreen slug={slug} businessName={b.name} onPaired={card.refresh} onNew={() => setWantsNew(true)} />
+          <><PairScreen slug={slug} businessName={b.name} onPaired={card.refresh} onNew={() => setWantsNew(true)} /><div className="mt-4 flex justify-center"><RecoverLink onClick={() => setScreen('recover')} /></div></>
         ) : screen === 'welcome' ? (
-          <Welcome business={b} program={pub.program} onStart={() => setScreen('register')} />
+          <Welcome business={b} program={pub.program} onStart={() => setScreen('register')} onRecover={() => setScreen('recover')} />
         ) : (
           <Register business={b} slug={slug} onBack={() => setScreen('welcome')} onDone={(link) => { setPersonalLink(link); card.refresh(); }} />
         )}
@@ -71,7 +74,7 @@ export function CustomerApp({ slug }: { slug: string }) {
   );
 }
 
-function Welcome({ business: b, program, onStart }: { business: BusinessInfo; program: Program; onStart: () => void }) {
+function Welcome({ business: b, program, onStart, onRecover }: { business: BusinessInfo; program: Program; onStart: () => void; onRecover: () => void }) {
   const rule = stampRule(program);
   return (
     <div className="screen-in pt-6 sm:pt-10 flex flex-col">
@@ -121,7 +124,8 @@ function Welcome({ business: b, program, onStart }: { business: BusinessInfo; pr
         Obtener mi tarjeta gratis <ArrowRight size={18} />
       </Button>
       <p className="mt-3 text-[12.5px] text-cafe-muted text-center">¿Ya tienes tarjeta? Abre el enlace personal que guardaste al registrarte.</p>
-      <div className="mt-10"><PoweredByVlux /></div>
+      <div className="mt-2 flex justify-center"><RecoverLink onClick={onRecover} /></div>
+      <div className="mt-10"><VluxHelp businessName={b.name} /></div>
     </div>
   );
 }
@@ -363,7 +367,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
         </ul>
       </details>
 
-      <PoweredByVlux />
+      <VluxHelp businessName={b.name} />
 
       {celebrate && reward && (
         <Celebration

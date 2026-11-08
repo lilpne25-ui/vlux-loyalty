@@ -90,10 +90,17 @@ h1, h2, h3 { text-wrap: balance; }
 /* V0.2 */
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+/* 1.0.x · Impresión. Antes se ocultaba TODO salvo el cartel y se posicionaba en la esquina con medidas de pantalla:
+   en celular salía pequeño, cortado o en varias hojas. El cartel ahora se imprime desde /panel/cartel (imagen a tamaño
+   físico fijo); aquí solo se quita lo que no aporta en papel y se conservan los colores. */
 @media print {
-  body * { visibility: hidden; }
-  .print-area, .print-area * { visibility: visible; }
-  .print-area { position: absolute; left: 0; top: 0; box-shadow: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .no-print, .topbar, [role="tablist"] { display: none !important; }
+  html, body, #root, .app-root { background: #fff !important; height: auto !important; min-height: 0 !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .poster-print { background: #fff !important; }
+  html:has(.poster-print), html:has(.poster-print) body { zoom: 1 !important; margin: 0 !important; }
+  .poster-print > div { padding: 0 !important; max-width: none !important; }
+  .poster-sheet { margin: 0 auto; page-break-inside: avoid; break-inside: avoid; }
 }
 /* Marca de sello por giro: grano de café solo en cafeterías; marca genérica en el resto. */
 .mark-bean { display: none; }

@@ -27,8 +27,9 @@ test('ninguna función de public es ejecutable por PUBLIC; vlux_app conserva sol
   const mine = await admin.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public' AND has_function_privilege('vlux_app', p.oid, 'EXECUTE') ORDER BY 1`);
   const has0016 = (await admin.query("SELECT to_regprocedure('public.app_scope()') IS NOT NULL AS ok")).rows[0].ok as boolean;
+  const has0017 = (await admin.query("SELECT to_regprocedure('public.recovery_retention_sweep(integer)') IS NOT NULL AS ok")).rows[0].ok as boolean;
   assert.deepEqual(mine.rows.map((x) => x.proname), [...(has0016 ? ['app_scope'] : []), 'current_business_id', 'notification_due_businesses', 'platform_business_export',
-    'platform_business_stats', 'platform_purge_business', 'platform_recent_activity']);
+    'platform_business_stats', 'platform_purge_business', 'platform_recent_activity', ...(has0017 ? ['recovery_mask', 'recovery_retention_sweep'] : [])]);
 });
 
 test('los disparadores siguen funcionando para vlux_app sin EXECUTE (logo_hash y updated_at)', async () => {

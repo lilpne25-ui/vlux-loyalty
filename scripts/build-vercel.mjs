@@ -70,5 +70,19 @@ const config = {
     { src: '^/(.*)$', dest: '/index.html', headers: { 'cache-control': 'public, max-age=0, must-revalidate' } },
   ],
 };
+// 1.0.x · Tarea programada de retención de «Perdí mi acceso» (0017) con Vercel Schedules (beta pública).
+// APAGADA por omisión: solo se declara si el build corre con VLUX_SCHEDULE_RECOVERY_RETENTION=1 en un build de Preview
+// (VERCEL_ENV=preview). Aun declarada,
+// en Preview una schedule estática nueva nace INACTIVA (hay que habilitarla por rama con la CLI). Vercel envía
+// `Authorization: Bearer $CRON_SECRET` a las rutas tipo path. Nunca llama a la ruta de avisos.
+// Procedimiento: docs/release-1.0/TAREA_RETENCION_0017.md
+const RECOVERY_RETENTION_SCHEDULE = {
+  'recovery-retention': { schedule: '47 8 * * *', timezone: 'UTC', path: '/api/internal/recovery/retention', requestMethod: 'GET' },
+};
+// Doble llave: la bandera Y entorno Preview. En Production no se declara aunque la bandera exista por error.
+if (process.env.VLUX_SCHEDULE_RECOVERY_RETENTION === '1' && process.env.VERCEL_ENV === 'preview') {
+  config.schedules = RECOVERY_RETENTION_SCHEDULE;
+  console.log('Vercel Schedules: recovery-retention DECLARADA (47 8 * * * UTC)');
+}
 writeFileSync(join(out, 'config.json'), JSON.stringify(config, null, 2));
 console.log('Build Output API listo en .vercel/output');

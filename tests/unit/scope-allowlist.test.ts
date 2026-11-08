@@ -18,7 +18,8 @@ test('runWithScope solo se usa en los puntos de entrada revisados', () => {
   const uniq = (a: string[] = []) => [...new Set(a)].sort();
   assert.deepEqual(uniq(found.platform), ['admin-routes.ts'], 'platform nace solo en requireAdmin');
   assert.deepEqual(uniq(found.webhook), ['services/email-invitations.ts']);
-  assert.deepEqual(uniq(found.worker), ['services/notifications.ts']);
+  // recovery.ts: barrido de retención 1.0.x (solo reduce datos; recovery_retention_sweep exige «worker» con 0016).
+  assert.deepEqual(uniq(found.worker), ['services/notifications.ts', 'services/recovery.ts']);
   assert.deepEqual(uniq(found.auth), ['services/auth.ts', 'services/customers.ts', 'services/demo.ts', 'services/invitations.ts', 'services/operations.ts']);
   assert.deepEqual(Object.keys(found).sort(), ['auth', 'platform', 'webhook', 'worker']);
 });

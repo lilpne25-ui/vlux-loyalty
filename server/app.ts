@@ -6,6 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { ZodError } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
+import { bearerMatchesAny, ipBucket } from './security';
 import { config } from './config';
 import { APP_VERSION } from './version';
 import { AppError, forbidden, notFound, unauthorized } from './errors';
@@ -27,6 +28,8 @@ import { buildManifest, buildStaffManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
 import { cancelAppointment, communicationOverview, createAppointment, createPromotion, dispatchBusiness, publicPushConfig, runNotificationJob, subscribe, subscriptionStatus, unsubscribe, updatePreferences, updateSettings } from './services/notifications';
+import { closeRecovery, issueRecoveryLink, listRecovery, publicHelp, requestRecovery, RETENTION_LIMIT, runRetentionTask, setBusinessWhatsapp } from './services/recovery';
+import { recordSupportReport } from './services/support';
 import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
 
 type Env = { Variables: { staff: StaffSession } };
@@ -202,6 +205,20 @@ export function buildApp() {
     return c.json({ publicCode: r.publicCode, personalLink: `${publicBaseUrl(c)}/t#${r.token}` }, 201);
   });
 
+  // 1.0.x · Ayuda del negocio para el cliente: ¿hay recuperación en línea? ¿WhatsApp público del negocio?
+  api.get('/public/businesses/:slug/help', async (c) => c.json(await publicHelp(slugSchema.parse(c.req.param('slug')))));
+
+  // 1.0.x · «Perdí mi acceso»: crea una solicitud para el negocio. Respuesta idéntica exista o no la tarjeta.
+  api.post('/public/businesses/:slug/recovery', async (c) => {
+    const slug = slugSchema.parse(c.req.param('slug'));
+    // IPv6 se agrupa por /64 (rotar direcciones dentro de una misma red no evade el límite).
+    await rateLimit(`recovery-ip:${ipBucket(clientIp(c))}`, 5, 60 * 60_000);
+    // Freno de tormenta por negocio, alto a propósito: un atacante con pocas IP no debe bloquear a los clientes reales.
+    // El almacenamiento lo protege MAX_OPEN_REQUESTS y el dueño ve en su bandeja si se descartaron solicitudes.
+    await rateLimit(`recovery-biz:${slug}`, 300, 60 * 60_000);
+    return c.json(await requestRecovery(slug, await jsonBody(c)), 202);
+  });
+
   // ---------- Cliente (cookie de su tarjeta) ----------
   api.get('/me/:slug/card', async (c) => {
     const ref = await customerCard(c, c.req.param('slug'));
@@ -247,6 +264,25 @@ export function buildApp() {
     c.header('Cache-Control', 'no-store');
     // La función de Vercel corta a los 15 s (maxDuration en build-vercel.mjs): el presupuesto queda por debajo.
     return c.json(await runNotificationJob({ budgetMs: jobBudgetMs() }));
+  });
+
+  // 1.0.x · Retención de «Perdí mi acceso» (0017) como tarea INDEPENDIENTE de los avisos: solo llama a
+  // recovery_retention_sweep(); nunca ejecuta runNotificationJob(), correos ni push. Autenticación de servidor:
+  // Bearer con RECOVERY_RETENTION_SECRET (pruebas manuales, no sirve para avisos) o CRON_SECRET (el que envía Vercel
+  // Schedules). Ambos ≥32 caracteres. ?limit=1..2000 (500 por omisión) · ?dryRun=1 ejecuta y DESHACE (no cambia datos).
+  api.get('/internal/recovery/retention', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    if (!bearerMatchesAny(c.req.header('authorization'), [process.env.RECOVERY_RETENTION_SECRET, process.env.CRON_SECRET])) throw unauthorized();
+    const rawLimit = c.req.query('limit');
+    const limit = rawLimit === undefined ? RETENTION_LIMIT.default : /^\d{1,4}$/.test(rawLimit) ? Number(rawLimit) : NaN;
+    if (!Number.isInteger(limit) || limit < RETENTION_LIMIT.min || limit > RETENTION_LIMIT.max) {
+      throw new AppError(422, 'invalid_limit', `limit debe ser un entero entre ${RETENTION_LIMIT.min} y ${RETENTION_LIMIT.max}.`);
+    }
+    const rawDry = c.req.query('dryRun');
+    if (rawDry !== undefined && !['0', '1', 'true', 'false'].includes(rawDry)) throw new AppError(422, 'invalid_dry_run', 'dryRun debe ser 1 o 0.');
+    const r = await runRetentionTask({ limit, dryRun: rawDry === '1' || rawDry === 'true' });
+    console.log('[recovery] retención', JSON.stringify(r));
+    return c.json(r);
   });
 
   // ---------- PWA: vincular la app instalada (V0.2.2) ----------
@@ -445,6 +481,12 @@ export function buildApp() {
     const r = await reissueCardLink(s, uuidSchema.parse(c.req.param('cardId')));
     return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}` });
   });
+  // 1.0.x · Reportar un problema a VLUX (dueño o caja): queda en la bitácora del negocio con su referencia.
+  staff.post('/support-report', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`support:${s.userId}`, 10, 60 * 60_000);
+    return c.json(await recordSupportReport(s, await jsonBody(c)), 201);
+  });
   api.route('/staff', staff);
 
   // ---------- Dueño ----------
@@ -515,6 +557,17 @@ export function buildApp() {
   });
   owner.post('/appointments', async (c) => c.json(await createAppointment(c.get('staff'), await jsonBody(c)), 201));
   owner.post('/appointments/:id/cancel', async (c) => c.json(await cancelAppointment(c.get('staff'), uuidSchema.parse(c.req.param('id')))));
+  // 1.0.x · Solicitudes de recuperación de acceso de clientes y WhatsApp público del negocio (requiere 0017).
+  owner.get('/recovery', async (c) => c.json(await listRecovery(c.get('staff'))));
+  owner.post('/recovery/:id/link', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`relink:${s.sessionId}`, 10, 60 * 60_000);
+    const r = await issueRecoveryLink(s, uuidSchema.parse(c.req.param('id')), await jsonBody(c));
+    // deliverTo es SIEMPRE el contacto registrado del cliente (o null: entrega en persona), nunca el de la solicitud.
+    return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}`, card: r.card, deliverTo: r.deliverTo });
+  });
+  owner.post('/recovery/:id/close', async (c) => c.json(await closeRecovery(c.get('staff'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
+  owner.put('/contact', async (c) => c.json(await setBusinessWhatsapp(c.get('staff'), await jsonBody(c))));
   api.route('/owner', owner);
 
   // ---------- Control Center (equipo VLUX) ----------

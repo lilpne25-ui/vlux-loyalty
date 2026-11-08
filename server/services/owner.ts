@@ -7,6 +7,7 @@ import { audit } from './audit';
 import { loadHistory } from './cards';
 import { unlockIfEligible } from './loyalty';
 import { insertRule, loadActiveRule, publicProgram, ruleChanged } from './rules-store';
+import { redactRecoveryForCustomer } from './recovery';
 import type { StaffSession } from './auth';
 
 const TZ = 'America/Mexico_City';
@@ -164,7 +165,7 @@ export async function setStaffActive(session: StaffSession, membershipId: string
 /** Derecho de cancelación (ARCO): se borran datos personales y se revoca el acceso; las métricas agregadas se conservan. */
 export async function anonymizeCustomer(session: StaffSession, customerId: string) {
   return withTenant(session.businessId, async (tx) => {
-    const c = (await tx.query('SELECT id, anonymized_at FROM customers WHERE id = $1 FOR UPDATE', [customerId])).rows[0];
+    const c = (await tx.query('SELECT id, anonymized_at, contact, contact_type FROM customers WHERE id = $1 FOR UPDATE', [customerId])).rows[0];
     if (!c) throw notFound('Cliente');
     if (c.anonymized_at) return { customerId, alreadyAnonymized: true };
     await tx.query("UPDATE customers SET display_name = 'Cliente eliminado', contact = NULL, contact_type = NULL, marketing_consent = false, anonymized_at = now() WHERE id = $1", [customerId]);
@@ -175,6 +176,9 @@ export async function anonymizeCustomer(session: StaffSession, customerId: strin
     await tx.query("UPDATE push_subscriptions SET disabled_at = now(), disabled_reason = 'card_revoked' WHERE disabled_at IS NULL AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
     await tx.query("UPDATE appointments SET status = 'cancelled' WHERE status = 'confirmed' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
     await tx.query("UPDATE notification_outbox SET status = 'skipped', skip_reason = 'card_revoked' WHERE status = 'queued' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    // 1.0.x · Solicitudes de recuperación de ese cliente (vinculadas o con su contacto): enmascaradas y cerradas.
+    // Bajo SAVEPOINT: sin 0017 (o revertida) no hace nada y nunca aborta la anonimización.
+    await redactRecoveryForCustomer(tx, session.businessId, customerId, { contact: c.contact, type: c.contact_type });
     await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'customer.anonymized', 'customer', customerId);
     return { customerId, alreadyAnonymized: false };
   });

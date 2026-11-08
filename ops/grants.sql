@@ -45,6 +45,16 @@ DO $$ BEGIN
     GRANT UPDATE (revoked_at) ON staff_sessions TO vlux_app;
   END IF;
 END $$;
+-- recovery_requests y sus funciones nacen en 0017: SELECT/INSERT y UPDATE por columnas, sin DELETE (lo borra solo
+-- recovery_retention_sweep). Condicional: no rompe respaldos anteriores a 0017 ni depende de 0016.
+DO $$ BEGIN
+  IF to_regclass('public.recovery_requests') IS NOT NULL THEN
+    GRANT SELECT, INSERT ON recovery_requests TO vlux_app;
+    GRANT UPDATE (contact, contact_hash, name_hint, matched_card_id, status, resolution, request_count, last_requested_at, resolved_by, resolved_at, expires_at) ON recovery_requests TO vlux_app;
+  END IF;
+  IF to_regprocedure('public.recovery_mask(text, text)') IS NOT NULL THEN GRANT EXECUTE ON FUNCTION public.recovery_mask(text, text) TO vlux_app; END IF;
+  IF to_regprocedure('public.recovery_retention_sweep(integer)') IS NOT NULL THEN GRANT EXECUTE ON FUNCTION public.recovery_retention_sweep(integer) TO vlux_app; END IF;
+END $$;
 GRANT SELECT, INSERT, UPDATE, DELETE ON activation_drafts, card_pair_codes, rate_limits TO vlux_app;
 -- Solo inserción (bitácoras y libro mayor; además los protege el disparador forbid_mutation)
 GRANT SELECT, INSERT ON audit_events, business_deletions, email_events, platform_audit_events, review_events, stamp_events TO vlux_app;
