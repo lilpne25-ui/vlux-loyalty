@@ -1,12 +1,12 @@
 // Sesiones de personal (dueño y empleado). Token opaco en cookie HttpOnly; en BD solo el hash.
 import { config } from '../config';
-import { getPool, withTenant, withTx } from '../db';
+import { getPool, q, runWithScope, withTenant } from '../db';
 import { AppError } from '../errors';
 import { DUMMY_PASSWORD_HASH, newToken, sha256, verifyPassword } from '../security';
 import { audit } from './audit';
 
 export type Role = 'OWNER' | 'EMPLOYEE';
-export interface StaffSession { sessionId: string; userId: string; email: string; displayName: string; businessId: string; businessSlug: string; businessName: string; role: Role; mustChangePassword: boolean; }
+export interface StaffSession { sessionId: string; userId: string; email: string; displayName: string; businessId: string; businessSlug: string; businessName: string; role: Role; mustChangePassword: boolean; demo?: boolean; }
 
 const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
@@ -18,12 +18,14 @@ export type LoginResult =
   | { kind: 'choose'; businesses: BusinessChoice[] };
 
 /** Crea la sesión del personal para una membresía concreta (dentro de una transacción). */
-export async function createStaffSession(tx: import('../db').Tx, userId: string, membershipId: string, businessId: string) {
+export const DEMO_EMAIL_DOMAIN = 'demo.vlux.invalid';
+
+export async function createStaffSession(tx: import('../db').Tx, userId: string, membershipId: string, businessId: string, hours = config.staffSessionHours) {
   const token = newToken();
   const id = (await tx.query(
     `INSERT INTO staff_sessions (token_hash, user_id, membership_id, business_id, expires_at)
      VALUES ($1, $2, $3, $4, now() + make_interval(hours => $5)) RETURNING id`,
-    [sha256(token), userId, membershipId, businessId, config.staffSessionHours],
+    [sha256(token), userId, membershipId, businessId, hours],
   )).rows[0].id as string;
   return { token, sessionId: id };
 }
@@ -47,11 +49,12 @@ export async function login(email: string, password: string, businessSlug?: stri
     );
     throw invalid();
   }
-  const memberships = (await pool.query(
+  // Antes de conocer el negocio: alcance auth (solo lectura de membresías del usuario ya verificado).
+  const memberships = (await runWithScope('auth', () => q(
     `SELECT m.id, m.role, b.id AS business_id, b.slug, b.name FROM staff_memberships m JOIN businesses b ON b.id = m.business_id
       WHERE m.user_id = $1 AND m.active AND b.status = 'active' ORDER BY m.created_at`,
     [user.id],
-  )).rows;
+  ))).rows;
   if (!memberships.length) throw new AppError(403, 'no_business', 'Tu usuario no tiene un negocio activo.');
   const choices: BusinessChoice[] = memberships.map((x) => ({ slug: x.slug, name: x.name, role: x.role }));
   if (!businessSlug && memberships.length > 1) {
@@ -61,7 +64,8 @@ export async function login(email: string, password: string, businessSlug?: stri
   const m = businessSlug ? memberships.find((x) => x.slug === businessSlug) : memberships[0];
   if (!m) throw new AppError(403, 'forbidden', 'No perteneces a ese negocio.');
 
-  const { token, sessionId } = await withTx(async (tx) => {
+  // La sesión nace dentro del negocio elegido: la política WITH CHECK impide crearla para otro.
+  const { token, sessionId } = await withTenant(m.business_id, async (tx) => {
     await tx.query('UPDATE staff_users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [user.id]);
     return createStaffSession(tx, user.id, m.id, m.business_id);
   });
@@ -76,23 +80,24 @@ export async function login(email: string, password: string, businessSlug?: stri
 
 /** Negocios activos del usuario (para el selector dentro de la sesión). */
 export async function listMyBusinesses(userId: string): Promise<BusinessChoice[]> {
-  return (await getPool().query(
+  return (await runWithScope('auth', () => q(
     `SELECT b.slug, b.name, m.role FROM staff_memberships m JOIN businesses b ON b.id = m.business_id
       WHERE m.user_id = $1 AND m.active AND b.status = 'active' ORDER BY b.name`, [userId],
-  )).rows.map((r) => ({ slug: r.slug, name: r.name, role: r.role }));
+  ))).rows.map((r) => ({ slug: r.slug, name: r.name, role: r.role }));
 }
 
 /** Cambia de negocio sin volver a pedir contraseña: nueva sesión para esa membresía y se revoca la actual. */
 export async function switchBusiness(s: StaffSession, slug: string) {
-  const m = (await getPool().query(
+  const m = (await runWithScope('auth', () => q(
     `SELECT m.id, m.business_id FROM staff_memberships m JOIN businesses b ON b.id = m.business_id
       WHERE m.user_id = $1 AND b.slug = $2 AND m.active AND b.status = 'active'`, [s.userId, slug],
-  )).rows[0];
+  ))).rows[0];
   if (!m) throw new AppError(403, 'forbidden', 'No perteneces a ese negocio.');
-  const r = await withTx(async (tx) => {
+  // Una sola transacción: revoca la sesión actual (alcance auth, puede ser de otro negocio) y crea la nueva dentro del negocio destino.
+  const r = await runWithScope('auth', () => withTenant(m.business_id, async (tx) => {
     await tx.query('UPDATE staff_sessions SET revoked_at = now() WHERE id = $1', [s.sessionId]);
     return createStaffSession(tx, s.userId, m.id, m.business_id);
-  });
+  }));
   await withTenant(m.business_id, (tx) => audit(tx, m.business_id, { type: 'staff', id: s.userId }, 'staff.switched_business', 'staff_user', s.userId));
   return r.token;
 }
@@ -100,21 +105,21 @@ export async function switchBusiness(s: StaffSession, slug: string) {
 /** Resuelve la sesión y revalida en cada solicitud que la membresía siga activa (revocación inmediata). */
 export async function getStaffSession(token: string | undefined): Promise<StaffSession | null> {
   if (!token || token.length > 100) return null;
-  const row = (await getPool().query(
-    `SELECT s.id, s.user_id, u.email, u.display_name, u.must_change_password, s.business_id, b.slug, b.name, m.role
+  const row = (await runWithScope('auth', () => q(
+    `SELECT s.id, s.user_id, u.email, u.display_name, u.must_change_password, s.business_id, b.slug, b.name, m.role, (b.is_demo AND u.email LIKE '%@' || $2) AS demo
        FROM staff_sessions s
        JOIN staff_users u ON u.id = s.user_id
        JOIN staff_memberships m ON m.id = s.membership_id
        JOIN businesses b ON b.id = s.business_id
       WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
         AND u.disabled_at IS NULL AND m.active AND b.status = 'active'`,
-    [sha256(token)],
-  )).rows[0];
+    [sha256(token), DEMO_EMAIL_DOMAIN],
+  ))).rows[0];
   if (!row) return null;
-  return { sessionId: row.id, userId: row.user_id, email: row.email, displayName: row.display_name, businessId: row.business_id, businessSlug: row.slug, businessName: row.name, role: row.role, mustChangePassword: !!row.must_change_password };
+  return { sessionId: row.id, userId: row.user_id, email: row.email, displayName: row.display_name, businessId: row.business_id, businessSlug: row.slug, businessName: row.name, role: row.role, mustChangePassword: !!row.must_change_password, demo: !!row.demo };
 }
 
 export async function logout(token: string | undefined) {
   if (!token) return;
-  await getPool().query('UPDATE staff_sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL', [sha256(token)]);
+  await runWithScope('auth', () => q('UPDATE staff_sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL', [sha256(token)]));
 }

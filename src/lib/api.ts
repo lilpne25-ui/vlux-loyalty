@@ -29,10 +29,17 @@ export async function api<T = any>(method: 'GET' | 'POST' | 'PUT' | 'PATCH', pat
 
 export const newIdempotencyKey = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)).replace(/-/g, '');
 
+import type { ProgramType } from '../../shared/catalog';
 // ---------- Tipos de respuesta ----------
-export interface Program { stampsRequired: number; stampMode: 'per_purchase' | 'per_item'; maxStampsPerPurchase: number; visitWindowMinutes?: number; rewardDescription: string }
-export interface BusinessInfo { slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; reviewUrl?: string | null; isDemo: boolean }
-export type Vertical = 'cafeteria' | 'barberia' | 'salon' | 'restaurante' | 'otro';
+export interface Program {
+  stampsRequired: number; stampMode: 'per_purchase' | 'per_item'; maxStampsPerPurchase: number; visitWindowMinutes?: number; rewardDescription: string;
+  /** V0.4.5 · motor común */
+  programType?: ProgramType; programName?: string; conditions?: string; unitSingular?: string | null; unitPlural?: string | null;
+  eligibleServices?: string[]; amountPerPointCents?: number | null; maxAwardsPerDay?: number | null; validUntil?: string | null; version?: number;
+}
+export interface BusinessInfo { slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; cardFinish?: 'signature' | 'silver' | 'black'; reviewUrl?: string | null; isDemo: boolean; logoUrl?: string | null; logoFit?: unknown | null; location?: { lat: number; lng: number } | null }
+/** V0.4.5: id del catálogo extensible de giros (shared/catalog.ts). */
+export type Vertical = string;
 export interface RewardInfo { id?: string; code: string; description: string; stampsCost: number; unlockedAt: string }
 export interface HistoryItem { kind: 'card_created' | 'purchase' | 'purchase_voided' | 'reward_unlocked' | 'reward_redeemed'; at: string; stamps: number; items?: number; purchaseId?: string; voided?: boolean; customerName?: string; publicCode?: string; staffName?: string | null }
 export interface CustomerCardView {

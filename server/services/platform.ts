@@ -1,20 +1,29 @@
 // V0.3 · Operaciones de VLUX sobre toda la plataforma (Control Center).
 // Reglas: los datos de cada negocio se leen con withTenant (RLS); las métricas globales salen de funciones
 // SECURITY DEFINER que solo devuelven conteos. Toda escritura queda en la bitácora del negocio y en la global.
+import { APP_VERSION, SCHEMA_VERSION } from '../version';
 import { z } from 'zod';
 import { config } from '../config';
-import { getPool, withTenant, withTx } from '../db';
+import { getPool, q, withTenant, withTx } from '../db';
 import { AppError, notFound } from '../errors';
 import { audit } from './audit';
 import { getBusinessById } from './businesses';
 import { createInvitation, listInvitations } from './invitations';
+import { emailState } from './email-invitations';
+import { insertRule } from './rules-store';
 import { platformAudit, type AdminSession } from './platform-auth';
 import { GoogleWalletProvider } from '../wallet/google';
 import { AppleWalletProvider } from '../wallet/apple';
+import { logoBytesMatch } from '../image-check';
+import { consumeDraft, lockDraft } from './drafts';
+import { sanitizeFit } from '../../src/lib/logoFit';
 import { emailSchema, rulesSchema, slugSchema, verticals } from '../validation';
 
 const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Usa colores en formato #RRGGBB.');
-const logoSchema = z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, 'El logotipo debe ser PNG, JPG o WebP.').max(90000, 'El logotipo es demasiado grande (máximo ~64 KB).').nullable();
+const logoSchema = z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, 'El logotipo debe ser PNG, JPG o WebP.').max(90000, 'El logotipo es demasiado grande (máximo ~64 KB).').refine(logoBytesMatch, 'El archivo no es una imagen válida del tipo indicado.').nullable();
+// Ajuste del logotipo: se normaliza y se acota (nunca se confía en el cliente); null si no es válido.
+const fitSchema = z.unknown().transform((v) => (v == null ? null : sanitizeFit(v))).default(null);
+export const cardFinishes = ['signature', 'silver', 'black'] as const;
 const reviewUrl = z.string().trim().regex(/^https:\/\/\S+$/, 'El enlace de reseñas debe empezar con https://').max(500).nullable();
 export const planCodes = ['piloto', 'inicio', 'crecimiento'] as const;
 export const commercialStatuses = ['piloto', 'activo', 'vencido', 'suspendido', 'cancelado'] as const;
@@ -28,14 +37,19 @@ export const wizardSchema = z.object({
   ownerName: z.string().trim().min(2).max(60),
   ownerEmail: emailSchema,
   logoDataUrl: logoSchema.default(null),
+  logoFit: fitSchema,
+  logoOriginalDataUrl: logoSchema.default(null),
   primaryColor: color,
   accentColor: color,
+  cardFinish: z.enum(cardFinishes).default('silver'),
   rules: rulesSchema,
   reviewUrl: reviewUrl.default(null),
   plan: z.enum(planCodes),
   priceCents: z.number().int().min(0).max(100_000_000).optional(),
   pilotDays: z.number().int().min(1).max(180).default(30),
   isDemo: z.boolean().default(false),
+  /** Referencia del Brand Activation Draft del que viene el diseño (se consume en la misma transacción). */
+  draftRef: z.string().max(60).optional(),
 });
 
 export const businessEditSchema = z.object({
@@ -44,8 +58,13 @@ export const businessEditSchema = z.object({
   city: z.string().trim().max(80),
   primaryColor: color,
   accentColor: color,
+  cardFinish: z.enum(cardFinishes).default('silver'),
   reviewUrl,
   logoDataUrl: logoSchema,
+  logoFit: fitSchema,
+  logoOriginalDataUrl: logoSchema.default(null),
+  // V0.4.6 · Ubicación pública del establecimiento (opcional). Sin enviar = se conserva; null = se borra.
+  location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).nullable().optional(),
 });
 
 export const statusChangeSchema = z.object({
@@ -81,6 +100,7 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
   const plan = (await getPool().query('SELECT code, price_cents, currency FROM plans WHERE code = $1', [input.plan])).rows[0];
   if (!plan) throw new AppError(422, 'validation', 'Plan inválido.');
   const result = await withTx(async (tx) => {
+    const draftId = input.draftRef ? await lockDraft(tx, input.draftRef) : null;
     // Identificador único: el sugerido o el derivado del nombre, con sufijo si ya existe.
     const base = input.slug ?? slugify(input.name);
     let slug = base;
@@ -89,17 +109,13 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
       slug = `${base.slice(0, 36)}-${i}`;
     }
     const biz = (await tx.query(
-      `INSERT INTO businesses (slug, name, city, vertical, primary_color, accent_color, review_url, is_demo, logo_data_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [slug, input.name, input.city, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl, input.isDemo, input.logoDataUrl],
+      `INSERT INTO businesses (slug, name, city, vertical, primary_color, accent_color, review_url, is_demo, logo_data_url, card_finish, logo_fit, logo_original_data_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+      [slug, input.name, input.city, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl, input.isDemo, input.logoDataUrl, input.cardFinish, input.logoFit ? JSON.stringify(input.logoFit) : null, input.logoDataUrl ? input.logoOriginalDataUrl : null],
     )).rows[0].id as string;
+    if (draftId) await consumeDraft(tx, draftId, biz);
     await tx.query("SELECT set_config('app.business_id', $1, true)", [biz]);
-    const r = input.rules;
-    await tx.query(
-      `INSERT INTO reward_rules (business_id, version, stamps_required, stamp_mode, max_stamps_per_purchase, visit_window_minutes, reward_description)
-       VALUES ($1, 1, $2, $3, $4, $5, $6)`,
-      [biz, r.stampsRequired, r.stampMode, r.maxStampsPerPurchase, r.visitWindowMinutes, r.rewardDescription],
-    );
+    await insertRule(tx, biz, 1, input.rules, null);
     const today = new Date();
     const pilotEnd = input.plan === 'piloto' ? isoDate(new Date(today.getTime() + input.pilotDays * 86400_000)) : null;
     await tx.query(
@@ -110,7 +126,7 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
     );
     const inv = await createInvitation(tx, { businessId: biz, email: input.ownerEmail, displayName: input.ownerName, role: 'OWNER', by: { type: 'platform', id: admin.adminId } });
     await audit(tx, biz, { type: 'platform', id: null }, 'business.created', 'business', biz, { slug, plan: input.plan, via: 'control_center' });
-    await platformAudit(tx, admin.adminId, 'business.created', { businessId: biz, entityType: 'business', entityId: biz, details: { slug, plan: input.plan, isDemo: input.isDemo } });
+    await platformAudit(tx, admin.adminId, 'business.created', { businessId: biz, entityType: 'business', entityId: biz, details: { slug, plan: input.plan, isDemo: input.isDemo, fromDraft: !!input.draftRef } });
     return { businessId: biz, slug, invitation: inv };
   });
   return result;
@@ -119,14 +135,14 @@ export async function createBusinessFromWizard(admin: AdminSession, raw: unknown
 // ---------- Lecturas ----------
 type Stats = { customers: number; cards: number; purchases: number; stamps: number; rewardsRedeemed: number; lastActivity: Date | null };
 async function statsByBusiness(): Promise<Map<string, Stats>> {
-  const rows = (await getPool().query('SELECT * FROM platform_business_stats()')).rows;
+  const rows = (await q('SELECT * FROM platform_business_stats()')).rows;
   return new Map(rows.map((r) => [r.business_id, { customers: Number(r.customers), cards: Number(r.cards), purchases: Number(r.purchases), stamps: Number(r.stamps), rewardsRedeemed: Number(r.rewards_redeemed), lastActivity: r.last_activity }]));
 }
 
 export async function listBusinesses() {
   const [rows, stats] = await Promise.all([
-    getPool().query(
-      `SELECT b.id, b.slug, b.name, b.vertical, b.city, b.status, b.is_demo, b.created_at,
+    q(
+      `SELECT b.id, b.slug, b.name, b.vertical, b.city, b.status, b.is_demo, b.created_at, b.archived_at, (b.synthetic_declared_at IS NOT NULL) AS synthetic,
               s.plan_code, s.commercial_status, s.price_cents, s.currency,
               (SELECT string_agg(u.display_name, ', ' ORDER BY m.created_at) FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id
                 WHERE m.business_id = b.id AND m.role = 'OWNER' AND m.active) AS owners,
@@ -139,7 +155,7 @@ export async function listBusinesses() {
   return rows.rows.map((r) => {
     const st = stats.get(r.id);
     return {
-      id: r.id, slug: r.slug, name: r.name, vertical: r.vertical, city: r.city, status: r.status, isDemo: r.is_demo, createdAt: r.created_at,
+      id: r.id, slug: r.slug, name: r.name, vertical: r.vertical, city: r.city, status: r.status, isDemo: r.is_demo, synthetic: r.synthetic, createdAt: r.created_at, archivedAt: r.archived_at,
       owner: r.owners || (r.pending_owner ? `${r.pending_owner} (invitación pendiente)` : null),
       plan: r.plan_code, commercialStatus: r.commercial_status, priceCents: r.price_cents, currency: r.currency,
       customers: st?.customers ?? 0, lastActivity: st?.lastActivity ?? null,
@@ -152,20 +168,23 @@ export async function overview() {
   const [list, stats, recent, platformRecent] = await Promise.all([
     listBusinesses(),
     statsByBusiness(),
-    getPool().query('SELECT a.business_id, a.action, a.actor_type, a.created_at, b.name, b.is_demo FROM platform_recent_activity(15) a JOIN businesses b ON b.id = a.business_id'),
-    getPool().query(`SELECT e.action, e.created_at, e.business_id, b.name, a.display_name FROM platform_audit_events e
+    q('SELECT a.business_id, a.action, a.actor_type, a.created_at, b.name, b.is_demo FROM platform_recent_activity(15) a JOIN businesses b ON b.id = a.business_id'),
+    q(`SELECT e.action, e.created_at, e.business_id, b.name, a.display_name FROM platform_audit_events e
                        LEFT JOIN businesses b ON b.id = e.business_id LEFT JOIN platform_admins a ON a.id = e.admin_id
                       ORDER BY e.created_at DESC LIMIT 10`),
   ]);
   const dbMs = Date.now() - t0;
+  // V0.4.5: los archivados se cuentan aparte y NO entran en las métricas de operación.
   const bucket = (demo: boolean) => {
-    const bs = list.filter((b) => b.isDemo === demo);
+    const all = list.filter((b) => b.isDemo === demo);
+    const bs = all.filter((b) => b.status !== 'archived');
     const sum = (k: keyof Stats) => bs.reduce((acc, b) => acc + Number(stats.get(b.id)?.[k] ?? 0), 0);
     return {
       businesses: bs.length,
       active: bs.filter((b) => b.status === 'active' && b.commercialStatus === 'activo').length,
       pilot: bs.filter((b) => b.status === 'active' && b.commercialStatus === 'piloto').length,
       suspended: bs.filter((b) => b.status === 'suspended').length,
+      archived: all.length - bs.length,
       customers: sum('customers'), cards: sum('cards'), purchases: sum('purchases'), stamps: sum('stamps'), rewardsRedeemed: sum('rewardsRedeemed'),
     };
   };
@@ -178,8 +197,8 @@ export async function overview() {
       environment: process.env.VERCEL_ENV || (config.isProduction ? 'production' : 'development'),
       region: process.env.VERCEL_REGION || 'local',
       node: process.version,
-      database: { ok: true, latencyMs: dbMs, schema: 'V0.3 (0006_control_center)' },
-      emailProvider: 'no configurado (las invitaciones se entregan por enlace)',
+      database: { ok: true, latencyMs: dbMs, schema: `${APP_VERSION} (${SCHEMA_VERSION})` },
+      emailProvider: (() => { const e = emailState(); return e.state === 'configured' ? (e.provider === 'smtp' ? `SMTP propio configurado (${e.from}); solo se confirma “aceptado por el servidor”, la entrega final no es verificable por SMTP` : `Resend configurado (${e.from}); webhook ${e.webhook ? 'firmado activo' : 'sin configurar: no se sabrá la entrega final'}`) : e.state === 'mock' ? 'simulado (solo pruebas)' : 'no configurado (las invitaciones se entregan copiando el enlace)'; })(),
       wallet: {
         google: walletLabel(GoogleWalletProvider.fromEnv().status()),
         apple: new AppleWalletProvider().status().state === 'configured' ? 'configurado' : 'no disponible (sin certificados de Apple)',
@@ -194,17 +213,19 @@ function walletLabel(st: ReturnType<GoogleWalletProvider['status']>) {
 }
 
 export async function businessDetail(id: string) {
-  const b = (await getPool().query(
-    `SELECT b.id, b.slug, b.status, b.suspended_reason, b.logo_data_url, b.created_at, b.updated_at, b.is_demo,
+  const b = (await q(
+    `SELECT b.id, b.slug, b.status, b.suspended_reason, b.archived_at, b.archived_reason, b.synthetic_declared_at, b.logo_data_url, b.logo_fit, b.logo_original_data_url, b.created_at, b.updated_at, b.is_demo,
             s.plan_code, s.commercial_status, s.start_date, s.pilot_end_date, s.renewal_date, s.price_cents, s.currency, s.notes, s.updated_at AS sub_updated
        FROM businesses b LEFT JOIN business_subscriptions s ON s.business_id = b.id WHERE b.id = $1`, [id],
   )).rows[0];
   if (!b) throw notFound('Negocio');
   const [pub, staff, invitations, stats, auditRows] = await Promise.all([
     getBusinessById(id),
-    getPool().query(
-      `SELECT m.id, m.role, m.active, u.email, u.display_name, m.created_at,
-              (SELECT max(s.created_at) FROM staff_sessions s WHERE s.membership_id = m.id) AS last_login
+    q(
+      `SELECT m.id, m.role, m.active, u.email, u.display_name, m.created_at, u.disabled_at, u.must_change_password,
+              (u.locked_until IS NOT NULL AND u.locked_until > now()) AS locked,
+              (SELECT max(s.created_at) FROM staff_sessions s WHERE s.membership_id = m.id) AS last_login,
+              (SELECT count(*)::int FROM staff_memberships o WHERE o.user_id = m.user_id AND o.business_id <> m.business_id AND o.active) AS other_businesses
          FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id WHERE m.business_id = $1 ORDER BY m.role, u.display_name`, [id]),
     listInvitations(id),
     statsByBusiness(),
@@ -213,12 +234,15 @@ export async function businessDetail(id: string) {
   const d = (v: Date | string | null) => (v ? (v instanceof Date ? isoDate(v) : String(v).slice(0, 10)) : null);
   return {
     ...pub,
-    status: b.status, suspendedReason: b.suspended_reason, logoDataUrl: b.logo_data_url, createdAt: b.created_at,
+    status: b.status, suspendedReason: b.suspended_reason, archivedAt: b.archived_at, archivedReason: b.archived_reason, syntheticDeclaredAt: b.synthetic_declared_at, logoDataUrl: b.logo_data_url, logoFit: b.logo_fit ?? null, logoOriginalDataUrl: b.logo_original_data_url ?? null, createdAt: b.created_at,
     subscription: b.plan_code ? {
       plan: b.plan_code, commercialStatus: b.commercial_status, startDate: d(b.start_date), pilotEndDate: d(b.pilot_end_date),
       renewalDate: d(b.renewal_date), priceCents: b.price_cents, currency: b.currency, notes: b.notes, updatedAt: b.sub_updated,
     } : null,
-    staff: staff.rows.map((r) => ({ membershipId: r.id, role: r.role, active: r.active, email: r.email, displayName: r.display_name, createdAt: r.created_at, lastLogin: r.last_login })),
+    // V0.4.6 · Estado de la cuenta para el Centro de accesos (nunca se expone la contraseña ni su hash).
+    staff: staff.rows.map((r) => ({ membershipId: r.id, role: r.role, active: r.active, email: r.email, displayName: r.display_name, createdAt: r.created_at, lastLogin: r.last_login,
+      accountState: r.disabled_at ? 'deshabilitada' : !r.active ? 'acceso desactivado' : r.locked ? 'bloqueada temporalmente' : r.must_change_password ? 'debe cambiar contraseña' : 'activa',
+      otherBusinesses: r.other_businesses })),
     invitations,
     stats: stats.get(id) ?? null,
     audit: auditRows.map((r) => ({ action: r.action, actorType: r.actor_type, at: r.created_at })),
@@ -230,9 +254,11 @@ export async function updateBusiness(admin: AdminSession, id: string, raw: unkno
   const input = businessEditSchema.parse(raw);
   return withTenant(id, async (tx) => {
     const r = await tx.query(
-      `UPDATE businesses SET name = $2, vertical = $3, city = $4, primary_color = $5, accent_color = $6, review_url = $7, logo_data_url = $8
+      `UPDATE businesses SET name = $2, vertical = $3, city = $4, primary_color = $5, accent_color = $6, review_url = $7, logo_data_url = $8, card_finish = $9, logo_fit = $10, logo_original_data_url = $11,
+              latitude = CASE WHEN $12 THEN $13 ELSE latitude END, longitude = CASE WHEN $12 THEN $14 ELSE longitude END
         WHERE id = $1 RETURNING id`,
-      [id, input.name, input.vertical, input.city, input.primaryColor, input.accentColor, input.reviewUrl, input.logoDataUrl],
+      [id, input.name, input.vertical, input.city, input.primaryColor, input.accentColor, input.reviewUrl, input.logoDataUrl, input.cardFinish, input.logoFit ? JSON.stringify(input.logoFit) : null, input.logoDataUrl ? input.logoOriginalDataUrl : null,
+        input.location !== undefined, input.location?.lat ?? null, input.location?.lng ?? null],
     );
     if (!r.rowCount) throw notFound('Negocio');
     await audit(tx, id, { type: 'platform', id: null }, 'business.updated', 'business', id);
@@ -247,6 +273,7 @@ export async function setBusinessStatus(admin: AdminSession, id: string, raw: un
   return withTenant(id, async (tx) => {
     const cur = (await tx.query('SELECT status FROM businesses WHERE id = $1 FOR UPDATE', [id])).rows[0];
     if (!cur) throw notFound('Negocio');
+    if (cur.status === 'archived') throw new AppError(409, 'archived', 'El negocio está archivado. Primero restáuralo.');
     if (cur.status === input.status) throw new AppError(409, 'no_change', input.status === 'active' ? 'El negocio ya está activo.' : 'El negocio ya está suspendido.');
     await tx.query('UPDATE businesses SET status = $2, suspended_reason = $3 WHERE id = $1', [id, input.status, input.status === 'suspended' ? input.reason : null]);
     let sessionsRevoked = 0;
@@ -260,7 +287,7 @@ export async function setBusinessStatus(admin: AdminSession, id: string, raw: un
 
 export async function updateSubscription(admin: AdminSession, id: string, raw: unknown) {
   const s = subscriptionSchema.parse(raw);
-  return withTx(async (tx) => {
+  return withTenant(id, async (tx) => {
     if (!(await tx.query('SELECT 1 FROM businesses WHERE id = $1', [id])).rowCount) throw notFound('Negocio');
     // Solo registro comercial: cambiar a "suspendido" o "vencido" NO apaga el servicio (no hay política aprobada).
     await tx.query(
@@ -290,7 +317,7 @@ export async function updatePlan(admin: AdminSession, code: string, raw: unknown
 }
 
 export async function platformAuditLog(limit: number) {
-  return (await getPool().query(
+  return (await q(
     `SELECT e.id, e.action, e.created_at, e.entity_type, e.details, b.name AS business_name, a.display_name AS admin_name
        FROM platform_audit_events e LEFT JOIN businesses b ON b.id = e.business_id LEFT JOIN platform_admins a ON a.id = e.admin_id
       ORDER BY e.created_at DESC LIMIT $1`, [limit],

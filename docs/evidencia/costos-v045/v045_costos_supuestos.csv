@@ -1,0 +1,32 @@
+clave,valor
+tipo_cambio_mxn_usd,18.5
+asientos_vercel,1
+ops_cliente_mes,"{'baja': 1.0, 'media': 3.0, 'alta': 8.0}"
+req_por_op,9
+panel_min_dia,"{'baja': 10, 'media': 30, 'alta': 90}"
+caja_min_dia,"{'baja': 120, 'media': 300, 'alta': 480}"
+panel_req_min,7.5
+caja_req_min,2.0
+cpu_ms_por_req,12.0
+mem_gb,1.0
+dur_ms_por_req,90.0
+bytes_cliente,3500
+bytes_op,2600
+bytes_negocio,400000
+overhead_bd_mb,12.0
+kb_api_por_req,4.0
+correos_negocio_mes,4
+dias_mes,30
+precio_supabase_pro_base,25.0
+precio_supabase_compute,"{'micro': 10.0, 'small': 15.0, 'medium': 60.0, 'large': 110.0}"
+precio_supabase_disk_incl_gb,8.0
+precio_supabase_disk_usd_gb,0.125
+precio_supabase_egress_incl_gb,250.0
+precio_supabase_egress_usd_gb,0.09
+precio_vercel_pro_seat,20.0
+precio_vercel_cpu_usd_h,0.128
+precio_vercel_mem_usd_gbh,0.0106
+precio_vercel_inv_usd_m,0.6
+precio_resend_free_month,3000
+precio_resend_free_day,100
+precio_resend_pro,20.0

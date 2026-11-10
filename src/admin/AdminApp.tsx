@@ -3,13 +3,14 @@
 //   /vlux-admin                  resumen
 //   /vlux-admin/negocios         directorio
 //   /vlux-admin/negocios/nuevo   asistente "+ Nuevo negocio"
+//   /vlux-admin/negocios/desde-diseno   recupera un diseño preparado (Brand Activation Draft) y abre el asistente con él
 //   /vlux-admin/negocios/:id     ficha del negocio
 //   /vlux-admin/planes           planes y precios
 //   /vlux-admin/equipo           administradores y sesiones
 //   /vlux-admin/bitacora         bitácora global
 //   /vlux-admin/aceptar#token    alta de un administrador invitado
 import React, { useCallback, useEffect, useState } from 'react';
-import { Activity, Building2, CreditCard, LayoutGrid, LogOut, Plus, ScrollText, ShieldCheck, Users } from 'lucide-react';
+import { Activity, Building2, CreditCard, LayoutGrid, LogOut, Palette, Plus, ScrollText, ShieldCheck, Users } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { navigate, useLocation } from '../lib/router';
 import { QRCode, CopyButton } from '../components/ui';
@@ -17,6 +18,8 @@ import { CButton, CField, ErrorLine, cx } from './kit';
 import { Dashboard } from './Dashboard';
 import { BusinessDetail, Directory } from './Businesses';
 import { Wizard } from './Wizard';
+import { FromDesign, pendingRef } from './Activation';
+import { Studio } from './Studio';
 import { AuditLog, Plans, Team } from './Settings';
 
 type Me = { email: string; displayName: string; mfaVerified: boolean; totpEnabled: boolean; sessionId: string } | null;
@@ -70,10 +73,7 @@ function Frame({ children }: { children: React.ReactNode }) {
 export function Wordmark({ small }: { small?: boolean }) {
   return (
     <div className="flex items-center gap-2.5 select-none">
-      <svg width={small ? 20 : 24} height={small ? 20 : 24} viewBox="0 0 24 24" aria-hidden>
-        <path d="M3 4h4.2L12 15.2 16.8 4H21l-7.4 16h-3.2z" fill="#E9ECEF" />
-        <path d="M14.3 15.6 21 4" stroke="#67C7D3" strokeWidth="1.4" opacity=".9" />
-      </svg>
+      <img src="/brand/vlux-isotipo.png" alt="" width="34" height="35" className="h-[30px] w-auto" style={small ? { height: 22 } : undefined} />
       <div className="leading-none">
         <div className={cx('font-medium tracking-[0.18em]', small ? 'text-[12px]' : 'text-[13px]')}>VLUX</div>
         <div className="mt-1 text-[10px] tracking-[0.14em] uppercase cc-faint">Control Center</div>
@@ -237,6 +237,7 @@ function AcceptAdminInvite({ onDone }: { onDone: () => void }) {
 const NAV: [string, string, React.ReactNode][] = [
   ['/vlux-admin', 'Resumen', <LayoutGrid size={16} key="r" />],
   ['/vlux-admin/negocios', 'Negocios', <Building2 size={16} key="n" />],
+  ['/vlux-admin/estudio', 'Estudio de marca', <Palette size={16} key="s" />],
   ['/vlux-admin/planes', 'Planes', <CreditCard size={16} key="p" />],
   ['/vlux-admin/equipo', 'Equipo y sesiones', <Users size={16} key="e" />],
   ['/vlux-admin/bitacora', 'Bitácora', <ScrollText size={16} key="b" />],
@@ -245,10 +246,14 @@ const NAV: [string, string, React.ReactNode][] = [
 function Workspace({ me, path, onLogout }: { me: NonNullable<Me>; path: string; onLogout: () => void }) {
   const current = (to: string) => (to === '/vlux-admin' ? path === to || path === '/vlux-admin/' : path.startsWith(to));
   const detail = path.match(/^\/vlux-admin\/negocios\/([0-9a-f-]{36})$/);
+  // Si llegaste con un diseño pendiente (p. ej. tras iniciar sesión) y caes en el resumen, se retoma el proceso de activación.
+  useEffect(() => { if ((path === '/vlux-admin' || path === '/vlux-admin/') && pendingRef()) navigate('/vlux-admin/negocios/desde-diseno', { replace: true }); }, [path]);
   let view: React.ReactNode;
   if (path === '/vlux-admin/negocios/nuevo') view = <Wizard />;
+  else if (path === '/vlux-admin/negocios/desde-diseno') view = <FromDesign />;
   else if (detail) view = <BusinessDetail id={detail[1]} />;
   else if (path.startsWith('/vlux-admin/negocios')) view = <Directory />;
+  else if (path.startsWith('/vlux-admin/estudio')) view = <Studio />;
   else if (path.startsWith('/vlux-admin/planes')) view = <Plans />;
   else if (path.startsWith('/vlux-admin/equipo')) view = <Team me={me} />;
   else if (path.startsWith('/vlux-admin/bitacora')) view = <AuditLog />;
@@ -259,6 +264,7 @@ function Workspace({ me, path, onLogout }: { me: NonNullable<Me>; path: string; 
       <aside className="hidden lg:flex w-[232px] shrink-0 flex-col border-r border-[color:var(--cc-line)] px-3 py-5 sticky top-0 h-screen">
         <div className="px-2"><Wordmark /></div>
         <CButton variant="primary" className="mt-7 mx-1" onClick={() => navigate('/vlux-admin/negocios/nuevo')}><Plus size={15} /> Nuevo negocio</CButton>
+        <CButton className="mt-2 mx-1 !text-[12.5px] !px-3 !h-auto !py-2 text-left leading-tight" onClick={() => navigate('/vlux-admin/negocios/desde-diseno')} data-testid="nav-from-design"><Palette size={15} /> Crear negocio desde un diseño</CButton>
         <nav className="mt-5 flex flex-col gap-0.5" aria-label="Control Center">
           {NAV.map(([to, label, icon]) => (
             <a key={to} href={to} aria-current={current(to) ? 'page' : undefined} className="cc-nav-item" onClick={(e) => { e.preventDefault(); navigate(to); }}>{icon} {label}</a>
@@ -277,6 +283,7 @@ function Workspace({ me, path, onLogout }: { me: NonNullable<Me>; path: string; 
             <Wordmark small />
             <div className="flex gap-1">
               <CButton small variant="primary" onClick={() => navigate('/vlux-admin/negocios/nuevo')} aria-label="Nuevo negocio"><Plus size={14} /></CButton>
+              <CButton small onClick={() => navigate('/vlux-admin/negocios/desde-diseno')} aria-label="Crear negocio desde un diseño" data-testid="nav-from-design-m"><Palette size={14} /></CButton>
               <CButton small variant="ghost" onClick={onLogout} aria-label="Cerrar sesión"><LogOut size={14} /></CButton>
             </div>
           </div>

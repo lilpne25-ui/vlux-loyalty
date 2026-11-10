@@ -7,7 +7,7 @@ import { usePolling } from '../lib/usePolling';
 import { relativeTime } from '../lib/format';
 import { ErrorLine, PageHeader, Pill, Skeleton, actionLabel, cx, num } from './kit';
 
-type Bucket = { businesses: number; active: number; pilot: number; suspended: number; customers: number; cards: number; purchases: number; stamps: number; rewardsRedeemed: number };
+type Bucket = { businesses: number; active: number; pilot: number; suspended: number; archived?: number; customers: number; cards: number; purchases: number; stamps: number; rewardsRedeemed: number };
 export type Overview = {
   real: Bucket; demo: Bucket;
   activity: { businessId: string; businessName: string; isDemo: boolean; action: string; actorType: string; at: string }[];
@@ -38,10 +38,10 @@ export function Dashboard() {
       {scope === 'demo' && <p className="mb-4 text-[12.5px] cc-muted">Negocios marcados como demostración. No cuentan en las métricas comerciales.</p>}
 
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Negocios">
-        <Kpi label="Negocios" value={b?.businesses} />
+        <Kpi label="Negocios en operación" value={b ? b.businesses - (b.archived ?? 0) : undefined} />
         <Kpi label="Activos (pagando)" value={b?.active} tone="green" />
         <Kpi label="En piloto" value={b?.pilot} tone="cyan" />
-        <Kpi label="Suspendidos" value={b?.suspended} tone={b?.suspended ? 'red' : undefined} />
+        <Kpi label={`Suspendidos${b?.archived ? ` · ${b.archived} archivados` : ''}`} value={b?.suspended} tone={b?.suspended ? 'red' : undefined} />
       </section>
       <section className="mt-3 grid grid-cols-2 lg:grid-cols-5 gap-3" aria-label="Operación">
         <Kpi small label="Clientes" value={b?.customers} />

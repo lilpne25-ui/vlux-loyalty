@@ -119,3 +119,28 @@ export async function startCameraScanner(video: HTMLVideoElement, onResult: (tex
     video.srcObject = null;
   };
 }
+
+/** Dibuja el QR en un canvas y lo descarga como PNG (con zona de silencio y tamaño de impresión). */
+export function downloadQrPng(text: string, filename: string, px = 1024) {
+  const m = qrMatrix(text);
+  const quiet = 4;
+  const cells = m.length + quiet * 2;
+  const cell = Math.max(1, Math.floor(px / cells));
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = cell * cells;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#0E1013';
+  m.forEach((row, y) => row.forEach((on, x) => { if (on) ctx.fillRect((x + quiet) * cell, (y + quiet) * cell, cell, cell); }));
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, 'image/png');
+}

@@ -1,0 +1,7 @@
+not ok 32 - ninguna función de public es ejecutable por PUBLIC; vlux_app conserva solo las suyas
+not ok 35 - ops/grants.sql reproduce exactamente los permisos de una base recién migrada (restauración --no-privileges)
+not ok 116 - T07: la vista previa muestra conteos, personal compartido y bloqueos; sin efectos
+# tests 148
+# pass 145
+# fail 3
+exit=1

@@ -1,0 +1,45 @@
+not ok 1 - business_deletions: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 2 - business_deletions: sin contexto ni alcance no se ve ninguna fila
+not ok 3 - business_deletions: un identificador de negocio inválido falla de forma segura
+not ok 4 - business_subscriptions: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 5 - business_subscriptions: sin contexto ni alcance no se ve ninguna fila
+not ok 6 - business_subscriptions: un identificador de negocio inválido falla de forma segura
+not ok 7 - card_access_tokens: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 8 - card_access_tokens: sin contexto ni alcance no se ve ninguna fila
+not ok 9 - card_access_tokens: un identificador de negocio inválido falla de forma segura
+not ok 10 - email_events: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 11 - email_events: sin contexto ni alcance no se ve ninguna fila
+not ok 12 - email_events: un identificador de negocio inválido falla de forma segura
+not ok 13 - email_outbox: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 14 - email_outbox: sin contexto ni alcance no se ve ninguna fila
+not ok 15 - email_outbox: un identificador de negocio inválido falla de forma segura
+not ok 16 - platform_audit_events: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 17 - platform_audit_events: sin contexto ni alcance no se ve ninguna fila
+not ok 18 - platform_audit_events: un identificador de negocio inválido falla de forma segura
+not ok 19 - staff_invitations: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 20 - staff_invitations: sin contexto ni alcance no se ve ninguna fila
+not ok 21 - staff_invitations: un identificador de negocio inválido falla de forma segura
+not ok 22 - staff_memberships: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 23 - staff_memberships: sin contexto ni alcance no se ve ninguna fila
+not ok 24 - staff_memberships: un identificador de negocio inválido falla de forma segura
+not ok 25 - staff_sessions: con el contexto del negocio A no se ve ninguna fila de otros negocios
+not ok 26 - staff_sessions: sin contexto ni alcance no se ve ninguna fila
+not ok 27 - staff_sessions: un identificador de negocio inválido falla de forma segura
+ok 28 - el negocio A sí ve sus propias filas (no se bloquea a todos)
+not ok 29 - INSERT hacia otro negocio es rechazado por WITH CHECK
+not ok 30 - UPDATE sobre filas de otro negocio no afecta ninguna fila
+not ok 31 - UPDATE no puede trasladar una fila propia a otro negocio
+ok 32 - vlux_app no puede borrar filas de las nueve tablas
+not ok 33 - un alcance inventado o mal escrito no concede acceso
+not ok 34 - alcance auth: solo lectura de sesiones, membresías, tokens e invitaciones; escribe únicamente revocaciones
+not ok 35 - alcance platform: lectura transversal acotada; sin acceso a tokens de tarjeta ni salida de correo
+not ok 36 - alcance webhook: localiza la salida de correo por id del proveedor y nada más
+not ok 37 - las funciones de plataforma exigen alcance platform (no sirven con el contexto de un negocio)
+not ok 38 - notification_due_businesses exige alcance worker
+ok 39 - vlux_app no puede cambiarse a un rol con más privilegios ni redefinir las políticas
+not ok 40 - el contexto no se filtra entre transacciones de una misma conexión (un solo cliente en el pool)
+not ok 41 - cambio legítimo de contexto A→B dentro de la misma conexión y concurrencia de negocios distintos
+ok 42 - PASSWORD de pruebas sigue siendo la esperada (guardia contra fixtures rotos)
+# tests 42
+# pass 4
+# fail 38

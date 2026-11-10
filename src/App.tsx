@@ -5,10 +5,13 @@
 //   /acceso       inicio de sesión del personal
 //   /caja         panel del empleado (empleado o dueño)
 //   /panel        panel del dueño (solo dueño)
+//   /panel/cartel cartel del QR para imprimir a tamaño carta o A5 (1.0.x, solo dueño)
 //   /cuenta       cambio de contraseña del personal
 //   /t#token      abre la tarjeta desde el enlace personal
 //   /restablecer#token  contraseña nueva con enlace de un solo uso
 //   /invitacion#token   aceptar invitación de dueño o empleado (V0.3)
+//   /activar            activación presencial con código corto (V0.4.6)
+//   ?negocio=<slug>     en /acceso, /caja y /panel: abre ESE negocio (enlaces permanentes y apps instaladas, V0.4.6)
 //   /vlux-admin/*       VLUX Control Center (V0.3, solo equipo VLUX; se carga aparte)
 import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { ScanLine, LayoutDashboard, LogOut, KeyRound, ArrowLeftRight } from 'lucide-react';
@@ -19,12 +22,17 @@ import { brandVars, Loading } from './components/Brand';
 import { CustomerApp } from './views/Customer';
 import { EmployeeView } from './views/Employee';
 import { OwnerView } from './views/Owner';
-import { ForBusinessView } from './views/ForBusiness';
+import { LandingView } from './views/Landing';
 import { LoginView } from './views/Login';
 import { CardLinkView, ChangePasswordPanel, ResetPasswordView } from './views/Account';
-import { InvitationView } from './views/Invitation';
+import { ActivateWithCodeView, InvitationView } from './views/Invitation';
+import PosterPrintView from './views/PosterPrint';
 
 const AdminApp = lazy(() => import('./admin/AdminApp'));
+const PersonalizarView = lazy(() => import('./views/Personalizar'));
+
+/** Negocios de demostración anteriores (V0.1–V0.4.1): sus rutas públicas ya no son la experiencia principal. */
+const LEGACY_DEMO_SLUGS = new Set(['cafe-demo-toluca', 'barberia-demo-metepec']);
 
 export default function App() {
   return (
@@ -34,7 +42,12 @@ export default function App() {
   );
 }
 
-type SessionState = { loading: boolean; session: StaffSessionInfo | null; colors: { primary: string; accent: string; vertical: string } | null };
+type SessionState = { loading: boolean; session: StaffSessionInfo | null; colors: { primary: string; accent: string; vertical: string; finish?: 'signature' | 'silver' | 'black' } | null };
+
+function Redirect({ to }: { to: string }) {
+  useEffect(() => { navigate(to, { replace: true }); }, [to]);
+  return <Loading />;
+}
 
 function Shell() {
   const { path, search } = useLocation();
@@ -46,7 +59,7 @@ function Shell() {
       let colors = null;
       if (r.session) {
         const b = await api('GET', '/staff/business');
-        colors = { primary: b.primaryColor, accent: b.accentColor, vertical: b.vertical };
+        colors = { primary: b.primaryColor, accent: b.accentColor, vertical: b.vertical, finish: b.cardFinish };
       }
       setS({ loading: false, session: r.session, colors });
     } catch {
@@ -59,35 +72,55 @@ function Shell() {
 
   if (path === '/vlux-admin' || path.startsWith('/vlux-admin/')) return <Suspense fallback={<div className="cc min-h-full" />}><AdminApp /></Suspense>;
   if (path === '/invitacion') return <InvitationView />;
+  if (path === '/activar') return <ActivateWithCodeView />;
   if (path === '/t') return <CardLinkView />;
   if (path === '/restablecer') return <ResetPasswordView />;
 
+  if (path === '/personalizar') return <Suspense fallback={<div className="lp min-h-full" />}><PersonalizarView /></Suspense>;
+
   const customerMatch = path.match(/^\/n\/([a-z0-9-]{3,40})\/?$/);
+  if (customerMatch && LEGACY_DEMO_SLUGS.has(customerMatch[1])) return <Redirect to="/?demo=anterior" />;
   if (customerMatch) return <CustomerApp slug={customerMatch[1]} />;
 
   if (!isStaffRoute) {
     return (
       <div className="app-root flex flex-col min-h-full">
+        {search.get('demo') === 'anterior' && <div className="gutter py-2 text-center text-[12.5px] bg-[#0E1115] text-white/80" role="status">Esa demostración anterior ya no está disponible. Estas son las experiencias actuales de VLUX Loyalty.</div>}
         {search.get('enlace') === 'invalido' && <div className="gutter py-2 text-center text-[12.5px] bg-[#FEF3F2] text-[#B42318]">Ese enlace de tarjeta no es válido o ya no está activo.</div>}
-        <ForBusinessView goTo={(p) => navigate(p)} />
+        <LandingView />
       </div>
     );
   }
 
   if (s.loading) return <Loading />;
   const session = s.session;
+  const wanted = search.get('negocio');
+  const home = (role: 'OWNER' | 'EMPLOYEE', slug?: string) => `${role === 'OWNER' ? '/panel' : '/caja'}${slug ? `?negocio=${encodeURIComponent(slug)}` : ''}`;
   if (!session || path === '/acceso') {
-    if (session) {
-      navigate(session.role === 'OWNER' ? '/panel' : '/caja', { replace: true });
+    if (session && (!wanted || wanted === session.business.slug)) {
+      navigate(home(session.role, session.business.slug), { replace: true });
       return <Loading />;
     }
-    return <LoginView onLoggedIn={async (ses) => { await loadSession(); navigate(ses.role === 'OWNER' ? '/panel' : '/caja', { replace: true }); }} />;
+    if (!session) return <LoginView businessSlug={wanted} onLoggedIn={async (ses) => { await loadSession(); navigate(home(ses.role, ses.business.slug), { replace: true }); }} />;
+  }
+  // V0.4.6 · La app instalada (o el enlace permanente) es de un negocio concreto. Si la sesión abierta es de OTRO negocio,
+  // nunca se muestran sus datos bajo este ícono: se cambia de negocio solo si la persona también pertenece a él;
+  // si no, se explica y se ofrece entrar con otra cuenta.
+  if (wanted && wanted !== session.business.slug) {
+    return <BusinessGate wanted={wanted} session={session} onSwitched={async (role) => { await loadSession(); navigate(home(role, wanted), { replace: true }); }}
+      onLogout={async () => { await api('POST', '/staff/logout', {}).catch(() => undefined); setS({ loading: false, session: null, colors: null }); navigate(`/acceso?negocio=${encodeURIComponent(wanted)}`, { replace: true }); }}
+      onStay={() => navigate(home(session.role, session.business.slug), { replace: true })} />;
+  }
+
+  // 1.0.x · Ruta de impresión del cartel: sin barra superior ni pestañas (solo el cartel y sus botones).
+  if (path === '/panel/cartel' && session.role === 'OWNER' && !session.mustChangePassword) {
+    return <PosterPrintView initialSize={search.get('tam') === 'a5' ? 'a5' : 'letter'} />;
   }
 
   const logout = async () => {
     await api('POST', '/staff/logout', {}).catch(() => undefined);
     setS({ loading: false, session: null, colors: null });
-    navigate('/acceso', { replace: true });
+    navigate(`/acceso?negocio=${encodeURIComponent(session.business.slug)}`, { replace: true });
   };
 
   const wantsPanel = path.startsWith('/panel');
@@ -95,7 +128,7 @@ function Shell() {
   const code = search.get('tarjeta') || search.get('premio');
 
   return (
-    <div className="app-root flex flex-col min-h-full" data-vertical={s.colors?.vertical} style={s.colors ? brandVars(s.colors.primary, s.colors.accent) : undefined}>
+    <div className="app-root flex flex-col min-h-full" data-vertical={s.colors?.vertical} style={s.colors ? brandVars(s.colors.primary, s.colors.accent, s.colors.finish) : undefined}>
       <TopBar session={session} path={path} onLogout={logout} onSwitched={async (role) => { await loadSession(); navigate(role === 'OWNER' ? '/panel' : '/caja', { replace: true }); }} />
       <main className="flex-1">
         <div className="view-in min-h-full">
@@ -107,12 +140,48 @@ function Shell() {
               <p className="mt-2 text-[14px] text-slate2">Tu cuenta es de caja. Si necesitas acceso, pídeselo al dueño del negocio.</p>
             </div>
           ) : wantsPanel ? (
-            <OwnerView onBusinessChanged={loadSession} />
+            <OwnerView onBusinessChanged={loadSession} welcome={search.get('bienvenida') === '1'} />
           ) : (
-            <EmployeeView businessName={session.business.name} initialCode={code} />
+            <EmployeeView businessName={session.business.name} businessSlug={session.business.slug} initialCode={code} />
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function BusinessGate({ wanted, session, onSwitched, onLogout, onStay }: { wanted: string; session: StaffSessionInfo; onSwitched: (role: 'OWNER' | 'EMPLOYEE') => void; onLogout: () => void; onStay: () => void }) {
+  const [state, setState] = useState<'checking' | 'other'>('checking');
+  const [name, setName] = useState<string>(wanted);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const mine = await api<{ businesses: { slug: string; name: string; role: 'OWNER' | 'EMPLOYEE' }[] }>('GET', '/staff/businesses');
+        if (mine.businesses.some((b) => b.slug === wanted)) {
+          const r = await api<{ session: StaffSessionInfo }>('POST', '/staff/switch', { slug: wanted });
+          if (live) onSwitched(r.session.role);
+          return;
+        }
+      } catch { /* sin acceso a ese negocio */ }
+      try { const p = await api<{ business: { name: string } }>('GET', `/public/businesses/${encodeURIComponent(wanted)}`); if (live) setName(p.business.name); } catch { /* negocio inexistente */ }
+      if (live) setState('other');
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted]);
+  if (state === 'checking') return <Loading />;
+  return (
+    <div className="biz-bg min-h-full">
+      <div className="mx-auto w-full max-w-[440px] gutter py-14 flex flex-col gap-5" data-testid="business-gate">
+        <VluxMark className="text-[#475467]" />
+        <h1 className="text-[22px] font-semibold tracking-tight text-ink">Este acceso es de {name}</h1>
+        <p className="text-[14px] text-slate2">Tu sesión abierta en este teléfono es de <strong className="text-ink">{session.business.name}</strong> y esa cuenta no tiene acceso a {name}. Por seguridad no mostramos datos de un negocio con el acceso de otro.</p>
+        <div className="flex flex-col gap-2">
+          <button onClick={onLogout} className="h-11 rounded-xl bg-ink text-white text-[14px] font-medium">Entrar con la cuenta de {name}</button>
+          <button onClick={onStay} className="h-11 rounded-xl border border-line text-[14px] text-ink">Seguir en {session.business.name}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -134,7 +203,7 @@ function TopBar({ session, path, onLogout, onSwitched }: { session: StaffSession
     <header className="topbar sticky z-30 text-white" style={{ top: 'env(safe-area-inset-top, 0px)' }}>
       <div className="mx-auto max-w-[1180px] gutter py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2.5">
         <div className="flex items-center gap-2.5 mr-auto min-w-0">
-          <VluxMark className="text-white" />
+          <VluxMark tone="dark" />
           <span className="h-3.5 w-px bg-white/20" />
           {businesses.length > 1 ? (
             <div className="relative min-w-0">

@@ -1,0 +1,8 @@
+not ok 1 - todas las funciones de public tienen search_path fijo (asesor 0011 de Supabase)
+not ok 2 - ninguna función de public es ejecutable por PUBLIC; vlux_app conserva solo las suyas
+ok 3 - los disparadores siguen funcionando para vlux_app sin EXECUTE (logo_hash y updated_at)
+ok 4 - bitácoras de solo inserción: ni el dueño del esquema puede modificarlas fuera de la purga
+not ok 5 - ops/grants.sql reproduce exactamente los permisos de una base recién migrada (restauración --no-privileges)
+ok 6 - serie diaria del tablero: cuenta por día local de México y excluye anuladas y días fuera del rango
+# pass 3
+# fail 3

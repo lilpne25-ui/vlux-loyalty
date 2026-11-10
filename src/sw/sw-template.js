@@ -58,3 +58,32 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data === 'vlux:version') event.source && event.source.postMessage({ type: 'vlux:version', build: BUILD_ID });
 });
+
+/* V0.4.6 · Notificaciones Web Push. El servidor envía un mensaje cifrado (título, texto y una ruta de ESTE sitio).
+ * Solo se abren rutas del mismo origen: un mensaje nunca puede llevar al cliente a otro sitio. */
+const safePath = (u) => (typeof u === 'string' && /^\/[^/\\]/.test(u) && u.length <= 200 ? u : '/');
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
+  const title = typeof data.title === 'string' && data.title ? data.title.slice(0, 60) : 'VLUX Loyalty';
+  const options = {
+    body: typeof data.body === 'string' ? data.body.slice(0, 180) : '',
+    icon: typeof data.icon === 'string' && data.icon.startsWith('/api/pwa/') ? data.icon : undefined,
+    tag: typeof data.tag === 'string' ? data.tag.slice(0, 40) : undefined,
+    data: { url: safePath(data.url) },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(safePath(event.notification.data && event.notification.data.url), self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if (c.url === target && 'focus' in c) return c.focus();
+      }
+      return self.clients.openWindow ? self.clients.openWindow(target) : undefined;
+    }),
+  );
+});

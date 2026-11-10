@@ -1,6 +1,6 @@
 {
   "name": "vlux-loyalty",
-  "version": "0.2.2",
+  "version": "1.0.0-rc.1",
   "description": "VLUX Loyalty: tarjetas de fidelidad web multiempresa",
   "scripts": {
     "dev:web": "vite",
@@ -29,6 +29,7 @@
     "hono": "4.13.14",
     "jsqr": "1.4.0",
     "lucide-react": "0.447.0",
+    "nodemailer": "10.2.1",
     "pg": "8.23.1",
     "qrcode-generator": "1.4.4",
     "react": "18.3.1",
@@ -40,14 +41,18 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "22.20.5",
+    "@types/nodemailer": "8.0.2",
     "@types/pg": "8.23.1",
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
+    "@types/smtp-server": "3.5.13",
     "autoprefixer": "10.6.2",
+    "esbuild": "0.28.2",
+    "http_ece": "1.2.1",
     "postcss": "8.5.32",
+    "smtp-server": "3.21.1",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
-    "vite": "8.3.5",
-    "esbuild": "0.28.2"
+    "vite": "8.3.5"
   }
 }

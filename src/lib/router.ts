@@ -17,6 +17,7 @@ export function useLocation() {
     const on = () => setLoc(read());
     window.addEventListener('popstate', on);
     window.addEventListener(EVT, on);
+    on(); // por si un hijo navegó antes de que este efecto se suscribiera
     return () => {
       window.removeEventListener('popstate', on);
       window.removeEventListener(EVT, on);

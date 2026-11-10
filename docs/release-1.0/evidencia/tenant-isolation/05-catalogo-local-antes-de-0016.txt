@@ -1,0 +1,113 @@
+== políticas con USING true
+tablename | policyname | cmd | roles | qual | with_check
+activation_drafts | app_only | ALL | {vlux_app} | true | true
+business_deletions | app_only | ALL | {vlux_app} | true | true
+business_subscriptions | app_only | ALL | {vlux_app} | true | true
+businesses | businesses_insert | INSERT | {vlux_app} |  | true
+businesses | businesses_select | SELECT | {vlux_app} | true | 
+card_access_tokens | app_only | ALL | {vlux_app} | true | true
+email_events | app_only | ALL | {vlux_app} | true | true
+email_outbox | app_only | ALL | {vlux_app} | true | true
+password_reset_tokens | app_only | ALL | {vlux_app} | true | true
+plans | app_only | ALL | {vlux_app} | true | true
+platform_admin_invitations | app_only | ALL | {vlux_app} | true | true
+platform_admin_recovery_codes | app_only | ALL | {vlux_app} | true | true
+platform_admin_sessions | app_only | ALL | {vlux_app} | true | true
+platform_admins | app_only | ALL | {vlux_app} | true | true
+platform_audit_events | app_only | ALL | {vlux_app} | true | true
+rate_limits | app_only | ALL | {vlux_app} | true | true
+schema_migrations | app_only | ALL | {vlux_app} | true | true
+staff_invitations | app_only | ALL | {vlux_app} | true | true
+staff_memberships | app_only | ALL | {vlux_app} | true | true
+staff_sessions | app_only | ALL | {vlux_app} | true | true
+staff_users | app_only | ALL | {vlux_app} | true | true
+(21 rows)
+== resumen RLS
+rls_on | forced | total
+34 | 0 | 34
+(1 row)
+policies
+36
+(1 row)
+== tablas con business_id y su política
+table_name | coalesce
+appointments | tenant_isolation:(business_id = current_business_id())
+audit_events | tenant_isolation:(business_id = current_business_id())
+business_deletions | app_only:true
+business_subscriptions | app_only:true
+card_access_tokens | app_only:true
+card_pair_codes | tenant_isolation:(business_id = current_business_id())
+cards | tenant_isolation:(business_id = current_business_id())
+customers | tenant_isolation:(business_id = current_business_id())
+email_events | app_only:true
+email_outbox | app_only:true
+notification_outbox | tenant_isolation:(business_id = current_business_id())
+notification_settings | tenant_isolation:(business_id = current_business_id())
+platform_audit_events | app_only:true
+purchases | tenant_isolation:(business_id = current_business_id())
+push_subscriptions | tenant_isolation:(business_id = current_business_id())
+review_events | tenant_isolation:(business_id = current_business_id())
+reward_rules | tenant_isolation:(business_id = current_business_id())
+rewards | tenant_isolation:(business_id = current_business_id())
+staff_invitations | app_only:true
+staff_memberships | app_only:true
+staff_sessions | app_only:true
+stamp_events | tenant_isolation:(business_id = current_business_id())
+visits | tenant_isolation:(business_id = current_business_id())
+(23 rows)
+== rol vlux_app
+rolname | rolsuper | rolbypassrls | rolcreaterole
+vlux_app | f | f | f
+(1 row)
+== dueño de tablas
+tableowner | count
+postgres | 34
+(1 row)
+== privilegios vlux_app por tabla
+table_name | string_agg
+activation_drafts | DELETE,INSERT,SELECT,UPDATE
+appointments | INSERT,SELECT,UPDATE
+audit_events | INSERT,SELECT
+business_deletions | INSERT,SELECT
+business_subscriptions | INSERT,SELECT,UPDATE
+businesses | INSERT,SELECT,UPDATE
+card_access_tokens | INSERT,SELECT,UPDATE
+card_pair_codes | DELETE,INSERT,SELECT,UPDATE
+cards | INSERT,SELECT,UPDATE
+customers | INSERT,SELECT,UPDATE
+email_events | INSERT,SELECT
+email_outbox | INSERT,SELECT,UPDATE
+notification_outbox | INSERT,SELECT,UPDATE
+notification_settings | INSERT,SELECT,UPDATE
+password_reset_tokens | INSERT,SELECT,UPDATE
+plans | INSERT,SELECT,UPDATE
+platform_admin_invitations | INSERT,SELECT,UPDATE
+platform_admin_recovery_codes | INSERT,SELECT,UPDATE
+platform_admin_sessions | INSERT,SELECT,UPDATE
+platform_admins | INSERT,SELECT,UPDATE
+platform_audit_events | INSERT,SELECT
+purchases | INSERT,SELECT,UPDATE
+push_subscriptions | INSERT,SELECT,UPDATE
+rate_limits | DELETE,INSERT,SELECT,UPDATE
+review_events | INSERT,SELECT
+reward_rules | INSERT,SELECT,UPDATE
+rewards | INSERT,SELECT,UPDATE
+staff_invitations | INSERT,SELECT,UPDATE
+staff_memberships | INSERT,SELECT,UPDATE
+staff_sessions | INSERT,SELECT,UPDATE
+staff_users | INSERT,SELECT,UPDATE
+stamp_events | INSERT,SELECT
+visits | INSERT,SELECT,UPDATE
+(33 rows)
+== funciones
+proname | prosecdef | proconfig | pub | app
+businesses_set_logo_hash | f | {"search_path=pg_catalog, public"} | f | f
+current_business_id | f | {"search_path=pg_catalog, public"} | f | t
+forbid_mutation | f | {"search_path=pg_catalog, public"} | f | f
+notification_due_businesses | t | {"search_path=public, pg_temp"} | f | t
+platform_business_export | t | {"search_path=public, pg_temp"} | f | t
+platform_business_stats | t | {"search_path=public, pg_temp"} | f | t
+platform_purge_business | t | {"search_path=public, pg_temp"} | f | t
+platform_recent_activity | t | {"search_path=public, pg_temp"} | f | t
+set_updated_at | f | {"search_path=pg_catalog, public"} | f | f
+(9 rows)

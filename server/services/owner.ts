@@ -1,11 +1,13 @@
 // Panel del dueño: métricas reales, clientes, actividad, configuración, personal y privacidad.
-import { withTenant, getPool, withTx } from '../db';
+import { withTenant } from '../db';
 import { AppError, notFound } from '../errors';
 import { hashPassword } from '../security';
 import { createEmployeeSchema, updateProgramSchema } from '../validation';
 import { audit } from './audit';
 import { loadHistory } from './cards';
 import { unlockIfEligible } from './loyalty';
+import { insertRule, loadActiveRule, publicProgram, ruleChanged } from './rules-store';
+import { redactRecoveryForCustomer } from './recovery';
 import type { StaffSession } from './auth';
 
 const TZ = 'America/Mexico_City';
@@ -27,14 +29,21 @@ export async function dashboard(session: StaffSession, days = 14) {
          (SELECT count(*) FROM review_events WHERE kind = 'link_opened')::int AS review_clicks`,
     )).rows[0];
     const series = (await tx.query(
-      `SELECT d::date AS day,
-              (SELECT count(*) FROM visits v WHERE (v.started_at AT TIME ZONE $2)::date = d::date)::int AS visits,
-              (SELECT count(*) FROM purchases p WHERE p.voided_at IS NULL AND (p.created_at AT TIME ZONE $2)::date = d::date)::int AS purchases
+      // 1.0.0-rc.1: una sola pasada acotada por fecha (usa los índices (business_id, started_at/created_at)).
+      // Antes se recorría todo el historial una vez por día mostrado: ~1 s con un año de datos de un negocio.
+      `WITH v AS (SELECT (started_at AT TIME ZONE $2)::date AS day, count(*) AS n FROM visits
+                   WHERE started_at >= ((((now() AT TIME ZONE $2)::date - ($1::int - 1))::timestamp) AT TIME ZONE $2) GROUP BY 1),
+            p AS (SELECT (created_at AT TIME ZONE $2)::date AS day, count(*) AS n FROM purchases
+                   WHERE voided_at IS NULL AND created_at >= ((((now() AT TIME ZONE $2)::date - ($1::int - 1))::timestamp) AT TIME ZONE $2) GROUP BY 1)
+       SELECT d::date AS day, coalesce(v.n, 0)::int AS visits, coalesce(p.n, 0)::int AS purchases
          FROM generate_series((now() AT TIME ZONE $2)::date - ($1::int - 1), (now() AT TIME ZONE $2)::date, interval '1 day') d
+         LEFT JOIN v ON v.day = d::date
+         LEFT JOIN p ON p.day = d::date
         ORDER BY d`,
       [days, TZ],
     )).rows.map((r) => ({ day: r.day.toISOString().slice(0, 10), visits: r.visits, purchases: r.purchases }));
-    const rule = (await tx.query('SELECT stamps_required, reward_description FROM reward_rules WHERE active')).rows[0];
+    const ruleFull = await loadActiveRule(tx);
+    const rule = { stamps_required: ruleFull.stampsRequired, reward_description: ruleFull.rewardDescription };
     const visitCounts = (await tx.query(
       `SELECT coalesce(v.n, 0)::int AS n FROM cards c LEFT JOIN (SELECT card_id, count(*) AS n FROM visits GROUP BY card_id) v ON v.card_id = c.id WHERE c.status = 'active'`,
     )).rows.map((r) => r.n as number);
@@ -47,9 +56,9 @@ export async function dashboard(session: StaffSession, days = 14) {
     ];
     const near = (await tx.query(
       `SELECT cu.display_name FROM cards c JOIN customers cu ON cu.id = c.customer_id
-        WHERE c.status = 'active' AND c.stamp_balance > 0 AND c.stamp_balance >= $1 - 2 AND c.stamp_balance < $1
+        WHERE c.status = 'active' AND c.stamp_balance > 0 AND c.stamp_balance >= $2 AND c.stamp_balance < $1
           AND NOT EXISTS (SELECT 1 FROM rewards r WHERE r.card_id = c.id AND r.status = 'available') ORDER BY c.stamp_balance DESC LIMIT 20`,
-      [req],
+      [req, ruleFull.programType === 'points' ? Math.floor(req * 0.8) : Math.max(1, req - 2)],
     )).rows.map((r) => r.display_name as string);
     const pending = (await tx.query(
       "SELECT cu.display_name FROM rewards r JOIN cards c ON c.id = r.card_id JOIN customers cu ON cu.id = c.customer_id WHERE r.status = 'available' ORDER BY r.unlocked_at LIMIT 20",
@@ -59,7 +68,7 @@ export async function dashboard(session: StaffSession, days = 14) {
         customers: k.customers, newCustomers7d: k.new_customers_7d, visits: k.visits, purchases: k.purchases, stamps: k.stamps, recurring: k.recurring,
         rewardsUnlocked: k.rewards_unlocked, redemptions: k.redemptions, rewardsPending: k.rewards_pending, reviewPrompts: k.review_prompts, reviewClicks: k.review_clicks,
       },
-      series, recurrence, program: { stampsRequired: req, rewardDescription: rule.reward_description }, nearReward: near, pendingRewards: pending,
+      series, recurrence, program: publicProgram(ruleFull), nearReward: near, pendingRewards: pending,
     };
   });
 }
@@ -92,20 +101,22 @@ export async function updateProgram(session: StaffSession, raw: unknown) {
   return withTenant(session.businessId, async (tx) => {
     await tx.query('UPDATE businesses SET name = $2, vertical = $3, primary_color = $4, accent_color = $5, review_url = $6 WHERE id = $1',
       [session.businessId, input.name, input.vertical, input.primaryColor, input.accentColor, input.reviewUrl]);
-    const cur = (await tx.query('SELECT id, version, stamps_required, stamp_mode, max_stamps_per_purchase, visit_window_minutes, reward_description FROM reward_rules WHERE active FOR UPDATE')).rows[0];
+    const cur = await loadActiveRule(tx, true);
     const r = input.rules;
-    const changed = cur.stamps_required !== r.stampsRequired || cur.stamp_mode !== r.stampMode || cur.max_stamps_per_purchase !== r.maxStampsPerPurchase
-      || cur.visit_window_minutes !== r.visitWindowMinutes || cur.reward_description !== r.rewardDescription;
+    const changed = ruleChanged(cur, r);
     let unlocked = 0;
     if (changed) {
-      // Nueva versión de la regla; la anterior queda como historial. Las recompensas ya ganadas conservan su costo y descripción.
+      // Cambiar de familia (sellos ↔ puntos) cambiaría el significado de los saldos acumulados: se bloquea mientras
+      // haya tarjetas con progreso. Los premios ya desbloqueados nunca se tocan (conservan costo y descripción).
+      const fam = (t: string) => (t === 'points' ? 'points' : 'stamps');
+      if (fam(cur.programType) !== fam(r.programType)) {
+        const n = (await tx.query("SELECT count(*)::int AS n FROM cards WHERE status = 'active' AND stamp_balance > 0")).rows[0].n;
+        if (n > 0) throw new AppError(409, 'program_family_change', `Hay ${n} tarjetas con progreso. Cambiar entre sellos y puntos lo invalidaría. Mantén el tipo de programa o pide a VLUX una conversión asistida.`);
+      }
+      // Nueva versión de la regla; la anterior queda como historial.
       await tx.query('UPDATE reward_rules SET active = false WHERE id = $1', [cur.id]);
-      const ruleId = (await tx.query(
-        `INSERT INTO reward_rules (business_id, version, stamps_required, stamp_mode, max_stamps_per_purchase, visit_window_minutes, reward_description, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [session.businessId, cur.version + 1, r.stampsRequired, r.stampMode, r.maxStampsPerPurchase, r.visitWindowMinutes, r.rewardDescription, session.userId],
-      )).rows[0].id;
-      const rule = { id: ruleId, ...r };
+      const ruleId = await insertRule(tx, session.businessId, cur.version + 1, r, session.userId);
+      const rule = { id: ruleId, stampsRequired: r.stampsRequired, rewardDescription: r.rewardDescription };
       const eligible = (await tx.query(
         "SELECT id FROM cards c WHERE status = 'active' AND stamp_balance >= $1 AND NOT EXISTS (SELECT 1 FROM rewards r WHERE r.card_id = c.id AND r.status = 'available') ORDER BY id FOR UPDATE",
         [r.stampsRequired],
@@ -118,17 +129,17 @@ export async function updateProgram(session: StaffSession, raw: unknown) {
 }
 
 export async function listStaff(session: StaffSession) {
-  return (await getPool().query(
+  return (await withTenant(session.businessId, (tx) => tx.query(
     `SELECT m.id AS membership_id, m.role, m.active, u.email, u.display_name, m.created_at FROM staff_memberships m JOIN staff_users u ON u.id = m.user_id
       WHERE m.business_id = $1 ORDER BY m.role, u.display_name`,
     [session.businessId],
-  )).rows.map((r) => ({ membershipId: r.membership_id, role: r.role, active: r.active, email: r.email, displayName: r.display_name, createdAt: r.created_at.toISOString() }));
+  ))).rows.map((r) => ({ membershipId: r.membership_id, role: r.role, active: r.active, email: r.email, displayName: r.display_name, createdAt: r.created_at.toISOString() }));
 }
 
 export async function createEmployee(session: StaffSession, raw: unknown) {
   const input = createEmployeeSchema.parse(raw);
   const hash = await hashPassword(input.password);
-  const membershipId = await withTx(async (tx) => {
+  const membershipId = await withTenant(session.businessId, async (tx) => {
     const existing = (await tx.query('SELECT id FROM staff_users WHERE email = $1', [input.email])).rows[0];
     // Por privacidad no se reutiliza ni se revela una cuenta existente de otro negocio.
     if (existing) throw new AppError(409, 'email_taken', 'Ese correo ya tiene una cuenta. Usa otro correo para este empleado.');
@@ -140,10 +151,10 @@ export async function createEmployee(session: StaffSession, raw: unknown) {
 }
 
 export async function setStaffActive(session: StaffSession, membershipId: string, active: boolean) {
-  const m = (await getPool().query('SELECT id, role, user_id FROM staff_memberships WHERE id = $1 AND business_id = $2', [membershipId, session.businessId])).rows[0];
+  const m = (await withTenant(session.businessId, (tx) => tx.query('SELECT id, role, user_id FROM staff_memberships WHERE id = $1 AND business_id = $2', [membershipId, session.businessId]))).rows[0];
   if (!m) throw notFound('Empleado');
   if (m.role === 'OWNER') throw new AppError(422, 'cannot_change_owner', 'La cuenta del dueño no se desactiva desde aquí.');
-  await withTx(async (tx) => {
+  await withTenant(session.businessId, async (tx) => {
     await tx.query('UPDATE staff_memberships SET active = $2 WHERE id = $1', [membershipId, active]);
     if (!active) await tx.query('UPDATE staff_sessions SET revoked_at = now() WHERE membership_id = $1 AND revoked_at IS NULL', [membershipId]);
   });
@@ -154,13 +165,20 @@ export async function setStaffActive(session: StaffSession, membershipId: string
 /** Derecho de cancelación (ARCO): se borran datos personales y se revoca el acceso; las métricas agregadas se conservan. */
 export async function anonymizeCustomer(session: StaffSession, customerId: string) {
   return withTenant(session.businessId, async (tx) => {
-    const c = (await tx.query('SELECT id, anonymized_at FROM customers WHERE id = $1 FOR UPDATE', [customerId])).rows[0];
+    const c = (await tx.query('SELECT id, anonymized_at, contact, contact_type FROM customers WHERE id = $1 FOR UPDATE', [customerId])).rows[0];
     if (!c) throw notFound('Cliente');
     if (c.anonymized_at) return { customerId, alreadyAnonymized: true };
     await tx.query("UPDATE customers SET display_name = 'Cliente eliminado', contact = NULL, contact_type = NULL, marketing_consent = false, anonymized_at = now() WHERE id = $1", [customerId]);
     await tx.query("UPDATE cards SET status = 'revoked' WHERE customer_id = $1", [customerId]);
     await tx.query('UPDATE card_access_tokens SET revoked_at = now() WHERE revoked_at IS NULL AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)', [customerId]);
     await tx.query("UPDATE rewards SET status = 'void' WHERE status = 'available' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    // V0.4.6 · Sin tarjeta no hay avisos: se desactivan sus notificaciones y se cancelan sus citas.
+    await tx.query("UPDATE push_subscriptions SET disabled_at = now(), disabled_reason = 'card_revoked' WHERE disabled_at IS NULL AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    await tx.query("UPDATE appointments SET status = 'cancelled' WHERE status = 'confirmed' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    await tx.query("UPDATE notification_outbox SET status = 'skipped', skip_reason = 'card_revoked' WHERE status = 'queued' AND card_id IN (SELECT id FROM cards WHERE customer_id = $1)", [customerId]);
+    // 1.0.x · Solicitudes de recuperación de ese cliente (vinculadas o con su contacto): enmascaradas y cerradas.
+    // Bajo SAVEPOINT: sin 0017 (o revertida) no hace nada y nunca aborta la anonimización.
+    await redactRecoveryForCustomer(tx, session.businessId, customerId, { contact: c.contact, type: c.contact_type });
     await audit(tx, session.businessId, { type: 'staff', id: session.userId }, 'customer.anonymized', 'customer', customerId);
     return { customerId, alreadyAnonymized: false };
   });

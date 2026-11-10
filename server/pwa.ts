@@ -39,6 +39,41 @@ export function buildManifest(b: Pick<PublicBusiness, 'slug' | 'name' | 'primary
   };
 }
 
+/**
+ * V0.4 · Manifiesto del personal: "Panel" (dueño) o "Caja" (empleado) como app en la pantalla de inicio.
+ * Usa los colores e inicial del negocio. El acceso sigue protegido por el inicio de sesión propio
+ * (cookie HttpOnly vlx_staff): el manifiesto no da permisos, solo un acceso directo.
+ */
+export function buildStaffManifest(b: Pick<PublicBusiness, 'slug' | 'name' | 'primaryColor' | 'accentColor'>, app: 'panel' | 'caja') {
+  // V0.4.6 · Identidad por negocio: ícono propio (colores invertidos respecto a la tarjeta del cliente, para no confundirlos
+  // en la pantalla de inicio), colores del negocio y arranque en SU negocio (?negocio=slug). La app no guarda credenciales:
+  // al abrirla, el servidor valida la cookie HttpOnly y, si la sesión es de otro negocio, la app lo detecta y no muestra datos ajenos.
+  const base = `/api/pwa/${b.slug}/icon/${app}-`;
+  const label = app === 'panel' ? 'Panel' : 'Caja';
+  const q = `negocio=${encodeURIComponent(b.slug)}`;
+  return {
+    id: `/${app}?${q}`,
+    name: `${b.name} · ${label}`,
+    short_name: `${label} ${shortName(b.name)}`.slice(0, 12),
+    description: app === 'panel' ? `Panel del dueño de ${b.name}: clientes, métricas y programa.` : `Caja de ${b.name}: escanea tarjetas y registra visitas.`,
+    lang: 'es-MX',
+    dir: 'ltr',
+    start_url: `/${app}?${q}&fuente=app`,
+    scope: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: b.primaryColor,
+    theme_color: b.primaryColor,
+    categories: ['business', 'productivity'],
+    prefer_related_applications: false,
+    icons: [
+      { src: `${base}192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `${base}512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: `${base}maskable-512.png`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+  };
+}
+
 // ---------- Dibujo del ícono ----------
 type RGB = [number, number, number];
 function hex(c: string): RGB {
@@ -116,12 +151,16 @@ function distToSeg(x: number, y: number, s: number[]) {
   return Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy));
 }
 
-export function renderIcon(o: { size: number; maskable: boolean; name: string; primary: string; accent: string }): Buffer {
+export function renderIcon(o: { size: number; maskable: boolean; name: string; primary: string; accent: string; variant?: 'card' | 'panel' | 'caja' }): Buffer {
   const S = o.size;
-  const bg = hex(o.primary);
+  const brand = hex(o.primary);
   const accent = hex(o.accent);
   // Si el acento casi no contrasta con el fondo, usa crema o tinta.
-  const fg: RGB = Math.abs(lum(accent) - lum(bg)) > 0.25 ? accent : lum(bg) < 0.5 ? [247, 241, 230] : [14, 16, 19];
+  const mark: RGB = Math.abs(lum(accent) - lum(brand)) > 0.25 ? accent : lum(brand) < 0.5 ? [247, 241, 230] : [14, 16, 19];
+  // V0.4.6: Panel y Caja usan los colores invertidos (fondo = acento) para distinguirse de la tarjeta del cliente.
+  const staff = o.variant === 'panel' || o.variant === 'caja';
+  const bg: RGB = staff ? mark : brand;
+  const fg: RGB = staff ? brand : mark;
   const segs = glyphSegments(initialOf(o.name));
   const k = o.maskable ? 0.72 : 1; // zona segura para íconos adaptables de Android
   const c = S / 2;
@@ -143,6 +182,7 @@ export function renderIcon(o: { size: number; maskable: boolean; name: string; p
   const inFg = (x: number, y: number) => {
     const d = Math.hypot(x - c, y - c);
     if (Math.abs(d - ringR) <= ringW / 2) return true;
+    if (o.variant === 'caja' && Math.abs(d - ringR * 0.84) <= ringW / 2) return true;
     if (x < bx0 || x > bx1 || y < by0 || y > by1) return false;
     const ux = (x - ox) / unit, uy = (y - oy) / unit, hu = half / unit;
     for (const q of segs) if (distToSeg(ux, uy, q) <= hu) return true;

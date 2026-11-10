@@ -1,42 +1,128 @@
-// Tarjeta de sellos: misma pieza para cliente, empleado, configuración y vista previa de Wallet.
-import React from 'react';
+// Tarjeta de sellos: misma pieza para cliente, caja, panel, Estudio de marca y presentación comercial.
+// V0.4: acabado metálico premium. Capas (de abajo hacia arriba):
+//   base con el color del negocio → cepillado fino → brillo especular que sigue al dedo/ratón →
+//   borde pulido (bisel) → contenido grabado. Inclinación 3D suave con el puntero; respeta
+//   "reducir movimiento". Todo es CSS: sin imágenes ni librerías, se ve igual instalada como app.
+import React, { useCallback, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { BusinessLogo, cx } from './ui';
+import { legacyFit, placeLogo, type LogoFit } from '../lib/logoFit';
 
 export function StampGrid({ total, filled, animateFrom, size = 'md', onBrand = true }: { total: number; filled: number; animateFrom?: number | null; size?: 'sm' | 'md'; onBrand?: boolean }) {
   const cols = total <= 5 ? total : total <= 10 ? Math.ceil(total / 2) : Math.ceil(total / 3);
-  const dim = size === 'sm' ? 'h-6 w-6' : 'h-[34px] w-[34px] sm:h-9 sm:w-9';
+  const cell = size === 'sm' ? 'max-w-6' : 'max-w-[34px] sm:max-w-9';
   return (
-    <div className="grid gap-2.5 sm:gap-3 justify-start" style={{ gridTemplateColumns: `repeat(${cols}, max-content)` }} role="img" aria-label={`${filled} de ${total} sellos`}>
+    <div className="grid gap-2 sm:gap-3 justify-start" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, ${size === 'sm' ? '24px' : '36px'}))` }} role="img" aria-label={`${filled} de ${total} sellos`}>
       {Array.from({ length: total }).map((_, i) => {
         const isFilled = i < filled;
         const isNew = isFilled && animateFrom != null && i >= animateFrom;
+        const delay = isNew ? `${(i - (animateFrom || 0)) * 140 + 250}ms` : undefined;
         return (
           <span
             key={i}
-            className={cx('relative inline-flex items-center justify-center rounded-full', dim, isNew && 'stamp-new')}
-            style={{
-              background: isFilled ? 'var(--accent)' : 'transparent',
-              border: isFilled ? 'none' : `1.5px dashed ${onBrand ? 'color-mix(in srgb, var(--cream) 38%, transparent)' : '#C9CED6'}`,
-              animationDelay: isNew ? `${(i - (animateFrom || 0)) * 140 + 250}ms` : undefined,
-              boxShadow: isFilled ? 'inset 0 -2px 0 rgba(0,0,0,.18), 0 1px 0 rgba(255,255,255,.25) inset' : undefined,
-            }}
+            className={cx('relative inline-flex items-center justify-center rounded-full aspect-square w-full', cell, isFilled ? 'stamp-coin' : onBrand ? 'stamp-slot' : 'stamp-slot-light', isNew && 'stamp-new')}
+            style={{ animationDelay: delay }}
           >
             {isFilled ? (
-              <svg viewBox="0 0 24 24" className={size === 'sm' ? 'w-3 h-3' : 'w-4 h-4'} aria-hidden="true">
+              <svg viewBox="0 0 24 24" className={cx('relative', size === 'sm' ? 'w-3 h-3' : 'w-4 h-4')} aria-hidden="true">
                 <g transform="translate(12 12) rotate(-30)" className="mark-bean">
-                  <ellipse rx="5" ry="7.2" fill="var(--brand)" opacity=".88" />
-                  <path d="M0 -6.6 C -2.4 -2.2, 2.4 2.2, 0 6.6" stroke="var(--accent)" strokeWidth="1.3" fill="none" />
+                  <ellipse rx="5" ry="7.2" fill="var(--c-stamp-ink, var(--brand))" opacity=".88" />
+                  <path d="M0 -6.6 C -2.4 -2.2, 2.4 2.2, 0 6.6" stroke="var(--c-detail, var(--accent))" strokeWidth="1.3" fill="none" />
                 </g>
-                <path className="mark-generic" transform="translate(12 12)" d="M-5 0.5 L-1.6 4 L5.5 -3.5" stroke="var(--brand)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                <path className="mark-generic" transform="translate(12 12)" d="M-5 0.5 L-1.6 4 L5.5 -3.5" stroke="var(--c-stamp-ink, var(--brand))" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
               </svg>
             ) : (
-              <span className={cx('text-[10px] tabular-nums', onBrand ? 'text-[color:var(--cream)] opacity-40' : 'text-[#98A2B3]')}>{i + 1}</span>
+              <span className={cx('text-[10px] tabular-nums', onBrand ? 'card-ink2' : 'text-[#98A2B3]')}>{i + 1}</span>
             )}
-            {isNew && <span className="stamp-ring absolute inset-0 rounded-full" style={{ animationDelay: `${(i - (animateFrom || 0)) * 140 + 250}ms` }} />}
+            {isNew && <span className="stamp-ring absolute inset-0 rounded-full" style={{ animationDelay: delay }} />}
           </span>
         );
       })}
     </div>
+  );
+}
+
+/** V0.4.5 · Medidor de puntos grabado en el metal: barra con progreso y meta. */
+export function PointsMeter({ total, filled, unit = 'Puntos', compact }: { total: number; filled: number; unit?: string; compact?: boolean }) {
+  const pct = Math.max(0, Math.min(100, total > 0 ? (filled / total) * 100 : 0));
+  const left = Math.max(0, total - filled);
+  return (
+    <div role="img" aria-label={`${filled} de ${total} ${unit.toLowerCase()}`} data-testid="points-meter">
+      <div className={cx('flex items-baseline gap-2 card-emboss', compact ? 'text-[22px]' : 'text-[34px]')}>
+        <span className="font-display tabular-nums leading-none">{new Intl.NumberFormat('es-MX').format(filled)}</span>
+        <span className="text-[11px] uppercase tracking-[0.16em] card-ink2">{unit.toLowerCase()}</span>
+      </div>
+      <div className={cx('mt-3 rounded-full stamp-slot overflow-hidden', compact ? 'h-2' : 'h-2.5')}>
+        <div className="h-full rounded-full stamp-coin" style={{ width: `${pct}%`, transition: 'width .6s cubic-bezier(.2,.8,.2,1)' }} />
+      </div>
+      <div className="mt-1.5 text-[11px] card-ink2 tabular-nums">{left > 0 ? `Faltan ${new Intl.NumberFormat('es-MX').format(left)} para tu recompensa` : 'Meta alcanzada'}</div>
+    </div>
+  );
+}
+
+/** Inclinación 3D y reflejo que siguen al puntero. Escribe variables CSS (sin re-render de React). */
+export function useTilt<T extends HTMLElement>(enabled = true) {
+  const ref = useRef<T | null>(null);
+  const frame = useRef(0);
+  const set = useCallback((x: number, y: number) => {
+    const el = ref.current;
+    if (!el) return;
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      el.style.setProperty('--mx', `${(x * 100).toFixed(1)}%`);
+      el.style.setProperty('--my', `${(y * 100).toFixed(1)}%`);
+      el.style.setProperty('--rx', `${((0.5 - y) * 5).toFixed(2)}deg`);
+      el.style.setProperty('--ry', `${((x - 0.5) * 7).toFixed(2)}deg`);
+      // La sombra se desplaza en sentido contrario a la luz (que sigue al puntero): profundidad coherente con el reflejo.
+      el.style.setProperty('--sx', `${((0.5 - x) * 14).toFixed(1)}px`);
+      el.style.setProperty('--sy', `${((0.5 - y) * 6).toFixed(1)}px`);
+    });
+  }, []);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !enabled) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const move = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      set(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)));
+      el.dataset.tilting = '1';
+    };
+    const leave = () => { delete el.dataset.tilting; set(0.5, 0.5); };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerleave', leave);
+    el.addEventListener('pointercancel', leave);
+    return () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerleave', leave); el.removeEventListener('pointercancel', leave); cancelAnimationFrame(frame.current); };
+  }, [enabled, set]);
+  return ref;
+}
+
+/** Placa del logotipo: aplica el ajuste del motor de logos (contain, sin deformar ni recortar) sobre una base pulida. */
+export function LogoPlate({ name, src, fit, compact, className }: { name: string; src?: string | null; fit?: LogoFit | null; compact?: boolean; className?: string }) {
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
+  const [broken, setBroken] = useState(false);
+  const k = compact ? 0.85 : 1;
+  if (!src || broken) {
+    const d = Math.round(46 * k);
+    return <span className={cx('logo-plate', className)} data-plate="none" style={{ width: d + 5, height: d + 5 }}><BusinessLogo name={name} size={d} src={null} /></span>;
+  }
+  const f = fit ?? (nat ? legacyFit(nat.w, nat.h) : null);
+  if (!f) {
+    // Logo antiguo sin ajuste: se mide una vez para respetar su proporción real.
+    return (
+      <span className={cx('logo-plate', className)} data-plate="light" style={{ width: Math.round(52 * k) + 5, height: Math.round(52 * k) + 5 }}>
+        <span className="logo-plate-in block" style={{ width: Math.round(52 * k), height: Math.round(52 * k) }}>
+          <img src={src} alt="" onLoad={(e) => setNat({ w: e.currentTarget.naturalWidth || 1, h: e.currentTarget.naturalHeight || 1 })} onError={() => setBroken(true)} style={{ opacity: 0, width: 1, height: 1 }} />
+        </span>
+      </span>
+    );
+  }
+  const p = placeLogo(f, k);
+  return (
+    <span className={cx('logo-plate', className)} data-plate={f.plate} data-kind={p.kind} data-testid="logo-plate" style={{ width: p.plateW + 5, height: p.plateH + 5 }}>
+      <span className="logo-plate-in block" data-content={[p.left + f.bounds.x * p.imgW, p.top + f.bounds.y * p.imgH, p.fitW, p.fitH].map((n) => n.toFixed(2)).join(',')} style={{ width: p.plateW, height: p.plateH }}>
+        <img src={src} alt={`Logotipo de ${name}`} draggable={false} onError={() => setBroken(true)} style={{ width: p.imgW, height: p.imgH, left: p.left, top: p.top }} />
+      </span>
+    </span>
   );
 }
 
@@ -50,6 +136,13 @@ export function LoyaltyCardFace({
   animateFrom,
   compact,
   footer,
+  logoUrl,
+  logoFit,
+  rewardLabel,
+  interactive = true,
+  className,
+  mode = 'stamps',
+  unitLabel = 'Sellos',
 }: {
   businessName: string;
   customerName: string;
@@ -60,47 +153,66 @@ export function LoyaltyCardFace({
   animateFrom?: number | null;
   compact?: boolean;
   footer?: React.ReactNode;
+  logoUrl?: string | null;
+  logoFit?: LogoFit | null;
+  rewardLabel?: string;
+  interactive?: boolean;
+  className?: string;
+  /** V0.4.5: el mismo motor visual se adapta al programa: círculos (sellos, visitas, servicios) o medidor (puntos). */
+  mode?: 'stamps' | 'points';
+  /** Nombre de la unidad en plural, con mayúscula inicial (Sellos, Visitas, Servicios, Puntos...). */
+  unitLabel?: string;
 }) {
+  const tilt = useTilt<HTMLDivElement>(interactive);
   return (
-    <div
-      className={cx('card-surface relative overflow-hidden text-[color:var(--cream)] shadow-[0_24px_48px_-24px_rgba(30,18,10,.55),0_2px_6px_rgba(30,18,10,.18)]', compact ? 'rounded-2xl p-4' : 'rounded-[22px] p-5 sm:p-6')}
-      style={{ background: 'var(--brand)' }}
-    >
-      <div className="pointer-events-none absolute inset-0 card-sheen" />
-      <div className="relative flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <BusinessLogo name={businessName} size={compact ? 34 : 42} />
+    <div className={cx('card-stage', className)} ref={tilt}>
+      <div
+        className={cx('card-metal relative overflow-hidden text-[color:var(--cream)]', rewardReady && 'card-metal-reward', compact ? 'rounded-2xl p-4' : 'rounded-[22px] p-5 sm:p-6')}
+        data-testid="loyalty-card"
+      >
+        <div className="card-metal-sheen" aria-hidden="true" />
+        <div className="card-metal-brush" aria-hidden="true" />
+        <div className="card-metal-grain" aria-hidden="true" />
+        <div className="card-metal-shine" aria-hidden="true" />
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="flex items-center gap-x-3 gap-y-1.5 min-w-0 flex-wrap">
+            <LogoPlate name={businessName} src={logoUrl} fit={logoFit} compact={compact} />
+            <div className="min-w-[7.5rem] flex-1">
+              <div className={cx('font-display leading-tight line-clamp-2 break-words card-emboss', compact ? 'text-[15px]' : 'text-[17px]')} title={businessName}>{businessName}</div>
+              <div className="text-[10px] sm:text-[10.5px] uppercase tracking-[0.14em] sm:tracking-[0.18em] card-ink2 whitespace-nowrap">Tarjeta de recompensas</div>
+            </div>
+          </div>
+          {rewardReady ? (
+            <span className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold reward-chip">
+              Premio listo
+            </span>
+          ) : (
+            <span className="shrink-0 card-mark" aria-hidden="true">VLUX</span>
+          )}
+        </div>
+
+        <div className={cx('relative', compact ? 'mt-4' : 'mt-6')}>
+          {mode === 'points' || total > 20
+            ? <PointsMeter total={total} filled={filled} unit={unitLabel} compact={compact} />
+            : <StampGrid total={total} filled={filled} animateFrom={animateFrom} size={compact ? 'sm' : 'md'} />}
+        </div>
+
+        <div className={cx('relative flex items-end justify-between gap-3', compact ? 'mt-4' : 'mt-6')}>
           <div className="min-w-0">
-            <div className={cx('font-display leading-tight truncate', compact ? 'text-[15px]' : 'text-[17px]')}>{businessName}</div>
-            <div className="text-[11px] uppercase tracking-[0.14em] opacity-60">Mi tarjeta de recompensas</div>
+            <div className="text-[10px] uppercase tracking-[0.16em] card-ink2">{rewardLabel ? 'Recompensa' : 'Cliente'}</div>
+            <div className={cx('font-medium truncate card-emboss', compact ? 'text-[13px]' : 'text-[15px]')}>{rewardLabel ?? customerName}</div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-[10px] uppercase tracking-[0.16em] card-ink2">{unitLabel}</div>
+            <div className={cx('font-display tabular-nums card-emboss', compact ? 'text-[15px]' : 'text-[20px]')}>
+              {filled}<span className="card-ink2"> / {total}</span>
+            </div>
           </div>
         </div>
-        {rewardReady && (
-          <span className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold reward-chip" style={{ background: 'var(--accent)', color: 'var(--brand)' }}>
-            Premio listo
-          </span>
-        )}
-      </div>
-
-      <div className={cx('relative', compact ? 'mt-4' : 'mt-6')}>
-        <StampGrid total={total} filled={filled} animateFrom={animateFrom} size={compact ? 'sm' : 'md'} />
-      </div>
-
-      <div className={cx('relative flex items-end justify-between gap-3', compact ? 'mt-4' : 'mt-6')}>
-        <div className="min-w-0">
-          <div className="text-[10.5px] uppercase tracking-[0.14em] opacity-55">Cliente</div>
-          <div className={cx('font-medium truncate', compact ? 'text-[13px]' : 'text-[15px]')}>{customerName}</div>
+        <div className="relative mt-3 pt-3 border-t card-divider flex items-center justify-between gap-2 text-[11.5px]">
+          <span className="font-mono tracking-[0.16em] card-ink2 card-emboss">{cardId}</span>
+          {footer}
         </div>
-        <div className="text-right shrink-0">
-          <div className="text-[10.5px] uppercase tracking-[0.14em] opacity-55">Sellos</div>
-          <div className={cx('font-display tabular-nums', compact ? 'text-[15px]' : 'text-[20px]')}>
-            {filled}<span className="opacity-50"> / {total}</span>
-          </div>
-        </div>
-      </div>
-      <div className="relative mt-3 pt-3 border-t card-divider flex items-center justify-between gap-2 text-[11.5px]">
-        <span className="font-mono tracking-wider opacity-70">{cardId}</span>
-        {footer}
       </div>
     </div>
   );

@@ -9,10 +9,25 @@
 # (KEEP_RESTORE=1 para conservarla).
 set -euo pipefail
 : "${SOURCE_URL:?Falta SOURCE_URL}"; : "${RESTORE_ADMIN_URL:?Falta RESTORE_ADMIN_URL}"
+# Salvaguarda (auditoría de datos 2026-11-07): el destino de la prueba jamás puede ser Supabase ni el mismo servidor del origen.
+case "$RESTORE_ADMIN_URL" in *supabase.co*|*pooler.supabase.com*) echo "Rechazado: RESTORE_ADMIN_URL apunta a Supabase. Usa un servidor aislado."; exit 1;; esac
+hostport() { printf '%s' "$1" | sed -E 's#^[a-z]+://[^@]*@##; s#[/?].*$##'; }
+[ "$(hostport "$SOURCE_URL")" != "$(hostport "$RESTORE_ADMIN_URL")" ] || { echo "Rechazado: origen y destino son el mismo servidor."; exit 1; }
 BACKUP_DIR="${BACKUP_DIR:-./backups}"; mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 FILE="$BACKUP_DIR/vlux-$STAMP.dump"
 RESTORE_DB="vlux_restore_$(date -u +%Y%m%d%H%M%S)"
+
+Q="SELECT string_agg(t || '=' || n, ' ' ORDER BY t) FROM (
+  SELECT 'businesses' t, count(*) n FROM businesses UNION ALL SELECT 'staff_users', count(*) FROM staff_users
+  UNION ALL SELECT 'customers', count(*) FROM customers UNION ALL SELECT 'cards', count(*) FROM cards
+  UNION ALL SELECT 'purchases', count(*) FROM purchases UNION ALL SELECT 'visits', count(*) FROM visits
+  UNION ALL SELECT 'rewards', count(*) FROM rewards UNION ALL SELECT 'stamp_events', count(*) FROM stamp_events
+  UNION ALL SELECT 'audit_events', count(*) FROM audit_events UNION ALL SELECT 'migrations', count(*) FROM schema_migrations
+  UNION ALL SELECT 'business_subscriptions', count(*) FROM business_subscriptions UNION ALL SELECT 'platform_audit_events', count(*) FROM platform_audit_events
+  UNION ALL SELECT 'staff_memberships', count(*) FROM staff_memberships UNION ALL SELECT 'reward_rules', count(*) FROM reward_rules
+  UNION ALL SELECT 'platform_admins', count(*) FROM platform_admins) x"
+SRC_BEFORE="$(psql "$SOURCE_URL" -Atc "$Q")"
 
 echo "1) Respaldo lógico (pg_dump formato custom, solo esquema public)"
 pg_dump --format=custom --no-owner --no-privileges --schema=public --file="$FILE" "$SOURCE_URL"
@@ -27,16 +42,40 @@ pg_restore --no-owner --no-privileges --exit-on-error --dbname="$RESTORE_URL" "$
 psql "$RESTORE_URL" -v ON_ERROR_STOP=1 -q -f "$(dirname "$0")/grants.sql"
 
 echo "3) Verificación de integridad (origen vs restaurada)"
-Q="SELECT string_agg(t || '=' || n, ' ' ORDER BY t) FROM (
-  SELECT 'businesses' t, count(*) n FROM businesses UNION ALL SELECT 'staff_users', count(*) FROM staff_users
-  UNION ALL SELECT 'customers', count(*) FROM customers UNION ALL SELECT 'cards', count(*) FROM cards
-  UNION ALL SELECT 'purchases', count(*) FROM purchases UNION ALL SELECT 'visits', count(*) FROM visits
-  UNION ALL SELECT 'rewards', count(*) FROM rewards UNION ALL SELECT 'stamp_events', count(*) FROM stamp_events
-  UNION ALL SELECT 'audit_events', count(*) FROM audit_events UNION ALL SELECT 'migrations', count(*) FROM schema_migrations
-  UNION ALL SELECT 'business_subscriptions', count(*) FROM business_subscriptions UNION ALL SELECT 'platform_audit_events', count(*) FROM platform_audit_events) x"
-SRC="$(psql "$SOURCE_URL" -Atc "$Q")"; DST="$(psql "$RESTORE_URL" -Atc "$Q")"
-echo "   origen:      $SRC"; echo "   restaurada:  $DST"
-[ "$SRC" = "$DST" ] || { echo "FALLA: los conteos no coinciden"; exit 1; }
+# pg_dump lee una sola instantánea al iniciar. El origen sigue recibiendo escrituras, así que se cuenta ANTES y DESPUÉS
+# del respaldo: cada tabla restaurada debe quedar entre ambos conteos (las tablas solo crecen salvo una purga manual).
+DST="$(psql "$RESTORE_URL" -Atc "$Q")"
+SRC_AFTER="$(psql "$SOURCE_URL" -Atc "$Q")"
+echo "   origen antes:   $SRC_BEFORE"; echo "   restaurada:     $DST"; echo "   origen después: $SRC_AFTER"
+# Comparar por nombre de tabla, no por posición. Las collations de Supabase y del contenedor
+# PostgreSQL pueden ordenar businesses y business_subscriptions de manera distinta.
+awk -v a="$SRC_BEFORE" -v d="$DST" -v b="$SRC_AFTER" '
+function parse_counts(s, out, label, words, pair, n, i, key) {
+  n = split(s, words, /[[:space:]]+/)
+  for (i=1; i<=n; i++) {
+    if (split(words[i], pair, "=") != 2 || pair[1] == "" || pair[2] !~ /^[0-9]+$/) {
+      print "FALLA: formato de conteo invalido en " label; bad=1; continue
+    }
+    key=pair[1]
+    if (key in out) { print "FALLA: tabla duplicada en " label ": " key; bad=1 }
+    out[key]=pair[2]+0
+  }
+}
+BEGIN {
+  parse_counts(a, A, "origen antes")
+  parse_counts(d, D, "restaurada")
+  parse_counts(b, B, "origen despues")
+  for (key in A) {
+    if (!(key in D) || !(key in B)) {
+      print "FALLA: tabla ausente: " key; bad=1
+    } else if (D[key] < A[key] || D[key] > B[key]) {
+      print "FUERA DE RANGO: " key ": " A[key] " / " D[key] " / " B[key]; bad=1
+    }
+  }
+  for (key in D) if (!(key in A)) { print "FALLA: tabla adicional en restaurada: " key; bad=1 }
+  for (key in B) if (!(key in A)) { print "FALLA: tabla adicional en origen despues: " key; bad=1 }
+  exit bad
+}' || { echo "FALLA: los conteos no coinciden (si hubo una purga durante el respaldo, repite)"; exit 1; }
 BAD="$(psql "$RESTORE_URL" -Atc "SELECT count(*) FROM cards c LEFT JOIN (SELECT card_id, sum(delta) s FROM stamp_events GROUP BY 1) e ON e.card_id = c.id WHERE c.stamp_balance <> coalesce(e.s,0)")"
 echo "   tarjetas con saldo distinto a su libro mayor: $BAD"; [ "$BAD" = "0" ] || { echo "FALLA: libro mayor"; exit 1; }
 NORLS="$(psql "$RESTORE_URL" -Atc "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND NOT c.relrowsecurity")"
@@ -46,6 +85,38 @@ echo "   tarjetas con más de un premio disponible: $DUP"; [ "$DUP" = "0" ] || {
 
 APP="$(psql "$RESTORE_URL" -Atc "SELECT has_table_privilege('vlux_app','cards','SELECT,INSERT,UPDATE') AND has_table_privilege('vlux_app','stamp_events','INSERT') AND NOT has_table_privilege('vlux_app','stamp_events','UPDATE')")"
 echo "   permisos mínimos de vlux_app tras restaurar: $APP"; [ "$APP" = "t" ] || { echo "FALLA: permisos"; exit 1; }
+
+# Permisos del rol de la app: deben ser idénticos a los del origen (ops/grants.sql al día) y nada ejecutable por PUBLIC.
+PQ="SELECT string_agg(x, ' ' ORDER BY x) FROM (
+  SELECT c.relname || ':' || (CASE WHEN has_table_privilege('vlux_app', c.oid, 'SELECT') THEN 'r' ELSE '' END)
+    || (CASE WHEN has_table_privilege('vlux_app', c.oid, 'INSERT') THEN 'a' ELSE '' END)
+    || (CASE WHEN has_table_privilege('vlux_app', c.oid, 'UPDATE') THEN 'w' ELSE '' END)
+    || (CASE WHEN has_table_privilege('vlux_app', c.oid, 'DELETE') THEN 'd' ELSE '' END) AS x
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'
+  UNION ALL SELECT p.proname || '()' || (CASE WHEN has_function_privilege('vlux_app', p.oid, 'EXECUTE') THEN 'x' ELSE '' END)
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')) y"
+if [ "$(psql "$SOURCE_URL" -Atc "$PQ")" = "$(psql "$RESTORE_URL" -Atc "$PQ")" ]; then echo "   permisos de vlux_app idénticos al origen: sí"; else echo "FALLA: permisos de vlux_app distintos al origen (actualiza ops/grants.sql)"; exit 1; fi
+PUBQ="SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e') AND EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee = 0)"
+# La copia restaurada se endurece con grants.sql, así que la deriva real solo se ve en el ORIGEN.
+SRCPUB="$(psql "$SOURCE_URL" -Atc "$PUBQ")"
+echo "   funciones ejecutables por PUBLIC en el ORIGEN: $SRCPUB"; [ "$SRCPUB" = "0" ] || { echo "FALLA: el origen tiene funciones con EXECUTE a PUBLIC"; exit 1; }
+PUB="$(psql "$RESTORE_URL" -Atc "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e') AND EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee = 0)")"
+echo "   funciones ejecutables por PUBLIC tras restaurar: $PUB"; [ "$PUB" = "0" ] || { echo "FALLA: EXECUTE a PUBLIC"; exit 1; }
+
+# Prueba funcional en la copia: como vlux_app (RLS activa) se lee un negocio y se registra una visita; luego se deshace.
+FUNC="$(psql "$RESTORE_URL" -v ON_ERROR_STOP=1 -Atq <<'SQL'
+BEGIN;
+SET LOCAL ROLE vlux_app;
+SELECT set_config('app.business_id', (SELECT id::text FROM businesses ORDER BY created_at LIMIT 1), true) \g /dev/null
+SELECT CASE WHEN (SELECT count(*) FROM cards) = (SELECT count(*) FROM cards WHERE business_id = current_business_id()) THEN 'rls-ok' ELSE 'rls-FALLA' END;
+INSERT INTO visits (business_id, card_id, created_by)
+  SELECT business_id, id, (SELECT user_id FROM staff_memberships WHERE business_id = current_business_id() LIMIT 1) FROM cards LIMIT 1;
+SELECT 'escritura-ok';
+ROLLBACK;
+SQL
+)" || { echo "FALLA: la app no puede operar sobre la copia restaurada"; exit 1; }
+echo "   prueba funcional como vlux_app: $(echo $FUNC)"
+case "$FUNC" in *rls-FALLA*) echo "FALLA: RLS"; exit 1;; esac
 
 echo "4) Registro del último respaldo verificado"
 echo "$STAMP $(cut -d' ' -f1 "$FILE.sha256") OK" >> "$BACKUP_DIR/ULTIMO_RESPALDO_VERIFICADO.txt"

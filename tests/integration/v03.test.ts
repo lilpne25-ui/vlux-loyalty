@@ -168,7 +168,7 @@ test('asistente: logotipo y datos inválidos se rechazan', async () => {
   assert.equal((await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/svg+xml;base64,PHN2Zz4=' }))).status, 422);
   assert.equal((await A.post('/api/admin/businesses', wizard({ ownerEmail: 'no-es-correo' }))).status, 422);
   assert.equal((await A.post('/api/admin/businesses', wizard({ plan: 'enterprise' }))).status, 422);
-  const ok = await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/png;base64,iVBORw0KGgo=' }));
+  const ok = await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' }));
   assert.equal(ok.status, 201);
 });
 
@@ -402,4 +402,163 @@ test('el dueño no puede reemplazar la invitación de co-dueño emitida por VLUX
   await db.query("UPDATE staff_invitations SET accepted_at = NULL WHERE business_id = $1 AND email = $2", [b.businessId, empEmail]); // simula una invitación aún abierta
   const r = await new Device('e2').post('/api/invitations/accept', { token: tok1, password: PASSWORD });
   assert.equal(r.status, 409);
+});
+
+// V0.4.1 · Acabado de la tarjeta: configuración guardada y validada en el servidor.
+test('acabado de tarjeta: por omisión silver (V0.4.3), se guarda y rechaza valores inválidos', async () => {
+  const r0 = await A.post('/api/admin/businesses', wizard());
+  assert.equal(r0.status, 201, JSON.stringify(r0.json));
+  const d0 = (await A.get(`/api/admin/businesses/${r0.json.businessId}`)).json;
+  assert.equal(d0.cardFinish, 'silver');
+
+  const r1 = await A.post('/api/admin/businesses', wizard({ cardFinish: 'silver', name: 'Barbería Plata Metepec' }));
+  assert.equal(r1.status, 201, JSON.stringify(r1.json));
+  assert.equal((await A.get(`/api/admin/businesses/${r1.json.businessId}`)).json.cardFinish, 'silver');
+
+  const bad = await A.post('/api/admin/businesses', wizard({ cardFinish: 'neon', name: 'Neón Prueba Toluca' }));
+  assert.equal(bad.status, 422);
+
+  const d1 = (await A.get(`/api/admin/businesses/${r1.json.businessId}`)).json;
+  const ed = await A.req('PATCH', `/api/admin/businesses/${r1.json.businessId}`, {
+    name: d1.name, vertical: d1.vertical, city: d1.city, primaryColor: d1.primaryColor, accentColor: d1.accentColor, reviewUrl: d1.reviewUrl, logoDataUrl: null, cardFinish: 'black',
+  });
+  assert.equal(ed.status, 200, JSON.stringify(ed.json));
+  assert.equal((await A.get(`/api/admin/businesses/${r1.json.businessId}`)).json.cardFinish, 'black');
+});
+
+test('logotipo: el servidor valida los bytes reales, no solo el prefijo del navegador', async () => {
+  const falso = 'data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>padding-padding').toString('base64');
+  const r = await A.post('/api/admin/businesses', wizard({ logoDataUrl: falso, name: 'Logo Falso Toluca' }));
+  assert.equal(r.status, 422);
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const ok = await A.post('/api/admin/businesses', wizard({ logoDataUrl: PNG, name: 'Logo Real Metepec' }));
+  assert.equal(ok.status, 201, JSON.stringify(ok.json));
+  const svg = await A.post('/api/admin/businesses', wizard({ logoDataUrl: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', name: 'Logo Svg Toluca' }));
+  assert.equal(svg.status, 422);
+});
+
+// ---- V0.4.3 · Intelligent Logo Engine: persistencia, validación y aislamiento ----
+const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const FIT = { v: 1, iw: 1, ih: 1, bounds: { x: 0, y: 0, w: 1, h: 1 }, plate: 'dark', scale: 1.2, dx: 0.05, dy: 0, pad: 0.1, align: 'left' };
+
+test('T21 el Estudio/asistente guarda acabado, ajuste del logo y original; el original no se expone', async () => {
+  const r = await A.post('/api/admin/businesses', wizard({ name: 'Logo Ajuste Toluca', logoDataUrl: PNG1, logoFit: FIT, logoOriginalDataUrl: PNG1, cardFinish: 'black' }));
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  const d = (await A.get(`/api/admin/businesses/${r.json.businessId}`)).json;
+  assert.equal(d.cardFinish, 'black');
+  assert.equal(d.logoFit.plate, 'dark'); assert.equal(d.logoFit.align, 'left'); assert.equal(d.logoOriginalDataUrl, PNG1);
+  const pub = await new Device('anon').get(`/api/public/businesses/${r.json.slug}`);
+  const txt = JSON.stringify(pub.json);
+  assert.equal(pub.json.business.logoFit.plate, 'dark');
+  assert.ok(!txt.includes('logoOriginal') && !txt.includes(PNG1.slice(30, 60)), 'el original no sale en la API pública');
+});
+
+test('logo_fit se sanea: valores fuera de rango se acotan y la basura se descarta', async () => {
+  const r = await A.post('/api/admin/businesses', wizard({ name: 'Logo Basura Metepec', logoFit: { v: 1, iw: 99999, ih: 5, bounds: { x: 0, y: 0, w: 1, h: 1 }, scale: 50 } }));
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.equal((await A.get(`/api/admin/businesses/${r.json.businessId}`)).json.logoFit.iw, 4096);
+  const r2 = await A.post('/api/admin/businesses', wizard({ name: 'Logo Basura Dos Metepec', logoFit: '<script>alert(1)</script>' }));
+  assert.equal(r2.status, 201);
+  assert.equal((await A.get(`/api/admin/businesses/${r2.json.businessId}`)).json.logoFit, null);
+});
+
+test('T22 el ajuste de un negocio no afecta a otro y se puede restaurar (editar sin ajuste)', async () => {
+  const a = await A.post('/api/admin/businesses', wizard({ name: 'Aislado Uno Toluca', logoDataUrl: PNG1, logoFit: FIT }));
+  const b = await A.post('/api/admin/businesses', wizard({ name: 'Aislado Dos Toluca', logoDataUrl: PNG1 }));
+  const bd = (await A.get(`/api/admin/businesses/${b.json.businessId}`)).json;
+  assert.equal(bd.logoFit, null);
+  const d1 = (await A.get(`/api/admin/businesses/${a.json.businessId}`)).json;
+  const ed = await A.req('PATCH', `/api/admin/businesses/${a.json.businessId}`, { name: d1.name, vertical: d1.vertical, city: d1.city, primaryColor: d1.primaryColor, accentColor: d1.accentColor, reviewUrl: d1.reviewUrl, logoDataUrl: PNG1, cardFinish: d1.cardFinish, logoFit: null });
+  assert.equal(ed.status, 200, JSON.stringify(ed.json));
+  assert.equal((await A.get(`/api/admin/businesses/${a.json.businessId}`)).json.logoFit, null);
+  // quitar el logo borra también el original conservado
+  const rm = await A.req('PATCH', `/api/admin/businesses/${a.json.businessId}`, { name: d1.name, vertical: d1.vertical, city: d1.city, primaryColor: d1.primaryColor, accentColor: d1.accentColor, reviewUrl: d1.reviewUrl, logoDataUrl: null, cardFinish: d1.cardFinish, logoOriginalDataUrl: PNG1 });
+  assert.equal((await A.get(`/api/admin/businesses/${a.json.businessId}`)).json.logoOriginalDataUrl, null);
+});
+
+test('el original conservado también valida bytes reales (no acepta SVG disfrazado)', async () => {
+  const falso = 'data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>padding-padding').toString('base64');
+  const r = await A.post('/api/admin/businesses', wizard({ name: 'Original Falso Toluca', logoDataUrl: PNG1, logoOriginalDataUrl: falso }));
+  assert.equal(r.status, 422);
+});
+
+// ---- V0.4.4 · Brand Activation Draft: transferencia pública → Control Center ----
+const draftBody = (over: Record<string, unknown> = {}) => ({ name: 'Café Borrador Toluca', logoDataUrl: PNG1, logoFit: FIT, primaryColor: '#0B3D2E', accentColor: '#E8B04B', cardFinish: 'silver', stampsRequired: 8, rewardDescription: 'Una bebida gratis', vertical: 'cafeteria', ...over });
+const visitor = () => new Device('visitante');
+
+test('T03 un visitante sin sesión puede preparar un borrador (solo guarda un diseño)', async () => {
+  await resetRateLimits();
+  const r = await visitor().post('/api/public/activation-drafts', draftBody());
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.match(r.json.ref, /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(r.json.controlCenterUrl.includes(`activar=${r.json.ref}`));
+  const row = (await db.query('SELECT ref_hash, data FROM activation_drafts ORDER BY created_at DESC LIMIT 1')).rows[0];
+  assert.ok(!JSON.stringify(row).includes(r.json.ref), 'la referencia en claro no se guarda');
+  assert.equal((await db.query('SELECT count(*)::int n FROM businesses WHERE name = $1', ['Café Borrador Toluca'])).rows[0].n, 0, 'preparar un borrador no crea negocios');
+});
+
+test('borrador: rechaza basura, campos extra, imágenes falsas y exceso de tasa', async () => {
+  await resetRateLimits();
+  const v = visitor();
+  assert.equal((await v.post('/api/public/activation-drafts', draftBody({ isAdmin: true }))).status, 422);
+  assert.equal((await v.post('/api/public/activation-drafts', draftBody({ primaryColor: 'rojo' }))).status, 422);
+  const falso = 'data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>padding-padding').toString('base64');
+  assert.equal((await v.post('/api/public/activation-drafts', draftBody({ logoDataUrl: falso }))).status, 422);
+  assert.equal((await v.post('/api/public/activation-drafts', draftBody({ stampsRequired: 99 }))).status, 422);
+  await resetRateLimits();
+  let last = 0;
+  for (let i = 0; i < 12; i++) last = (await v.post('/api/public/activation-drafts', draftBody())).status;
+  assert.equal(last, 429, 'después de 10 por hora se limita');
+  await resetRateLimits();
+});
+
+test('T05/T19 sin sesión de administrador no se lee ni se crea nada con un borrador', async () => {
+  await resetRateLimits();
+  const v = visitor();
+  const d = await v.post('/api/public/activation-drafts', draftBody());
+  assert.ok([401, 403].includes((await v.get(`/api/admin/activation-drafts/${d.json.ref}`)).status));
+  const c = await v.post('/api/admin/businesses', wizard({ name: 'Intruso Toluca', draftRef: d.json.ref }));
+  assert.ok([401, 403].includes(c.status));
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = 'Intruso Toluca'")).rows[0].n, 0);
+  // la referencia no da permisos ni siquiera con otra sesión no administrativa
+  assert.ok([401, 403, 404].includes((await visitor().get('/api/admin/overview')).status));
+});
+
+test('T06/T09/T10/T22 el administrador recupera el borrador, crea UN negocio y no puede repetirlo', async () => {
+  await resetRateLimits();
+  const U = `Café Único ${randomUUID().slice(0, 6)} Toluca`, R = `Café Repetido ${randomUUID().slice(0, 6)} Toluca`;
+  const d = await visitor().post('/api/public/activation-drafts', draftBody({ name: U }));
+  const got = await A.get(`/api/admin/activation-drafts/${d.json.ref}`);
+  assert.equal(got.status, 200, JSON.stringify(got.json));
+  assert.equal(got.json.draft.name, U); assert.equal(got.json.draft.logoFit.plate, 'dark'); assert.equal(got.json.draft.stampsRequired, 8);
+  assert.equal((await A.get('/api/admin/activation-drafts/no-existe')).status, 404);
+  assert.equal((await A.get(`/api/admin/activation-drafts/${'a'.repeat(43)}`)).status, 404);
+  // doble clic simultáneo: exactamente un 201 y un 409
+  const body = wizard({ name: U, logoDataUrl: PNG1, logoFit: FIT, cardFinish: 'silver', draftRef: d.json.ref });
+  const [x, y] = await Promise.all([A.post('/api/admin/businesses', body), A.post('/api/admin/businesses', body)]);
+  assert.deepEqual([x.status, y.status].sort(), [201, 409], JSON.stringify([x.json, y.json]));
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = $1", [U])).rows[0].n, 1);
+  // ya consumido: ni se lee ni se repite
+  assert.equal((await A.get(`/api/admin/activation-drafts/${d.json.ref}`)).status, 410);
+  assert.equal((await A.post('/api/admin/businesses', wizard({ name: R, draftRef: d.json.ref }))).status, 409);
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = $1", [R])).rows[0].n, 0);
+  // T14: el logo y el acabado quedaron en el negocio
+  const biz = (x.status === 201 ? x : y).json;
+  const det = (await A.get(`/api/admin/businesses/${biz.businessId}`)).json;
+  assert.equal(det.cardFinish, 'silver'); assert.ok(det.logoDataUrl); assert.equal(det.logoFit.plate, 'dark');
+});
+
+test('T21 un borrador vencido no se puede leer ni activar', async () => {
+  await resetRateLimits();
+  const d = await visitor().post('/api/public/activation-drafts', draftBody({ name: 'Café Vencido Toluca' }));
+  await db.query("UPDATE activation_drafts SET created_at = now() - interval '3 days', expires_at = now() - interval '1 day' WHERE data->>'name' = 'Café Vencido Toluca'");
+  assert.equal((await A.get(`/api/admin/activation-drafts/${d.json.ref}`)).status, 410);
+  assert.equal((await A.post('/api/admin/businesses', wizard({ name: 'Café Vencido Toluca', draftRef: d.json.ref }))).status, 410);
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = 'Café Vencido Toluca'")).rows[0].n, 0);
+});
+
+test('el alta con un borrador falso no crea negocio (la transacción se revierte)', async () => {
+  const r = await A.post('/api/admin/businesses', wizard({ name: 'Falso Borrador Toluca', draftRef: 'x'.repeat(43) }));
+  assert.ok([404, 409, 410, 422].includes(r.status));
+  assert.equal((await db.query("SELECT count(*)::int n FROM businesses WHERE name = 'Falso Borrador Toluca'")).rows[0].n, 0);
 });

@@ -12,6 +12,23 @@ export const config = {
   isProduction: process.env.NODE_ENV === 'production',
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || 'http://localhost:8787').replace(/\/$/, ''),
   publicBaseUrlExplicit: !!process.env.PUBLIC_BASE_URL,
+  // V0.4 · Origen PÚBLICO de la app para los enlaces que se entregan a negocios y clientes (tarjeta, caja,
+  // panel e invitaciones). Sirve cuando el Control Center vive en un despliegue protegido por Vercel
+  // Authentication y la parte comercial en otro público. Debe ser https:// (o http://localhost en pruebas).
+  // En producción solo se acepta https (http únicamente para localhost); si no cumple, se ignora.
+  publicAppUrl: (() => {
+    const v = (process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+    if (!/^https?:\/\/[a-z0-9.:-]+$/i.test(v)) return '';
+    if (process.env.NODE_ENV === 'production' && v.startsWith('http://') && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v)) return '';
+    return v;
+  })(),
+  // V0.4.4 · Origen del Control Center al que la parte pública envía a VLUX para activar un diseño (otro proyecto de Vercel).
+  adminAppUrl: (() => {
+    const v = (process.env.ADMIN_APP_URL || '').replace(/\/$/, '');
+    if (!/^https?:\/\/[a-z0-9.:-]+$/i.test(v)) return '';
+    if (process.env.NODE_ENV === 'production' && v.startsWith('http://') && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(v)) return '';
+    return v;
+  })(),
   onVercel: process.env.VERCEL === '1',
   poolMax: Math.max(1, Math.min(20, Number(process.env.PG_POOL_MAX) || (process.env.VERCEL === '1' ? 3 : 10))),
   allowUnsafeDbRole: process.env.ALLOW_UNSAFE_DB_ROLE === '1',
@@ -19,6 +36,9 @@ export const config = {
   platformAdminToken: process.env.PLATFORM_ADMIN_TOKEN || '',
   privacyNoticeVersion: process.env.PRIVACY_NOTICE_VERSION || 'borrador-2026-10',
   staffSessionHours: 12,
+  /** V0.4.2: acceso de demostración (solo proyecto público de demostración). */
+  get demoAccess() { return process.env.DEMO_ACCESS === '1'; },
+  get demoBusinessSlug() { return /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(process.env.DEMO_BUSINESS_SLUG || '') ? (process.env.DEMO_BUSINESS_SLUG as string) : 'vlux-demo'; },
   // V0.3 · Control Center. En producción (NODE_ENV=production, incluido Vercel) solo se activa con
   // CONTROL_CENTER_ENABLED=1 (proyecto interno). En desarrollo y pruebas está activo salvo CONTROL_CENTER_ENABLED=0.
   get controlCenterEnabled() {

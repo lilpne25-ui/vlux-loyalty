@@ -88,6 +88,6 @@ test('canjear sin premio disponible no hace nada', () => {
 
 test('validación de reglas', () => {
   assert.equal(validateRules(DEFAULT_RULES), null);
-  assert.match(validateRules({ ...DEFAULT_RULES, stampsRequired: 2 })!, /entre 3 y 15/);
+  assert.match(validateRules({ ...DEFAULT_RULES, stampsRequired: 2 })!, /entre 3 y 20/);
   assert.match(validateRules({ ...DEFAULT_RULES, visitWindowMinutes: 5 })!, /ventana/);
 });

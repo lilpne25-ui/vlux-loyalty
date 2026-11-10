@@ -1,0 +1,152 @@
+ok 1 - login correcto crea sesión con cookie HttpOnly; incorrecto devuelve 401 genérico
+ok 2 - bloqueo temporal tras 5 contraseñas incorrectas
+ok 3 - sin sesión no hay acceso a caja ni panel
+ok 4 - un empleado NO puede entrar al panel del dueño ni a su configuración
+ok 5 - un empleado no puede operar tarjetas de otro negocio
+ok 6 - desactivar a un empleado revoca su sesión de inmediato
+ok 7 - logout invalida la sesión en el servidor
+ok 8 - el cliente solo ve su tarjeta y no tiene acceso a caja
+ok 9 - el enlace personal abre la tarjeta en otro teléfono
+ok 10 - CSRF: mutaciones sin JSON u origen ajeno se rechazan
+ok 11 - API heredada de plataforma: apagada por omisión y, encendida, exige token
+ok 12 - solicitudes demasiado grandes se rechazan
+ok 13 - registro masivo desde la misma IP se limita
+ok 14 - sin aceptar el aviso de privacidad no hay registro
+ok 15 - las respuestas no exponen hashes ni tokens de sesión
+ok 16 - 2 cafés en una compra (modo por artículo) = 2 sellos, 1 compra, 1 visita
+ok 17 - segunda compra en la misma visita: suma sellos pero no visitas
+ok 18 - una visita en otro día cuenta como regreso (recurrencia)
+ok 19 - idempotencia: la misma llave enviada 2 veces registra 1 sola compra
+ok 20 - idempotencia con 10 solicitudes simultáneas idénticas: 1 compra
+ok 21 - doble toque con llaves distintas: el segundo pide confirmación (no suma)
+ok 22 - el cliente no puede agregarse sellos ni canjear
+ok 23 - 8 compras desbloquean la recompensa; el cliente la ve; se canjea una vez
+ok 24 - canje concurrente: 10 intentos simultáneos consumen la recompensa 1 sola vez
+ok 25 - compras y canje concurrentes en la misma tarjeta mantienen el saldo íntegro
+ok 26 - el excedente pasa al siguiente ciclo
+ok 27 - QR de recompensa identifica la tarjeta; códigos inválidos se rechazan sin revelar datos
+ok 28 - bajar la meta desbloquea premios en tarjetas que ya la alcanzan; los ganados conservan su costo
+ok 29 - invitación a reseña: desde la 2a visita, una vez, sin premio
+ok 30 - derechos ARCO: exportar y anonimizar al cliente revoca su acceso
+ok 31 - todas las funciones de public tienen search_path fijo (asesor 0011 de Supabase)
+ok 32 - ninguna función de public es ejecutable por PUBLIC; vlux_app conserva solo las suyas
+ok 33 - los disparadores siguen funcionando para vlux_app sin EXECUTE (logo_hash y updated_at)
+ok 34 - bitácoras de solo inserción: ni el dueño del esquema puede modificarlas fuera de la purga
+ok 35 - ops/grants.sql reproduce exactamente los permisos de una base recién migrada (restauración --no-privileges)
+ok 36 - serie diaria del tablero: cuenta por día local de México y excluye anuladas y días fuera del rango
+ok 37 - funciones congeladas: con FEATURE_*=0 la promoción y la cita se rechazan y la operación normal sigue
+ok 38 - cliente y tarjeta persisten y se recuperan desde una sesión independiente
+ok 39 - RLS: sin negocio fijado no se ve ninguna tarjeta
+ok 40 - RLS: un negocio no ve ni puede escribir datos de otro
+ok 41 - una tarjeta no puede apuntar a un cliente de otro negocio (FK compuesta)
+ok 42 - saldo negativo y dos recompensas disponibles se rechazan en BD
+ok 43 - la app no puede borrar ni editar auditoría
+ok 44 - pooler: conexiones reutilizadas no filtran el negocio de una transacción a otra
+ok 45 - pooler: el negocio A no puede leer, modificar, comprar ni canjear en el negocio B
+ok 46 - errores de conexión: reintenta y falla de forma controlada, sin tumbar el proceso
+ok 47 - rol de BD inseguro: en producción la app se niega a operar como superusuario
+ok 48 - rate limit compartido: dos instancias distintas suman al mismo contador
+ok 49 - login: el bloqueo de cuenta responde igual que el límite por IP (no revela si el correo existe)
+ok 50 - anular compra: quita sellos, queda auditada, no cuenta en el panel y no se anula dos veces
+ok 51 - anular compra: invalida el premio si ya no alcanza, y se rechaza si los sellos ya se canjearon
+ok 52 - cambio de contraseña: exige la actual, cierra las otras sesiones y la nueva funciona
+ok 53 - restablecimiento: el dueño emite un enlace de un solo uso para su empleado
+ok 54 - enlace de tarjeta: reemitirlo revoca el anterior
+ok 55 - todas las tablas de la app tienen RLS activo y el rol de la app no es dueño ni BYPASSRLS
+ok 56 - respuestas de API y enlace /t no se guardan en caché
+ok 57 - vincular: sin tarjeta en este navegador no se puede generar código
+ok 58 - vincular: la app instalada abre la MISMA tarjeta con el código; Safari sigue funcionando
+ok 59 - vincular: el código sirve una sola vez, caduca y es exclusivo del negocio
+ok 60 - vincular: un código nuevo invalida el anterior; formato inválido 422; solo se guarda el hash
+ok 61 - vincular: límite de intentos por IP (fuerza bruta)
+ok 62 - manifiesto: válido, por negocio, público y sin datos personales
+ok 63 - íconos: PNG con el tamaño correcto, caché pública y rutas acotadas
+ok 64 - revisión MSA: ícono en caché de CDN y memoria; códigos aislados por negocio (RLS)
+ok 65 - revisión MSA: un número ya usado puede volver a emitirse (índice único solo entre códigos abiertos)
+ok 66 - primer administrador: requiere el código de instalación y solo funciona una vez
+ok 67 - sin segundo factor no hay acceso; alta de TOTP con códigos de recuperación
+ok 68 - inicio de sesión con TOTP: código incorrecto, repetido (replay) y de recuperación de un solo uso
+ok 69 - sesiones: se listan, se revocan y una sesión revocada deja de servir
+ok 70 - bloqueo tras 5 contraseñas incorrectas (sin revelar si el correo existe)
+ok 71 - el personal de un negocio no entra al Control Center y el Control Center apagado responde 404
+ok 72 - asistente: crea negocio + reglas + suscripción + invitación en una sola operación
+ok 73 - asistente: logotipo y datos inválidos se rechazan
+ok 74 - invitación: se inspecciona, se acepta una sola vez y abre la sesión del dueño
+ok 75 - invitación: vencida (410), revocada (404) y reenviada (la anterior deja de servir)
+ok 76 - cuenta existente: se vincula solo con su contraseña actual, nunca se sobrescribe; intentos limitados
+ok 77 - selector: con varios negocios no se elige el primero en silencio; se puede cambiar de negocio
+ok 78 - aislamiento (J): el dueño del segundo negocio no ve datos del primero
+ok 79 - dueño invita empleados por enlace (solo EMPLEADO, nunca DUEÑO)
+ok 80 - suscripción manual: estados comerciales sin cobros ni suspensión automática
+ok 81 - suspender exige confirmación y motivo, corta sesiones y la página pública; reactivar restaura
+ok 82 - métricas: demo y reales por separado; conteos correctos por negocio
+ok 83 - métricas globales: la función de estadísticas solo la puede ejecutar la app, no anon/public
+ok 84 - 2FA: los fallos no se reinician al volver a iniciar sesión; al 5.º se bloquea y se revocan las sesiones previas
+ok 85 - el dueño no puede reemplazar la invitación de co-dueño emitida por VLUX; aceptar no degrada a un miembro activo
+ok 86 - acabado de tarjeta: por omisión silver (V0.4.3), se guarda y rechaza valores inválidos
+ok 87 - logotipo: el servidor valida los bytes reales, no solo el prefijo del navegador
+ok 88 - T21 el Estudio/asistente guarda acabado, ajuste del logo y original; el original no se expone
+ok 89 - logo_fit se sanea: valores fuera de rango se acotan y la basura se descarta
+ok 90 - T22 el ajuste de un negocio no afecta a otro y se puede restaurar (editar sin ajuste)
+ok 91 - el original conservado también valida bytes reales (no acepta SVG disfrazado)
+ok 92 - T03 un visitante sin sesión puede preparar un borrador (solo guarda un diseño)
+ok 93 - borrador: rechaza basura, campos extra, imágenes falsas y exceso de tasa
+ok 94 - T05/T19 sin sesión de administrador no se lee ni se crea nada con un borrador
+ok 95 - T06/T09/T10/T22 el administrador recupera el borrador, crea UN negocio y no puede repetirlo
+ok 96 - T21 un borrador vencido no se puede leer ni activar
+ok 97 - el alta con un borrador falso no crea negocio (la transacción se revierte)
+ok 98 - accessLinks arma las tres direcciones y no incluye credenciales
+ok 99 - endpoint público de accesos: tres direcciones por negocio, sin tokens
+ok 100 - logotipo: se sirve versionado y en caché largo; sin logo no hay URL
+ok 101 - logotipo: la base rechaza SVG y un negocio suspendido no sirve el suyo
+ok 102 - la tarjeta del cliente incluye la URL del logotipo
+ok 103 - manifiestos de Panel y Caja: acceso directo con la marca, sin permisos
+ok 104 - RLS businesses: sin contexto o con otro negocio no se puede actualizar; con el propio sí
+ok 105 - hash de logotipo: lo calcula la base al escribir y la API pública lo usa sin recalcular
+ok 106 - acceso de demostración: apagado por omisión; encendido solo abre cuentas reservadas del negocio sintético
+ok 107 - el login normal no abre las cuentas reservadas de demostración (contraseña desconocida)
+ok 108 - el Control Center sigue apagado sin CONTROL_CENTER_ENABLED en producción y /api/admin no existe en el público
+ok 109 - T10–T11: la invitación y su correo pendiente se guardan juntos; la plantilla no lleva contraseñas
+ok 110 - T12–T13: envío con proveedor simulado registra "aceptado por proveedor" (no "entregado")
+ok 111 - T14: un fallo del proveedor queda "fallido" y el reintento usa el MISMO enlace sin crear otra invitación
+ok 112 - T15–T17: revocar borra el token guardado; aceptar funciona una vez y no se reenvía después
+ok 113 - sin proveedor configurado: no se envía nada y la UI conserva el enlace para copiar
+ok 114 - T01–T04: crear, editar, suspender y reactivar siguen funcionando
+ok 115 - T05–T06: archivar saca de operación y de métricas; restaurar vuelve a suspendido
+ok 116 - T07: la vista previa muestra conteos, personal compartido y bloqueos; sin efectos
+ok 117 - T08–T09: eliminación segura de un negocio sintético; el personal compartido se conserva
+ok 118 - un negocio de demostración archivado se elimina sin declaración; ruta protegida sin 2FA
+ok 119 - T18: sellos por compra (comportamiento V0.4.4 intacto) y desbloqueo al llegar a la meta
+ok 120 - T19: sellos por visita: varias compras en la misma visita cuentan una sola vez
+ok 121 - T20: sellos por servicio: solo servicios participantes y con tope por operación
+ok 122 - puntos por consumo: monto → puntos, con tope; sin monto se rechaza
+ok 123 - T21–T22: nueva versión del programa sin invalidar premios ganados; historial conservado
+ok 124 - T23–T24: sin doble acumulación (idempotencia y guardia de duplicado) ni doble canje (en paralelo)
+ok 125 - límite diario y vigencia del programa
+ok 126 - cambiar entre sellos y puntos con tarjetas en progreso se bloquea; sin progreso se permite
+ok 127 - T25–T30: alta de negocios de los 16 giros del catálogo con su plantilla sugerida
+ok 128 - T01: los enlaces permanentes (panel, caja, acceso, clientes) no llevan credenciales y apuntan al negocio correcto
+ok 129 - T02: renovar una invitación pendiente genera un token NUEVO e invalida el anterior
+ok 130 - T03: una invitación consumida nunca vuelve a mostrar su token; el dueño activado recibe su enlace permanente
+ok 131 - T04: activación en persona: código de un solo uso, 30 min, resistente a adivinanzas
+ok 132 - T05: restablecer contraseña desde el Control Center: enlace de un solo uso; nunca se muestra la contraseña
+ok 133 - T06: sin cuentas duplicadas; T07: un empleado nunca obtiene acceso de dueño
+ok 134 - T08–T11 (servidor): manifiesto del panel por negocio, íconos propios y entrada solo al negocio correcto
+ok 135 - T14: configuración por variables de entorno; incompleta = no configurado (sin valores fijos en el código)
+ok 136 - T15: TLS con verificación real: CA desconocida o nombre de host distinto = rechazo (no se reintenta)
+ok 137 - T16: con la CA correcta: STARTTLS + autenticación, Message-ID determinista y estado "aceptado por el servidor"
+ok 138 - T17–T18: rechazo temporal (4xx) se reintenta; rechazo permanente (5xx) no; servidor caído = reintento
+ok 139 - T19: invitación por SMTP desde el Control Center: queda "aceptado", la entrega final no se inventa
+ok 140 - T20: sin llaves VAPID las notificaciones quedan apagadas; con llaves se publica solo la llave pública
+ok 141 - T21: suscribirse exige la tarjeta del cliente, un servicio push conocido y al menos una categoría; nada se activa solo
+ok 142 - T22: recompensa lista y "casi lo logras" llegan cifradas, sin datos personales y con enlace a la tarjeta
+ok 143 - T23: sin duplicados (llave por recompensa) y reintento acotado ante fallas temporales
+ok 144 - T24: aislamiento entre negocios: un negocio jamás envía a suscriptores de otro (RLS)
+ok 145 - T25: el cliente cambia categorías o desactiva todo; un endpoint vencido (410) se desactiva solo
+ok 146 - T26: horas de silencio posponen, tope semanal de recordatorios y máximo 2 promociones en 30 días
+ok 147 - T27: "te extrañamos" una sola vez por ausencia y recordatorio de cita genérico 20–28 h antes; anonimizar apaga avisos
+ok 148 - T28–T31: ubicación pública del negocio, cálculo en el teléfono, sin endpoint para la ubicación del cliente
+# tests 148
+# pass 148
+# fail 0
+# duration_ms 35446.323838

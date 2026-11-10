@@ -27,11 +27,13 @@ export const acceptAdminInviteSchema = z.object({ token: z.string().min(20).max(
 const invalid = () => new AppError(401, 'invalid_credentials', 'Correo o contraseña incorrectos.');
 
 /** Bitácora global de la plataforma. Nunca recibe contraseñas, tokens ni códigos. */
-export async function platformAudit(q: Tx | ReturnType<typeof getPool>, adminId: string | null, action: string, opts: { businessId?: string | null; entityType?: string; entityId?: string | null; details?: Record<string, unknown> } = {}) {
-  await q.query(
-    'INSERT INTO platform_audit_events (admin_id, action, business_id, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5, $6)',
-    [adminId, action, opts.businessId ?? null, opts.entityType ?? null, opts.entityId ?? null, JSON.stringify(opts.details ?? {})],
-  );
+export async function platformAudit(conn: Tx | ReturnType<typeof getPool>, adminId: string | null, action: string, opts: { businessId?: string | null; entityType?: string; entityId?: string | null; details?: Record<string, unknown> } = {}) {
+  const sql = 'INSERT INTO platform_audit_events (admin_id, action, business_id, entity_type, entity_id, details) VALUES ($1, $2, $3, $4, $5, $6)';
+  const params = [adminId, action, opts.businessId ?? null, opts.entityType ?? null, opts.entityId ?? null, JSON.stringify(opts.details ?? {})];
+  // 0016: la bitácora es de solo escritura (INSERT abierto, lectura solo con alcance platform). Una conexión suelta del pool
+  // no puede asumir contexto, así que se escribe dentro de una transacción corta.
+  if ('release' in conn) await conn.query(sql, params);
+  else await withTx((tx) => tx.query(sql, params));
 }
 
 // ---------- Primer administrador ----------
@@ -257,6 +259,31 @@ export async function setAdminDisabled(s: AdminSession, adminId: string, disable
     await platformAudit(tx, s.adminId, disabled ? 'admin.disabled' : 'admin.enabled', { entityType: 'platform_admin', entityId: adminId });
     return { ok: true };
   });
+}
+
+/**
+ * V0.4.5 · Reverificación 2FA para operaciones peligrosas (eliminar un negocio, declarar datos sintéticos).
+ * Exige un código TOTP NUEVO (no reutilizable) aunque la sesión ya esté verificada. Cuenta como fallo de 2FA.
+ */
+export async function verifyStepUp(s: AdminSession, code: unknown, purpose: string) {
+  const clean = typeof code === 'string' ? code.replace(/\s/g, '') : '';
+  if (!/^\d{6}$/.test(clean)) throw new AppError(422, 'validation', 'Escribe el código de 6 dígitos de tu app de autenticación.');
+  const ok = await withTx(async (tx) => {
+    const a = (await tx.query('SELECT totp_secret_enc, totp_last_step, mfa_failures, locked_until FROM platform_admins WHERE id = $1 FOR UPDATE', [s.adminId])).rows[0];
+    if (!a?.totp_secret_enc) return false;
+    if (a.locked_until && new Date(a.locked_until) > new Date()) throw new AppError(429, 'rate_limited', 'Demasiados intentos. Espera un momento y vuelve a intentar.');
+    const step = verifyTotp(decryptSecret(a.totp_secret_enc), clean);
+    if (step !== null && step > Number(a.totp_last_step)) {
+      await tx.query('UPDATE platform_admins SET totp_last_step = $2, mfa_failures = 0 WHERE id = $1', [s.adminId, step]);
+      return true;
+    }
+    const n = Number(a.mfa_failures) + 1;
+    await tx.query(`UPDATE platform_admins SET mfa_failures = $2::int, locked_until = CASE WHEN $2::int >= $3::int THEN now() + make_interval(mins => $4) ELSE locked_until END WHERE id = $1`,
+      [s.adminId, n, MAX_FAILED, LOCK_MINUTES]);
+    await platformAudit(tx, s.adminId, 'admin.stepup_failed', { details: { purpose, failures: n } });
+    return false;
+  });
+  if (!ok) throw new AppError(401, 'invalid_code', 'El código no es correcto o ya se usó. Espera el siguiente código.');
 }
 
 export const requireMfa = (s: AdminSession | null) => {

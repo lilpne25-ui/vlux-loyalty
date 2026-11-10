@@ -22,11 +22,14 @@ function serviceWorker(): Plugin {
 
 // El frontend se sirve desde el mismo servidor Node que la API (un solo despliegue).
 // En desarrollo, Vite reenvía /api y /t al servidor local.
+const APP_VERSION = JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8')).version as string;
+
 export default defineConfig(({ command }) => ({
   plugins: [serviceWorker()],
   oxc: { jsx: { runtime: 'automatic', development: command !== 'build' } },
   // El build siempre usa React de producción, aunque NODE_ENV del shell diga otra cosa (.env de desarrollo).
-  define: command === 'build' ? { 'process.env.NODE_ENV': JSON.stringify('production') } : undefined,
+  // 1.0.x · __APP_VERSION__ viaja en «Reportar problema» (sale de package.json, igual que APP_VERSION del servidor).
+  define: command === 'build' ? { 'process.env.NODE_ENV': JSON.stringify('production'), __APP_VERSION__: JSON.stringify(APP_VERSION) } : { __APP_VERSION__: JSON.stringify(APP_VERSION) },
   server: {
     port: 5173,
     proxy: { '/api': 'http://localhost:8787', '/t': 'http://localhost:8787' },

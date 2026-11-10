@@ -20,16 +20,16 @@ Mejoras de V0.3 en la rama `v0.3`:
 | Punto | Estado real | Cómo se comprobó |
 | :- | :- | :- |
 | Plan de Supabase | Free, sin respaldos del proveedor | Organización en Supabase (Free, 2 proyectos activos) |
-| Workflow `respaldo-diario.yml` | Existe en las ramas `v0.2.1` y `v0.2.2`, **no en `main`** | `git ls-tree origin/main` no tiene `.github/workflows` |
-| Programación diaria | **No corre**: GitHub solo programa workflows de la rama principal | La API de Actions responde 404 para ese workflow (nunca se ha ejecutado) |
-| Secretos `SUPABASE_BACKUP_URL` y `BACKUP_PASSPHRASE` | **No verificable desde esta sesión** (el proxy bloquea la lectura de secretos); Vlux no ha confirmado haberlos creado | — |
+| Workflow `respaldo-diario.yml` | **En `main`** desde el 2026-11-01 (PR #1, fusión autorizada por Vlux) | La API de Actions lo lista como activo |
+| Programación diaria | Programada a las 03:17 (centro de México), pero **falla** mientras no existan los secretos | Ejecución manual 41267800663 (2026-11-01): falla en «Verificar secretos»; el aviso de falla corrió |
+| Secretos `SUPABASE_BACKUP_URL` y `BACKUP_PASSPHRASE` | **No existen** (o están vacíos) | Ejecución 41267800663 falla en «Verificar secretos» |
 | Almacenamiento y retención | Artefacto cifrado AES-256 en GitHub Actions, 30 días (al activarse) | Definido en el workflow |
 | Prueba de restauración | **Hecha en entorno aislado local con datos sintéticos**: VERIFICADO | `docs/evidencia/v022-respaldo-restauracion-local.txt` |
 | Restauración desde Supabase | **No hecha** | Requiere la conexión de administración, que no se usa desde esta sesión |
 
 **Conclusión: el respaldo del Preview NO está operativo.** Se marcará operativo solo cuando exista una ejecución verde del workflow contra Supabase con su artefacto.
 
-Lo que falta, en orden: (1) fusionar `v0.2.2` en `main`; (2) crear los dos secretos en GitHub; (3) *Run workflow* y revisar que termine en verde.
+Lo que falta, en orden: (1) ~~fusionar en `main`~~ hecho el 2026-11-01; (2) crear los dos secretos en GitHub; (3) *Run workflow* y revisar que termine en verde.
 
 ## Estrategia
 1. **Pro:** respaldo diario administrado por Supabase (7 días). PITR (100 USD/mes por 7 días) no se justifica todavía.

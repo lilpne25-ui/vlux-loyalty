@@ -61,7 +61,7 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
   await owner.fill('#emp-email', `caja@${slug}.e2e.test`);
   await owner.getByRole('tab', { name: 'Contraseña temporal' }).click(); // V0.3: por omisión se invita por enlace
   await owner.fill('#emp-pass', PASSWORD);
-  await owner.click('button:has-text("Agregar")');
+  await owner.click('button:text-is("Agregar")');
   await owner.waitForSelector(`text=caja@${slug}.e2e.test`);
   ok('02 alta de empleado desde el panel del dueño', true);
   await shot(owner, 'v02-03-dueno-equipo');
@@ -69,7 +69,7 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
   // DISPOSITIVO 1: cliente en su teléfono, llega por el QR del mostrador
   const custCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const cust = await custCtx.newPage(); watch(cust, 'cliente');
-  await owner.click('[role=tab]:has-text("QR del mostrador")');
+  await owner.click('[role=tab]:has-text("Accesos")');
   const counterUrl = (await owner.locator('p.font-mono').first().textContent()).trim();
   ok('05a QR del mostrador apunta a la URL pública de registro', counterUrl === `${BASE}/n/${slug}`, counterUrl);
   await shot(owner, 'v02-04-qr-mostrador');

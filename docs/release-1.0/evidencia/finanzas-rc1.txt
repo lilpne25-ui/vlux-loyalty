@@ -1,0 +1,8 @@
+Fijo base: 874 MXN/mes
+
+| 299 | 15 min | comisión 17.96 | contribución 219 | equilibrio 5 | recupera CAC+alta en 10.3 meses | -656 (-219%) | 219 (15%) | 1,311 (44%) | 10,053 (67%) | 20,887 (70%) | 63,299 (71%) |
+| 299 | 30 min | comisión 17.96 | contribución 156 | equilibrio 6 | recupera CAC+alta en 14.4 meses | -718 (-240%) | -94 (-6%) | 686 (23%) | 6,928 (46%) | 14,637 (49%) | 44,549 (50%) |
+| 299 | 60 min | comisión 17.96 | contribución 31 | equilibrio 29 | recupera CAC+alta en 72.5 meses | -843 (-282%) | -719 (-48%) | -564 (-19%) | 678 (5%) | 2,137 (7%) | 7,049 (8%) |
+| 499 | 15 min | comisión 27.65 | contribución 409 | equilibrio 3 | recupera CAC+alta en 5.5 meses | -465 (-93%) | 1,170 (47%) | 3,214 (64%) | 19,568 (78%) | 39,918 (80%) | 120,393 (80%) |
+| 499 | 30 min | comisión 27.65 | contribución 346 | equilibrio 3 | recupera CAC+alta en 6.5 meses | -528 (-106%) | 858 (34%) | 2,589 (52%) | 16,443 (66%) | 33,668 (67%) | 101,643 (68%) |
+| 499 | 60 min | comisión 27.65 | contribución 221 | equilibrio 4 | recupera CAC+alta en 10.2 meses | -653 (-131%) | 233 (9%) | 1,339 (27%) | 10,193 (41%) | 21,168 (42%) | 64,143 (43%) |

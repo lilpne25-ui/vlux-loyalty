@@ -100,6 +100,18 @@ function Guide({ platform, slug, businessName, open, onClose }: { platform: Inst
   );
 }
 
+/** Ilustración: un teléfono donde el ícono de la tarjeta "cae" en la pantalla de inicio (CSS, sin imágenes). */
+function PhoneArt() {
+  return (
+    <span className="phone-art shrink-0" aria-hidden="true">
+      <span className="phone-art-screen">
+        {[0, 1, 2, 3, 4, 5].map((i) => <i key={i} />)}
+        <b className="phone-art-icon" />
+      </span>
+    </span>
+  );
+}
+
 /** Sección de la tarjeta: invita a guardarla en la pantalla de inicio. Se oculta dentro de la app instalada. */
 export function SaveCardPanel({ slug, businessName }: { slug: string; businessName: string }) {
   const install = useInstallState();
@@ -120,11 +132,11 @@ export function SaveCardPanel({ slug, businessName }: { slug: string; businessNa
 
   return (
     <section className="rounded-2xl bg-white border border-cafe-line p-5" aria-labelledby="save-title" data-testid="save-card">
-      <div className="flex items-start gap-3">
-        <div className="h-10 w-10 shrink-0 rounded-full bg-cafe-cream inline-flex items-center justify-center text-cafe-ink"><Smartphone size={18} /></div>
+      <div className="flex items-center gap-4">
+        <PhoneArt />
         <div className="min-w-0">
-          <h3 id="save-title" className="text-[15px] font-medium text-cafe-ink">Guarda tu tarjeta</h3>
-          <p className="text-[13.5px] text-cafe-body mt-0.5">Ten tus recompensas siempre a la mano.</p>
+          <h3 id="save-title" className="font-display text-[19px] leading-tight text-cafe-ink">Llévala en tu teléfono</h3>
+          <p className="text-[13.5px] text-cafe-body mt-1 leading-snug">Un ícono en tu pantalla de inicio y tus sellos siempre a un toque.</p>
         </div>
       </div>
       {done ? (
@@ -135,7 +147,7 @@ export function SaveCardPanel({ slug, businessName }: { slug: string; businessNa
       ) : (
         <>
           <Button variant="brand" className="mt-4 w-full" onClick={onAdd} data-testid="add-to-phone"><Download size={16} /> Agregar a mi teléfono</Button>
-          <p className="mt-2 text-center text-[11.5px] text-cafe-muted">Sin descargar aplicaciones de la tienda.</p>
+          <p className="mt-2 text-center text-[11.5px] text-cafe-muted" data-testid="install-hint">{platform === 'ios-safari' ? 'En iPhone: Compartir → Agregar a pantalla de inicio. Te lo explicamos paso a paso.' : platform === 'ios-other' ? 'En iPhone funciona mejor desde Safari. Te decimos cómo.' : 'Sin descargar aplicaciones de la tienda.'}</p>
         </>
       )}
       <Guide platform={platform} slug={slug} businessName={businessName} open={guide} onClose={() => setGuide(false)} />

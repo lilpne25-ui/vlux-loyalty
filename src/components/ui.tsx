@@ -118,13 +118,13 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function CopyButton({ text, className, dark }: { text: string; className?: string; dark?: boolean }) {
+export function CopyButton({ text, className, dark, touch }: { text: string; className?: string; dark?: boolean; touch?: boolean }) {
   const toast = useToast();
   const [done, setDone] = useState(false);
   return (
     <button
       type="button"
-      className={cx('inline-flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-[12.5px] font-medium transition', dark ? 'text-[var(--cream)] hover:bg-white/10' : 'text-slate2 hover:bg-black/5 hover:text-ink', className)}
+      className={cx('inline-flex items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition', touch ? 'min-h-[44px]' : 'h-8', dark ? 'text-[var(--cream)] hover:bg-white/10' : 'text-slate2 hover:bg-black/5 hover:text-ink', className)}
       onClick={async () => {
         const ok = await copyText(text);
         if (ok) {
@@ -166,14 +166,21 @@ export function Field({ label, hint, error, children, htmlFor }: { label: React.
 export const inputCls = 'h-11 w-full rounded-xl border border-line bg-white px-3.5 text-[15px] text-ink placeholder:text-[#98A2B3] outline-none transition focus:border-[#98A2B3] focus:ring-4 focus:ring-[#67C7D3]/20';
 
 // ---------- Marcas ----------
-export function VluxMark({ className = '' }: { className?: string }) {
+/** Identidad oficial de VLUX (PNG originales de /brand, sin redibujar ni recolorear). tone="dark": isotipo + wordmark sobre fondo oscuro; "light"/"chip": isotipo dentro de pastilla negra + nombre. */
+export function VluxMark({ className = '', tone = 'light' }: { className?: string; tone?: 'dark' | 'light' | 'chip' }) {
+  // Logos oficiales (PNG con fondo translúcido, diseñados para superficies oscuras): sobre claro van dentro de una pastilla negra.
+  if (tone === 'dark') {
+    return (
+      <span className={cx('inline-flex items-center gap-1', className)} role="img" aria-label="VLUX">
+        <img src="/brand/vlux-isotipo.png" alt="" width="29" height="30" className="h-[30px] w-auto" />
+        <img src="/brand/vlux-wordmark.png" alt="" width="94" height="30" className="h-[30px] w-auto" />
+      </span>
+    );
+  }
   return (
     <span className={cx('inline-flex items-center gap-1.5 font-semibold tracking-[0.18em] text-[11px]', className)}>
-      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3 4h4.2L12 15.6 16.8 4H21l-7.4 16h-3.2z" fill="currentColor" />
-        <path d="M16.8 4H21l-1.6 3.5h-4.1z" fill="#67C7D3" />
-      </svg>
-      VLUX
+      <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#0E1013] overflow-hidden"><img src="/brand/vlux-isotipo.png" alt="" width="24" height="25" className="h-[24px] w-auto" /></span>
+      <span>VLUX</span>
     </span>
   );
 }
@@ -188,7 +195,11 @@ export function PoweredByVlux({ dark }: { dark?: boolean }) {
 }
 
 /** Monograma del negocio, construido con su nombre y colores. El grano de café solo aparece en cafeterías (data-vertical). */
-export function BusinessLogo({ name, size = 44, ring = true }: { name: string; size?: number; ring?: boolean }) {
+export function BusinessLogo({ name, size = 44, ring = true, src }: { name: string; size?: number; ring?: boolean; src?: string | null }) {
+  const [broken, setBroken] = useState(false);
+  if (src && !broken) {
+    return <img src={src} alt="" width={size} height={size} onError={() => setBroken(true)} className="shrink-0 rounded-full object-contain bg-white" style={{ width: size, height: size, padding: Math.round(size * 0.1) }} />;
+  }
   const initials = name
     .replace(/caf[eé]/i, '')
     .split(/\s+/)

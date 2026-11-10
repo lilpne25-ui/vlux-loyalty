@@ -1,25 +1,36 @@
 // Asistente "+ Nuevo negocio": 4 pasos. El servidor crea todo en una sola transacción
 // (negocio, programa, suscripción e invitación del dueño). No crea proyectos ni despliegues nuevos.
+import { EmailInviteBlock } from './EmailInvite';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Download, ExternalLink } from 'lucide-react';
 import { api, ApiError, type Vertical } from '../lib/api';
 import { navigate } from '../lib/router';
-import { VERTICAL_LABEL } from '../lib/vertical';
+import { VERTICAL_LABEL, isPoints, rewardSentence, stampRule, unitTitle, units } from '../lib/vertical';
+import { ProgramFields } from '../components/ProgramFields';
+import { DEFAULT_PROGRAM, formFromTemplate, previewProgram, programError, rulesFromForm, type ProgramForm } from '../lib/program-form';
+import { VERTICALS, VERTICAL_IDS, verticalInfo } from '../../shared/catalog';
 import { CopyButton, QRCode } from '../components/ui';
 import { CButton, CField, PLAN_LABEL, PageHeader, cx, money } from './kit';
 import { ColorField, LogoField } from './Businesses';
 import { LIMITS } from '../../shared/rules';
+import { LoyaltyCardFace } from '../components/LoyaltyCard';
+import { brandVars } from '../components/Brand';
+import { sanitizeFit, type LogoFit } from '../lib/logoFit';
+import { forgetRef, pendingRef, safeRef } from './Activation';
 
 type Plan = { code: 'piloto' | 'inicio' | 'crecimiento'; name: string; priceCents: number; currency: string };
-type Created = { businessId: string; slug: string; registrationUrl: string; ownerInvitation: { link: string; expiresAt: string } };
+type Created = { businessId: string; slug: string; registrationUrl: string; access?: { customerUrl: string; cashierUrl: string; ownerUrl: string }; ownerInvitation: { invitationId?: string; link: string; expiresAt: string }; email?: { state: 'configured' | 'mock' | 'not_configured' } };
 
-const PRESETS: Record<Vertical, { primary: string; accent: string; reward: string }> = {
-  cafeteria: { primary: '#2B1B14', accent: '#C9A15B', reward: 'Una bebida de cortesía' },
-  barberia: { primary: '#14181F', accent: '#B9C0C9', reward: 'Un corte de cortesía' },
-  salon: { primary: '#2A1626', accent: '#D8A7B1', reward: 'Un tratamiento de cortesía' },
-  restaurante: { primary: '#1B1F1A', accent: '#D9A441', reward: 'Un postre de cortesía' },
-  otro: { primary: '#111418', accent: '#67C7D3', reward: 'Un producto de cortesía' },
+const COLORS: Record<string, { primary: string; accent: string }> = {
+  cafeteria: { primary: '#2B1B14', accent: '#C9A15B' }, restaurante: { primary: '#1B1F1A', accent: '#D9A441' },
+  barberia: { primary: '#14181F', accent: '#B9C0C9' }, salon: { primary: '#2A1626', accent: '#D8A7B1' }, unas: { primary: '#2B1624', accent: '#E3A7C0' },
+  dentista: { primary: '#0F2230', accent: '#8FD3E8' }, consultorio: { primary: '#10232B', accent: '#7CC6C0' }, taller: { primary: '#17191C', accent: '#E0A43A' },
+  autolavado: { primary: '#0E1E33', accent: '#6FB7F2' }, gimnasio: { primary: '#141414', accent: '#C6F432' }, veterinaria: { primary: '#1C2A1E', accent: '#9ED39A' },
+  spa: { primary: '#22261F', accent: '#CDBA8E' }, optica: { primary: '#161B26', accent: '#B9C0C9' }, boutique: { primary: '#1D1518', accent: '#D9B26F' },
+  accesorios: { primary: '#191512', accent: '#D2B26B' }, otro: { primary: '#111418', accent: '#67C7D3' },
 };
+const PRESETS: Record<string, { primary: string; accent: string }> = Object.fromEntries(VERTICALS.map((v) => [v.id, COLORS[v.id] ?? COLORS.otro]));
+const programFor = (vertical: string, base: ProgramForm = DEFAULT_PROGRAM): ProgramForm => { const t = verticalInfo(vertical).templates[0]; return t ? formFromTemplate(t, base) : base; };
 
 const STEPS = ['Negocio', 'Programa', 'Plan', 'Resumen'];
 
@@ -30,31 +41,85 @@ export function Wizard() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [f, setF] = useState({
-    name: '', vertical: 'cafeteria' as Vertical, city: '', ownerName: '', ownerEmail: '', logoDataUrl: null as string | null,
-    primaryColor: PRESETS.cafeteria.primary, accentColor: PRESETS.cafeteria.accent,
-    stampsRequired: 8, stampMode: 'per_purchase' as 'per_purchase' | 'per_item', maxStampsPerPurchase: 3, visitWindowMinutes: 120,
-    rewardDescription: PRESETS.cafeteria.reward, reviewUrl: '',
+    name: '', vertical: 'cafeteria' as Vertical, city: '', ownerName: '', ownerEmail: '', logoDataUrl: null as string | null, logoFit: null as LogoFit | null, logoOriginalDataUrl: null as string | null,
+    primaryColor: PRESETS.cafeteria.primary, accentColor: PRESETS.cafeteria.accent, cardFinish: 'silver' as 'signature' | 'silver' | 'black',
+    reviewUrl: '',
     plan: 'piloto' as Plan['code'], price: '', pilotDays: 30, isDemo: false,
   });
+  const [prog, setProg] = useState<ProgramForm>(() => programFor('cafeteria'));
+  const [progTouched, setProgTouched] = useState(false);
+  // Brand Activation Draft del que viene el diseño (se consume en la creación; evita duplicados por reintento).
+  const [draftRef, setDraftRef] = useState<string | null>(null);
+  const [fromDesign, setFromDesign] = useState(false);
+  const [draftNote, setDraftNote] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
+  // Marca preparada en el Estudio de marca (solo sesión del navegador; se consume una vez).
+  useEffect(() => {
+    let handed = false;
+    try {
+      const raw = sessionStorage.getItem('vlux:studio');
+      if (raw) {
+        handed = true;
+        sessionStorage.removeItem('vlux:studio');
+        const v = JSON.parse(raw);
+        setDraftRef(safeRef(v.draftRef)); setFromDesign(true);
+        setDraftNote({ tone: 'ok', text: 'Diseño recuperado. Revisa los datos y completa lo que falta; puedes cambiar cualquier cosa antes de crear el negocio.' });
+        const hex = /^#[0-9a-f]{6}$/i;
+        setF((x) => ({
+          ...x,
+          name: typeof v.name === 'string' ? v.name.slice(0, 60) : x.name,
+          logoDataUrl: typeof v.logoDataUrl === 'string' && v.logoDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoDataUrl) ? v.logoDataUrl : x.logoDataUrl,
+          logoOriginalDataUrl: typeof v.logoOriginalDataUrl === 'string' && v.logoOriginalDataUrl.length < 90000 && /^data:image\/(png|jpeg|webp);base64,/.test(v.logoOriginalDataUrl) ? v.logoOriginalDataUrl : null,
+          vertical: VERTICAL_IDS.includes(v.vertical) ? v.vertical : x.vertical,
+          logoFit: sanitizeFit(v.logoFit) ?? x.logoFit,
+          primaryColor: hex.test(v.primaryColor) ? v.primaryColor : x.primaryColor,
+          accentColor: hex.test(v.accentColor) ? v.accentColor : x.accentColor,
+          cardFinish: v.cardFinish === 'signature' || v.cardFinish === 'black' ? v.cardFinish : 'silver',
+        }));
+        const vv = VERTICAL_IDS.includes(v.vertical) ? v.vertical : 'cafeteria';
+        setProg((p) => ({ ...programFor(vv, p), programType: 'stamps_purchase', stampMode: 'per_purchase', maxStampsPerPurchase: 1,
+          rewardDescription: typeof v.rewardDescription === 'string' && v.rewardDescription.trim().length >= 3 ? v.rewardDescription.slice(0, 80) : p.rewardDescription,
+          stampsRequired: Number.isInteger(v.stampsRequired) && v.stampsRequired >= 3 && v.stampsRequired <= 20 ? v.stampsRequired : p.stampsRequired }));
+        setProgTouched(true);
+      }
+    } catch { /* sin almacenamiento */ }
+    // Si se recargó la página en medio del alta, el diseño se recupera de nuevo desde el servidor con la misma referencia.
+    const ref = pendingRef();
+    if (handed || !ref) return;
+    api<{ draft: any }>('GET', `/admin/activation-drafts/${ref}`).then(({ draft: v }) => {
+      setDraftRef(ref); setFromDesign(true);
+      setDraftNote({ tone: 'ok', text: 'Diseño recuperado. Revisa los datos y completa lo que falta; puedes cambiar cualquier cosa antes de crear el negocio.' });
+      setF((x) => x.name ? x : ({ ...x, name: v.name, logoDataUrl: v.logoDataUrl, logoOriginalDataUrl: v.logoOriginalDataUrl, logoFit: sanitizeFit(v.logoFit), primaryColor: v.primaryColor, accentColor: v.accentColor, cardFinish: v.cardFinish, vertical: VERTICAL_IDS.includes(v.vertical) ? v.vertical : x.vertical }));
+      setProg((p) => ({ ...p, programType: 'stamps_purchase', stampMode: 'per_purchase', maxStampsPerPurchase: 1, rewardDescription: v.rewardDescription ?? p.rewardDescription, stampsRequired: v.stampsRequired ?? p.stampsRequired }));
+      setProgTouched(true);
+    }).catch((x) => {
+      forgetRef();
+      const code = (x as ApiError).code;
+      setDraftNote({ tone: 'warn', text: code === 'draft_expired' ? 'El diseño venció (dura 24 horas). Puedes dar de alta el negocio con los datos de aquí, o volver a prepararlo desde la página pública.' : code === 'draft_consumed' ? 'Ese diseño ya se usó para crear un negocio. Revisa el directorio antes de crear otro.' : 'No se pudo recuperar el diseño. Captura los datos aquí o vuelve a prepararlo desde la página pública.' });
+    });
+  }, []);
   useEffect(() => { api<{ plans: Plan[] }>('GET', '/admin/plans').then((r) => setPlans(r.plans)).catch(() => undefined); }, []);
   const plan = plans.find((p) => p.code === f.plan);
   const priceCents = f.price.trim() === '' ? plan?.priceCents ?? 0 : Math.round(Number(f.price) * 100);
 
-  const setVertical = (v: Vertical) => setF((x) => ({
-    ...x, vertical: v,
-    // Cambia los colores y el premio sugeridos solo si siguen siendo los sugeridos del giro anterior.
-    primaryColor: x.primaryColor === PRESETS[x.vertical].primary ? PRESETS[v].primary : x.primaryColor,
-    accentColor: x.accentColor === PRESETS[x.vertical].accent ? PRESETS[v].accent : x.accentColor,
-    rewardDescription: x.rewardDescription === PRESETS[x.vertical].reward ? PRESETS[v].reward : x.rewardDescription,
-  }));
+  const setVertical = (v: Vertical) => {
+    setF((x) => ({
+      ...x, vertical: v,
+      // Cambia los colores sugeridos solo si siguen siendo los sugeridos del giro anterior.
+      primaryColor: x.primaryColor === PRESETS[x.vertical]?.primary ? PRESETS[v].primary : x.primaryColor,
+      accentColor: x.accentColor === PRESETS[x.vertical]?.accent ? PRESETS[v].accent : x.accentColor,
+    }));
+    // La plantilla sugerida del giro reemplaza el programa solo si aún no se editó a mano.
+    if (!progTouched) setProg((p) => programFor(v, p));
+  };
+  const progErr = programError(prog);
+  const preview = previewProgram(prog);
 
   const stepValid = useMemo(() => [
     f.name.trim().length >= 2 && f.ownerName.trim().length >= 2 && /^\S+@\S+\.\S+$/.test(f.ownerEmail.trim()) && /^#[0-9A-F]{6}$/i.test(f.primaryColor) && /^#[0-9A-F]{6}$/i.test(f.accentColor),
-    f.stampsRequired >= LIMITS.stampsRequired.min && f.stampsRequired <= LIMITS.stampsRequired.max && f.visitWindowMinutes >= LIMITS.visitWindowMinutes.min && f.visitWindowMinutes <= LIMITS.visitWindowMinutes.max
-      && f.maxStampsPerPurchase >= 1 && f.maxStampsPerPurchase <= LIMITS.maxStampsPerPurchase.max && f.rewardDescription.trim().length >= 3 && f.rewardDescription.trim().length <= 80 && (!f.reviewUrl.trim() || /^https:\/\/\S+$/.test(f.reviewUrl.trim())),
+    !progErr && (!f.reviewUrl.trim() || /^https:\/\/\S+$/.test(f.reviewUrl.trim())),
     !!f.plan && Number.isFinite(priceCents) && priceCents >= 0,
     true,
-  ], [f, priceCents]);
+  ], [f, priceCents, progErr]);
 
   const create = async () => {
     setBusy(true);
@@ -62,19 +127,29 @@ export function Wizard() {
     try {
       const r = await api<Created>('POST', '/admin/businesses', {
         name: f.name.trim(), vertical: f.vertical, city: f.city.trim(), ownerName: f.ownerName.trim(), ownerEmail: f.ownerEmail.trim(),
-        logoDataUrl: f.logoDataUrl, primaryColor: f.primaryColor, accentColor: f.accentColor,
-        rules: { stampsRequired: f.stampsRequired, stampMode: f.stampMode, maxStampsPerPurchase: f.stampMode === 'per_item' ? f.maxStampsPerPurchase : 1, visitWindowMinutes: f.visitWindowMinutes, rewardDescription: f.rewardDescription.trim() },
+        logoDataUrl: f.logoDataUrl, logoFit: f.logoFit, logoOriginalDataUrl: f.logoOriginalDataUrl, draftRef: draftRef ?? undefined, primaryColor: f.primaryColor, accentColor: f.accentColor, cardFinish: f.cardFinish,
+        rules: rulesFromForm(prog),
         reviewUrl: f.reviewUrl.trim() || null, plan: f.plan, priceCents, pilotDays: f.pilotDays, isDemo: f.isDemo,
       });
+      forgetRef();
       setCreated(r);
     } catch (x) {
-      setErr((x as ApiError).message);
+      const e = x as ApiError;
+      if (e.code === 'draft_expired') {
+        // El diseño venció, pero los datos siguen en pantalla: se puede crear sin la referencia.
+        setDraftRef(null); forgetRef();
+        setDraftNote({ tone: 'warn', text: 'El diseño venció, pero tus datos siguen aquí. Pulsa de nuevo para crear el negocio con lo que ves en pantalla.' });
+        setErr(null);
+      } else if (e.code === 'draft_consumed') {
+        setDraftRef(null); forgetRef();
+        setErr('Este diseño ya se usó (otra solicitud lo consumió). Revisa el directorio de negocios antes de intentar otra vez para no duplicar.');
+      } else setErr(e.message);
     } finally {
       setBusy(false);
     }
   };
 
-  if (created) return <CreatedView c={created} name={f.name} ownerName={f.ownerName} />;
+  if (created) return <CreatedView c={created} f={{ ...f, stampsRequired: preview.stampsRequired, points: isPoints(preview), unit: unitTitle(preview) }} />;
 
   return (
     <>
@@ -88,6 +163,7 @@ export function Wizard() {
         ))}
       </ol>
 
+      {draftNote && <div role="status" data-testid="draft-note" data-tone={draftNote.tone} className={`mb-5 rounded-lg border px-4 py-3 text-[13px] ${draftNote.tone === 'ok' ? 'border-[#47CD89]/30 text-[#9BE3BC]' : 'border-[#F5B544]/40 text-[#F5C971]'}`}>{draftNote.text}{fromDesign && draftNote.tone === 'ok' && <span className="cc-faint"> Todavía no se ha creado nada.</span>}</div>}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px] items-start">
         <section className="cc-panel cc-sheen p-5 sm:p-6">
           {step === 0 && (
@@ -100,26 +176,18 @@ export function Wizard() {
               <CField label="Correo del dueño" htmlFor="wz-email" hint="Recibirá una invitación por enlace (sin contraseña técnica)."><input id="wz-email" type="email" className="cc-input" value={f.ownerEmail} onChange={(e) => setF({ ...f, ownerEmail: e.target.value })} /></CField>
               <ColorField id="wz-primary" label="Color principal" value={f.primaryColor} onChange={(v) => setF({ ...f, primaryColor: v })} />
               <ColorField id="wz-accent" label="Color de acento" value={f.accentColor} onChange={(v) => setF({ ...f, accentColor: v })} />
-              <LogoField className="sm:col-span-2" value={f.logoDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v })} />
+              <CField label="Acabado de la tarjeta" htmlFor="wz-finish"><select id="wz-finish" className="cc-input" value={f.cardFinish} onChange={(e) => setF({ ...f, cardFinish: e.target.value as 'signature' | 'silver' | 'black' })}><option value="silver">Signature Silver</option><option value="black">Black Titanium</option><option value="signature">Signature Color</option></select></CField>
+              <LogoField className="sm:col-span-2" value={f.logoDataUrl} fit={f.logoFit} original={f.logoOriginalDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v.logo, logoFit: v.fit, logoOriginalDataUrl: v.original })} />
               <label className="sm:col-span-2 flex items-center gap-2.5 text-[13px] cc-muted cursor-pointer">
                 <input type="checkbox" className="accent-[#67C7D3]" checked={f.isDemo} onChange={(e) => setF({ ...f, isDemo: e.target.checked })} /> Es un negocio de demostración (no cuenta en métricas comerciales)
               </label>
             </div>
           )}
           {step === 1 && (
-            <div className="grid sm:grid-cols-2 gap-4">
-              <CField label="Sellos para el premio" htmlFor="wz-stamps" hint={`Entre ${LIMITS.stampsRequired.min} y ${LIMITS.stampsRequired.max}.`}><input id="wz-stamps" type="number" min={LIMITS.stampsRequired.min} max={LIMITS.stampsRequired.max} className="cc-input tabular-nums" value={f.stampsRequired} onChange={(e) => setF({ ...f, stampsRequired: Number(e.target.value) })} /></CField>
-              <CField label="Ventana de visita (min)" htmlFor="wz-window" hint="Compras dentro de esta ventana cuentan como una visita."><input id="wz-window" type="number" min={15} max={720} className="cc-input tabular-nums" value={f.visitWindowMinutes} onChange={(e) => setF({ ...f, visitWindowMinutes: Number(e.target.value) })} /></CField>
-              <div className="sm:col-span-2">
-                <div className="text-[12.5px] font-medium text-[#C5CBD3] mb-2">Regla de acumulación</div>
-                <div className="grid sm:grid-cols-2 gap-2">
-                  <button type="button" className="cc-choice" aria-pressed={f.stampMode === 'per_purchase'} onClick={() => setF({ ...f, stampMode: 'per_purchase' })}><div className="text-[13.5px] font-medium">1 sello por compra</div><div className="mt-1 text-[12px] cc-muted">Sin importar cuántos artículos.</div></button>
-                  <button type="button" className="cc-choice" aria-pressed={f.stampMode === 'per_item'} onClick={() => setF({ ...f, stampMode: 'per_item' })}><div className="text-[13.5px] font-medium">1 sello por artículo</div><div className="mt-1 text-[12px] cc-muted">Con un tope por compra.</div></button>
-                </div>
-              </div>
-              {f.stampMode === 'per_item' && <CField label="Tope de sellos por compra" htmlFor="wz-max"><input id="wz-max" type="number" min={1} max={10} className="cc-input tabular-nums" value={f.maxStampsPerPurchase} onChange={(e) => setF({ ...f, maxStampsPerPurchase: Number(e.target.value) })} /></CField>}
-              <CField label="Premio" htmlFor="wz-reward" className="sm:col-span-2"><input id="wz-reward" className="cc-input" value={f.rewardDescription} onChange={(e) => setF({ ...f, rewardDescription: e.target.value })} /></CField>
-              <CField label="Enlace de reseñas de Google (opcional)" htmlFor="wz-review" className="sm:col-span-2" hint="Se invita a reseñar después de la visita; nunca se premia la reseña (política de Google)."><input id="wz-review" className="cc-input" value={f.reviewUrl} onChange={(e) => setF({ ...f, reviewUrl: e.target.value })} placeholder="https://g.page/r/…/review" /></CField>
+            <div className="flex flex-col gap-4">
+              <ProgramFields theme="cc" idPrefix="wz" value={prog} vertical={f.vertical} onChange={(x) => { setProg(x); setProgTouched(true); }} />
+              {progErr && <p className="text-[12px] text-[#FDA29B]" role="alert" data-testid="program-error">{progErr}</p>}
+              <CField label="Enlace de reseñas de Google (opcional)" htmlFor="wz-review" hint="Se invita a reseñar después de la visita; nunca se premia la reseña (política de Google)."><input id="wz-review" className="cc-input" value={f.reviewUrl} onChange={(e) => setF({ ...f, reviewUrl: e.target.value })} placeholder="https://g.page/r/…/review" /></CField>
             </div>
           )}
           {step === 2 && (
@@ -143,8 +211,8 @@ export function Wizard() {
             <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-4 text-[13px]" data-testid="wizard-summary">
               <Item k="Negocio" v={`${f.name} · ${VERTICAL_LABEL[f.vertical]}${f.city ? ` · ${f.city}` : ''}`} />
               <Item k="Dueño" v={`${f.ownerName} · ${f.ownerEmail}`} />
-              <Item k="Programa" v={`${f.stampsRequired} sellos → ${f.rewardDescription}`} />
-              <Item k="Regla" v={f.stampMode === 'per_item' ? `1 sello por artículo (máx. ${f.maxStampsPerPurchase})` : '1 sello por compra'} />
+              <Item k="Programa" v={`${preview.stampsRequired} ${units(preview, preview.stampsRequired)} → ${preview.rewardDescription}`} />
+              <Item k="Regla" v={`${stampRule(preview).title} ${stampRule(preview).sub}`} />
               <Item k="Plan" v={`${PLAN_LABEL[f.plan]} · ${money(priceCents, plan?.currency)}/mes${f.plan === 'piloto' ? ` · ${f.pilotDays} días` : ''}`} />
               <Item k="Reseñas" v={f.reviewUrl.trim() || 'Sin enlace'} />
               <Item k="Tipo" v={f.isDemo ? 'Demostración' : 'Negocio real'} />
@@ -162,20 +230,9 @@ export function Wizard() {
 
         <aside className="hidden lg:block">
           <div className="cc-label mb-2">Vista previa de la tarjeta</div>
-          <div className="rounded-2xl p-5 shadow-2xl" style={{ background: f.primaryColor, color: '#fff' }}>
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg overflow-hidden flex items-center justify-center text-[15px] font-medium" style={{ background: f.accentColor, color: f.primaryColor }}>
-                {f.logoDataUrl ? <img src={f.logoDataUrl} alt="" className="h-full w-full object-contain bg-white" /> : (f.name.trim()[0] ?? 'V')}
-              </div>
-              <div className="min-w-0"><div className="text-[14px] font-medium truncate">{f.name || 'Tu negocio'}</div><div className="text-[11px] opacity-70">{f.city || 'Ciudad'}</div></div>
-            </div>
-            <div className="mt-5 grid grid-cols-5 gap-2">
-              {Array.from({ length: Math.min(Math.max(f.stampsRequired, LIMITS.stampsRequired.min), LIMITS.stampsRequired.max) }).map((_, i) => (
-                <span key={i} className={cx('aspect-square rounded-full border', i < 2 ? '' : 'opacity-40')} style={{ borderColor: f.accentColor, background: i < 2 ? f.accentColor : 'transparent' }} />
-              ))}
-            </div>
-            <div className="mt-4 text-[11.5px] opacity-80">Premio: {f.rewardDescription || '—'}</div>
-          </div>
+          <div style={brandVars(f.primaryColor, f.accentColor, f.cardFinish)} data-testid="wizard-card"><LoyaltyCardFace compact businessName={f.name.trim() || 'Tu negocio'} customerName="Mariana López" cardId="VX-4F7K-92" total={Math.max(1, preview.stampsRequired || LIMITS.stampsRequired.min)} filled={Math.min(2, preview.stampsRequired || 2)} logoUrl={f.logoDataUrl} logoFit={f.logoFit} footer={<span className="opacity-70">{f.city || 'Ejemplo'}</span>} interactive={false} mode={isPoints(preview) ? 'points' : 'stamps'} unitLabel={unitTitle(preview)} /></div>
+          <p className="mt-2 text-[11.5px] cc-muted">{rewardSentence(preview)}</p>
+          
         </aside>
       </div>
     </>
@@ -184,30 +241,98 @@ export function Wizard() {
 
 const Item = ({ k, v }: { k: string; v: string }) => <div><dt className="cc-faint text-[12px]">{k}</dt><dd className="mt-0.5 break-words">{v}</dd></div>;
 
-function CreatedView({ c, name, ownerName }: { c: Created; name: string; ownerName: string }) {
+/** Descarga un QR (SVG renderizado en pantalla) como PNG de 1024 px. */
+async function downloadQr(host: HTMLElement | null, filename: string) {
+  const svg = host?.querySelector('svg');
+  if (!svg) return;
+  const xml = new XMLSerializer().serializeToString(svg);
+  const img = new Image();
+  await new Promise<void>((ok, bad) => { img.onload = () => ok(); img.onerror = () => bad(new Error('qr')); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml); });
+  const c = document.createElement('canvas'); c.width = c.height = 1024;
+  const g = c.getContext('2d')!; g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, 1024, 1024);
+  const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = filename; a.click();
+}
+
+function QrBlock({ value, label, file }: { value: string; label: string; file: string }) {
+  const ref = React.useRef<HTMLDivElement>(null);
   return (
-    <div className="max-w-[760px]">
-      <div className="inline-flex items-center gap-2 text-[12.5px] text-[#47CD89]"><Check size={15} /> Negocio creado</div>
-      <h1 className="mt-2 text-[24px] font-medium tracking-[-0.01em]" data-testid="created-name">{name}</h1>
-      <p className="mt-1.5 text-[13.5px] cc-muted">Siguiente paso: envía la invitación a {ownerName}. <strong className="text-white">No se envió ningún correo</strong> (no hay proveedor configurado); compártela tú por un canal seguro.</p>
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <section className="cc-panel p-5 flex flex-col items-center gap-3 text-center">
-          <div className="cc-label self-start">Invitación del dueño · un solo uso · 72 h</div>
-          <div className="rounded-lg bg-white p-2"><QRCode value={c.ownerInvitation.link} size={150} label="QR de la invitación del dueño" /></div>
-          <div className="cc-code w-full text-left select-all" data-testid="owner-invite-link">{c.ownerInvitation.link}</div>
-          <CopyButton dark text={c.ownerInvitation.link} />
-        </section>
-        <section className="cc-panel p-5 flex flex-col items-center gap-3 text-center">
-          <div className="cc-label self-start">Registro de clientes (QR del mostrador)</div>
-          <div className="rounded-lg bg-white p-2"><QRCode value={c.registrationUrl} size={150} label="QR de registro de clientes" /></div>
-          <div className="cc-code w-full text-left" data-testid="created-registration-url">{c.registrationUrl}</div>
-          <CopyButton dark text={c.registrationUrl} />
-        </section>
+    <div className="flex flex-col items-start gap-2">
+      <div ref={ref} className="rounded-lg bg-white p-2 self-start"><QRCode value={value} size={132} label={label} /></div>
+      <CButton small onClick={() => downloadQr(ref.current, file)} data-testid={`qr-download-${file.replace(/\.png$/, '')}`}><Download size={13} /> Descargar QR</CButton>
+    </div>
+  );
+}
+
+function Row({ k, v, testid }: { k: string; v: string; testid?: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="cc-faint text-[12px] mb-1">{k}</div>
+      <div className="flex items-start gap-2">
+        <div className="cc-code flex-1 min-w-0 break-all" data-testid={testid}>{v}</div>
+        <CopyButton dark text={v} />
       </div>
-      <div className="mt-6 flex flex-wrap gap-2">
-        <CButton variant="primary" onClick={() => navigate(`/vlux-admin/negocios/${c.businessId}`)}>Abrir ficha del negocio</CButton>
-        <CButton onClick={() => navigate('/vlux-admin/negocios')}>Volver al directorio</CButton>
+    </div>
+  );
+}
+
+/** Pantalla posterior al alta. Solo dice lo que es verdad: se generaron enlaces e invitación manual; no se envió ningún correo ni el negocio está operando todavía. */
+function CreatedView({ c, f }: { c: Created; f: { name: string; ownerName: string; ownerEmail: string; primaryColor: string; accentColor: string; cardFinish: 'signature' | 'silver' | 'black'; logoDataUrl: string | null; logoFit: LogoFit | null; stampsRequired: number; points?: boolean; unit?: string } }) {
+  const access = c.access ?? { customerUrl: c.registrationUrl, cashierUrl: '', ownerUrl: '' };
+  const ficha = `/vlux-admin/negocios/${c.businessId}`;
+  return (
+    <div className="max-w-[980px]" data-testid="activation-screen">
+      <div className="inline-flex items-center gap-2 text-[12.5px] text-[#47CD89]"><Check size={15} /> Configuración creada</div>
+      <h1 className="mt-2 text-[26px] font-medium tracking-[-0.015em]">Tu negocio está configurado</h1>
+      <p className="mt-1 text-[14px] font-medium" data-testid="created-name">{f.name}</p>
+      <p className="mt-1.5 text-[13.5px] cc-muted max-w-[68ch]">Estado: <strong className="text-white">configuración creada</strong>. Todavía no opera: falta que {f.ownerName} acepte su invitación y que definas el acceso de caja. <strong className="text-white">No se envió ningún correo</strong> todavía: {c.email?.state === 'not_configured' || !c.email ? 'no hay proveedor de correo configurado, comparte los enlaces por un canal seguro.' : 'usa «Enviar invitación» o comparte el enlace por un canal seguro.'}</p>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,380px)_1fr] items-start">
+        <div style={brandVars(f.primaryColor, f.accentColor, f.cardFinish)} data-testid="activation-card">
+          <LoyaltyCardFace businessName={f.name} customerName="Mariana López" cardId="VX-4F7K-92" total={f.stampsRequired} filled={0} logoUrl={f.logoDataUrl} logoFit={f.logoFit} footer={<span className="opacity-70">Vista previa</span>} mode={f.points ? 'points' : 'stamps'} unitLabel={f.unit} />
+        </div>
+        <div className="flex flex-col gap-4" data-testid="created-access">
+          <section className="cc-panel p-5" aria-label="Cliente" data-testid="activation-customer">
+            <div className="cc-label">Cliente · QR del mostrador</div>
+            <div className="mt-3 flex flex-wrap gap-5">
+              <QrBlock value={access.customerUrl} label="QR de registro de clientes" file={`${c.slug}-clientes.png`} />
+              <div className="flex-1 min-w-[220px] flex flex-col gap-3">
+                <Row k="Enlace público" v={access.customerUrl} testid="created-registration-url" />
+                <div className="flex flex-wrap gap-2"><a className="cc-btn cc-btn-primary" href={access.customerUrl} target="_blank" rel="noopener noreferrer" data-testid="open-customer">Abrir experiencia del cliente <ExternalLink size={14} /></a></div>
+              </div>
+            </div>
+          </section>
+          <section className="cc-panel p-5" aria-label="Propietario" data-testid="activation-owner">
+            <div className="cc-label">Propietario · invitación de un solo uso · 72 h</div>
+            {c.ownerInvitation.invitationId && c.email?.state !== 'not_configured' && c.email && (
+              <div className="mt-3 pb-4 border-b border-[color:var(--cc-line)]"><EmailInviteBlock businessId={c.businessId} invitationId={c.ownerInvitation.invitationId} email={f.ownerEmail} initial={{ status: 'pending', attempts: 0, sendsAccepted: 0, acceptedAt: null, deliveredAt: null, error: null, canSend: true }} /></div>
+            )}
+            <div className="mt-3 flex flex-wrap gap-5">
+              <QrBlock value={c.ownerInvitation.link} label="QR de la invitación del dueño" file={`${c.slug}-invitacion-dueno.png`} />
+              <div className="flex-1 min-w-[220px] flex flex-col gap-3">
+                <Row k={`Para ${f.ownerName}`} v={c.ownerInvitation.link} testid="owner-invite-link" />
+                {access.ownerUrl && <Row k="Panel del dueño" v={access.ownerUrl} />}
+                {access.ownerUrl && <div className="flex flex-wrap gap-2"><a className="cc-btn" href={access.ownerUrl} target="_blank" rel="noopener noreferrer" data-testid="open-owner-panel">Abrir panel del dueño <ExternalLink size={14} /></a></div>}
+                <p className="text-[12px] cc-faint">El panel del dueño pide la contraseña que se crea al aceptar la invitación.</p>
+              </div>
+            </div>
+          </section>
+          <section className="cc-panel p-5" aria-label="Empleados" data-testid="activation-staff">
+            <div className="cc-label">Empleados · caja</div>
+            <div className="mt-3 flex flex-col gap-3">
+              {access.cashierUrl && <Row k="Acceso de caja" v={access.cashierUrl} testid="created-cashier-url" />}
+              <div className="flex flex-wrap gap-2"><CButton onClick={() => navigate(ficha)} data-testid="invite-employee">Invitar empleado</CButton></div>
+              <p className="text-[12px] cc-faint">Cada empleado entra con su propia invitación; se crean desde la ficha del negocio.</p>
+            </div>
+          </section>
+        </div>
       </div>
+
+      <section className="mt-6 flex flex-wrap gap-2" aria-label="VLUX" data-testid="activation-vlux">
+        <CButton variant="primary" onClick={() => navigate(ficha)} data-testid="view-access">Ver accesos del negocio</CButton>
+        <CButton onClick={() => navigate(ficha)}>Ver ficha del negocio</CButton>
+        <CButton onClick={() => navigate(ficha)}>Editar configuración</CButton>
+        <CButton variant="ghost" onClick={() => navigate('/vlux-admin/negocios')}>Volver a Control Center</CButton>
+      </section>
     </div>
   );
 }

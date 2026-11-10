@@ -6,22 +6,25 @@ import { api, ApiError, BusinessInfo, CustomerCardView, Program, Vertical } from
 import { formatDateTime, lowerFirst, cardQrValue, rewardQrValue, plural } from '../lib/format';
 import { usePolling } from '../lib/usePolling';
 import { getSeen, setSeen, getFlag, setFlag } from '../lib/seen';
-import { rewardSentence, stampRule, welcomeHeadline } from '../lib/vertical';
-import { Button, Modal, QRCode, CopyButton, Field, inputCls, BusinessLogo, CupIllustration, PoweredByVlux, useToast, cx, Badge } from '../components/ui';
+import { isPoints, programHow, rewardSentence, stampRule, units, unitTitle, welcomeHeadline } from '../lib/vertical';
+import { Button, Modal, QRCode, CopyButton, Field, inputCls, BusinessLogo, CupIllustration, useToast, cx, Badge } from '../components/ui';
 import { LoyaltyCardFace } from '../components/LoyaltyCard';
+import { VerticalIcon } from '../components/VerticalIcon';
+import { sanitizeFit } from '../lib/logoFit';
 import { brandVars, ErrorBox, Loading } from '../components/Brand';
 import { SaveCardPanel, PairScreen, OfflineNotice } from '../components/SaveCard';
+import { CustomerNotifications } from '../components/Notifications';
+import { NearbyCheck } from '../components/Nearby';
 import { applyBusinessAppHead, isStandalone, useOnline } from '../lib/pwa';
+import { RecoverLink, RecoverScreen, VluxHelp } from '../components/CustomerHelp';
 
 const POLL_MS = 4000;
 
-const VerticalIcon = ({ v, size = 17 }: { v: Vertical; size?: number }) =>
-  v === 'cafeteria' ? <Coffee size={size} /> : v === 'barberia' ? <Scissors size={size} /> : v === 'salon' ? <Sparkles size={size} /> : v === 'restaurante' ? <UtensilsCrossed size={size} /> : <Store size={size} />;
 
 export function CustomerApp({ slug }: { slug: string }) {
   const [pub, setPub] = useState<{ business: BusinessInfo; program: Program; privacyNoticeVersion: string } | null>(null);
   const [pubError, setPubError] = useState<string | null>(null);
-  const [screen, setScreen] = useState<'welcome' | 'register'>('welcome');
+  const [screen, setScreen] = useState<'welcome' | 'register' | 'recover'>('welcome');
   const [personalLink, setPersonalLink] = useState<string | null>(null);
   const card = usePolling(() => api<CustomerCardView | { card: null }>('GET', `/me/${slug}/card`), POLL_MS, [slug]);
 
@@ -51,16 +54,18 @@ export function CustomerApp({ slug }: { slug: string }) {
   if (!view && networkDown) return <div className="mx-auto max-w-[460px] gutter"><OfflineNotice hasData={false} onRetry={card.refresh} /></div>;
 
   return (
-    <div className="cafe-bg min-h-full min-h-[100dvh]" data-vertical={view?.business.vertical ?? b.vertical} data-standalone={standalone ? '1' : undefined} style={brandVars(view?.business.primaryColor ?? b.primaryColor, view?.business.accentColor ?? b.accentColor)}>
+    <div className="cafe-bg min-h-full min-h-[100dvh]" data-vertical={view?.business.vertical ?? b.vertical} data-standalone={standalone ? '1' : undefined} style={brandVars(view?.business.primaryColor ?? b.primaryColor, view?.business.accentColor ?? b.accentColor, view?.business.cardFinish ?? b.cardFinish)}>
       <div className="mx-auto w-full max-w-[460px] gutter pb-10 safe-top">
         {b.isDemo && <div className="mt-3 rounded-xl bg-[#F4F3FF] border border-[#D9D6FE] px-3 py-2 text-[12px] text-[#5925DC]">Negocio de demostración: no escribas datos personales reales.</div>}
         {view && networkDown && <OfflineNotice hasData onRetry={card.refresh} />}
         {view ? (
           <CardScreen view={view} slug={slug} refresh={card.refresh} personalLink={personalLink} onLinkSeen={() => setPersonalLink(null)} />
+        ) : screen === 'recover' ? (
+          <><RecoverScreen slug={slug} businessName={b.name} onBack={() => setScreen('welcome')} /><div className="mt-8"><VluxHelp businessName={b.name} /></div></>
         ) : standalone && !wantsNew ? (
-          <PairScreen slug={slug} businessName={b.name} onPaired={card.refresh} onNew={() => setWantsNew(true)} />
+          <><PairScreen slug={slug} businessName={b.name} onPaired={card.refresh} onNew={() => setWantsNew(true)} /><div className="mt-4 flex justify-center"><RecoverLink onClick={() => setScreen('recover')} /></div></>
         ) : screen === 'welcome' ? (
-          <Welcome business={b} program={pub.program} onStart={() => setScreen('register')} />
+          <Welcome business={b} program={pub.program} onStart={() => setScreen('register')} onRecover={() => setScreen('recover')} />
         ) : (
           <Register business={b} slug={slug} onBack={() => setScreen('welcome')} onDone={(link) => { setPersonalLink(link); card.refresh(); }} />
         )}
@@ -69,13 +74,13 @@ export function CustomerApp({ slug }: { slug: string }) {
   );
 }
 
-function Welcome({ business: b, program, onStart }: { business: BusinessInfo; program: Program; onStart: () => void }) {
+function Welcome({ business: b, program, onStart, onRecover }: { business: BusinessInfo; program: Program; onStart: () => void; onRecover: () => void }) {
   const rule = stampRule(program);
   return (
     <div className="screen-in pt-6 sm:pt-10 flex flex-col">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <BusinessLogo name={b.name} size={38} />
+          <BusinessLogo name={b.name} size={38} src={b.logoUrl} />
           <div className="min-w-0">
             <div className="font-display text-[16px] text-cafe-ink leading-tight line-clamp-2">{b.name}</div>
             <div className="text-[11.5px] text-cafe-muted">{b.city.split(',')[0]}</div>
@@ -91,7 +96,7 @@ function Welcome({ business: b, program, onStart }: { business: BusinessInfo; pr
         {b.vertical === 'cafeteria' ? (
           <CupIllustration className="relative w-full h-auto px-6 pt-6 -mb-2" />
         ) : (
-          <div className="relative flex justify-center pt-10 pb-4"><BusinessLogo name={b.name} size={132} /></div>
+          <div className="relative flex justify-center pt-10 pb-4"><BusinessLogo name={b.name} size={132} src={b.logoUrl} /></div>
         )}
         <div className="relative px-6 pb-6 text-[color:var(--cream)]">
           <div className="text-[11px] uppercase tracking-[0.18em] opacity-60">{b.name}</div>
@@ -104,7 +109,7 @@ function Welcome({ business: b, program, onStart }: { business: BusinessInfo; pr
       <div className="mt-6 grid grid-cols-3 gap-2 text-center">
         {[
           { icon: <VerticalIcon v={b.vertical} />, t: rule.title, s: rule.sub },
-          { icon: <Gift size={17} />, t: `${program.stampsRequired} sellos`, s: '= premio' },
+          { icon: <Gift size={17} />, t: `${program.stampsRequired} ${units(program, program.stampsRequired)}`, s: '= premio' },
           { icon: <ShieldCheck size={17} />, t: 'Sin app', s: 'ni contraseña' },
         ].map((x) => (
           <div key={x.t} className="rounded-2xl bg-white/70 border border-cafe-line px-2 py-3">
@@ -119,7 +124,8 @@ function Welcome({ business: b, program, onStart }: { business: BusinessInfo; pr
         Obtener mi tarjeta gratis <ArrowRight size={18} />
       </Button>
       <p className="mt-3 text-[12.5px] text-cafe-muted text-center">¿Ya tienes tarjeta? Abre el enlace personal que guardaste al registrarte.</p>
-      <div className="mt-10"><PoweredByVlux /></div>
+      <div className="mt-2 flex justify-center"><RecoverLink onClick={onRecover} /></div>
+      <div className="mt-10"><VluxHelp businessName={b.name} /></div>
     </div>
   );
 }
@@ -151,9 +157,9 @@ function Register({ business: b, slug, onBack, onDone }: { business: BusinessInf
 
   return (
     <form onSubmit={submit} className="screen-in pt-6 sm:pt-10 flex flex-col gap-5" noValidate>
-      <button type="button" onClick={onBack} className="self-start text-[13px] text-cafe-muted hover:text-cafe-ink">← Regresar</button>
+      <button type="button" onClick={onBack} className="self-start min-h-[44px] pr-3 text-[13px] text-cafe-muted hover:text-cafe-ink">← Regresar</button>
       <div className="flex items-center gap-3">
-        <BusinessLogo name={b.name} size={44} />
+        <BusinessLogo name={b.name} size={44} src={b.logoUrl} />
         <div>
           <h1 className="font-display text-[26px] leading-tight text-cafe-ink">Crea tu tarjeta</h1>
           <p className="text-[14px] text-cafe-muted">Toma menos de un minuto. Sin contraseñas.</p>
@@ -218,7 +224,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
     const seen = getSeen(key);
     if (seen !== null && shown > seen) {
       setAnimateFrom(seen);
-      toast('good', shown - seen === 1 ? '¡Nuevo sello en tu tarjeta!' : `¡${shown - seen} sellos nuevos en tu tarjeta!`);
+      toast('good', shown - seen === 1 ? (units(program, 1) === 'sello' ? '¡Nuevo sello en tu tarjeta!' : `¡+1 ${units(program, 1)} en tu tarjeta!`) : `¡+${shown - seen} ${units(program, shown - seen)} en tu tarjeta!`);
     } else if (prevKey.current !== key) {
       setAnimateFrom(null);
     }
@@ -245,8 +251,8 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
   const message = reward
     ? 'Tu recompensa está lista. Muéstrala en caja cuando quieras usarla.'
     : card.balance === 0
-      ? card.cycle > 1 ? 'Nuevo ciclo. Tu siguiente compra suma el primer sello.' : 'Tu primera compra suma tu primer sello.'
-      : remaining === 1 ? '¡Te falta 1 sello para tu recompensa!' : `¡Solo te faltan ${remaining} sellos para tu recompensa!`;
+      ? card.cycle > 1 ? `Nuevo ciclo. ${programHow(program)}` : programHow(program)
+      : remaining === 1 ? `¡Te falta 1 ${units(program, 1)} para tu recompensa!` : `¡Solo te faltan ${remaining} ${units(program, remaining)} para tu recompensa!`;
 
   return (
     <div className="screen-in pt-5 flex flex-col gap-5">
@@ -261,13 +267,13 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
           <p className="text-[12.5px] text-[#0E6874] leading-snug">Tu tarjeta quedó guardada en este teléfono. Con este enlace la abres en otro teléfono o si borras el navegador. No lo compartas: es tu llave.</p>
           <div className="flex items-center gap-1 rounded-lg bg-white border border-[#BFE6EC] px-2 py-1.5">
             <span className="text-[11.5px] font-mono text-ink truncate flex-1 select-all" data-testid="personal-link">{personalLink}</span>
-            <CopyButton text={personalLink} />
+            <CopyButton text={personalLink} touch />
           </div>
-          <button className="self-end text-[12.5px] text-[#0E6874] underline underline-offset-2" onClick={onLinkSeen}>Ya lo guardé</button>
+          <button className="self-end min-h-[44px] px-2 text-[12.5px] text-[#0E6874] underline underline-offset-2" onClick={onLinkSeen}>Ya lo guardé</button>
         </section>
       )}
 
-      <LoyaltyCardFace businessName={b.name} customerName={card.customerName} cardId={card.publicCode} total={goal} filled={shown} rewardReady={!!reward} animateFrom={animateFrom} footer={<span className="opacity-70">Ciclo {card.cycle}</span>} />
+      <LoyaltyCardFace businessName={b.name} customerName={card.customerName} cardId={card.publicCode} total={goal} filled={shown} rewardReady={!!reward} animateFrom={animateFrom} logoUrl={b.logoUrl} logoFit={sanitizeFit(b.logoFit)} footer={<span className="opacity-70">Ciclo {card.cycle}</span>} mode={isPoints(program) ? 'points' : 'stamps'} unitLabel={unitTitle(program)} />
 
       <div className="flex flex-col gap-2 -mt-1">
         <p className="text-[15px] font-medium text-cafe-ink" data-testid="progress-message">{message}</p>
@@ -275,10 +281,10 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
           <div className="h-full rounded-full transition-[width] duration-700 ease-out" style={{ width: `${(shown / goal) * 100}%`, background: 'var(--accent)' }} />
         </div>
         <div className="flex flex-wrap justify-between gap-x-3 text-[12px] text-cafe-muted tabular-nums">
-          <span data-testid="stamp-count">{shown} de {goal} sellos</span>
+          <span data-testid="stamp-count">{shown} de {goal} {units(program, goal)}</span>
           <span className="min-w-0">Recompensa: {program.rewardDescription}</span>
         </div>
-        {extra > 0 && <p className="text-[12.5px] text-cafe-muted">Además llevas +{plural(extra, 'sello', 'sellos')} para tu siguiente ciclo.</p>}
+        {extra > 0 && <p className="text-[12.5px] text-cafe-muted">Además llevas +{extra} {units(program, extra)} para tu siguiente ciclo.</p>}
       </div>
 
       {reward && (
@@ -293,18 +299,21 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
       )}
 
       <section className="rounded-2xl bg-white border border-cafe-line p-5 flex flex-col items-center text-center gap-3">
-        <div className="text-[13px] font-medium text-cafe-ink">Muestra este código en caja para recibir tus sellos</div>
+        <div className="text-[13px] font-medium text-cafe-ink">Muestra este código en caja para recibir tus {units(program, 2)}</div>
         <div className="rounded-2xl border border-cafe-line p-2 bg-white">
           <QRCode value={cardQrValue(card.publicCode)} size={176} fg="#1E140F" label={`Código QR de la tarjeta ${card.publicCode}`} />
         </div>
         <div className="flex items-center gap-1">
           <span className="font-mono text-[15px] tracking-[0.12em] text-cafe-ink select-all" data-testid="card-code">{card.publicCode}</span>
-          <CopyButton text={card.publicCode} />
+          <CopyButton text={card.publicCode} touch />
         </div>
-        <p className="text-[12px] text-cafe-muted max-w-[300px]">Si no se puede escanear, el personal puede escribir este código. El código solo identifica tu tarjeta: los sellos los autoriza el personal.</p>
+        <p className="text-[12px] text-cafe-muted max-w-[300px]">Si no se puede escanear, el personal puede escribir este código. El código solo identifica tu tarjeta: solo el personal puede sumar {units(program, 2)}.</p>
       </section>
 
       <SaveCardPanel slug={slug} businessName={b.name} />
+
+      <CustomerNotifications slug={slug} businessName={b.name} />
+      <NearbyCheck slug={slug} businessName={b.name} location={b.location ?? null} />
 
       <div className="grid grid-cols-2 gap-2.5">
         <button onClick={() => setWalletOpen('apple')} className="wallet-btn"><Wallet size={17} /> <span className="leading-tight text-left"><span className="block text-[10.5px] opacity-70">Vista previa</span>Apple Wallet</span></button>
@@ -337,7 +346,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
             <li key={o.kind + o.at + i} className="px-5 py-2.5 flex items-center justify-between gap-3 text-[13px]">
               <span className="inline-flex items-center gap-2 text-cafe-body min-w-0">
                 {o.kind === 'purchase' ? <VerticalIcon v={b.vertical} size={14} /> : o.kind === 'card_created' ? <Plus size={14} /> : o.kind === 'reward_redeemed' ? <Check size={14} /> : <Gift size={14} />}
-                <span className="truncate">{o.kind === 'purchase' ? `Compra · +${plural(o.stamps, 'sello', 'sellos')}` : o.kind === 'purchase_voided' ? `Compra anulada · ${o.stamps} ${Math.abs(o.stamps) === 1 ? 'sello' : 'sellos'}` : o.kind === 'card_created' ? 'Tarjeta creada' : o.kind === 'reward_redeemed' ? 'Recompensa canjeada' : 'Recompensa desbloqueada'}</span>
+                <span className="truncate">{o.kind === 'purchase' ? `Operación · +${o.stamps} ${units(program, o.stamps)}` : o.kind === 'purchase_voided' ? `Operación anulada · ${o.stamps} ${units(program, Math.abs(o.stamps))}` : o.kind === 'card_created' ? 'Tarjeta creada' : o.kind === 'reward_redeemed' ? 'Recompensa canjeada' : 'Recompensa desbloqueada'}</span>
               </span>
               <span className="shrink-0 text-cafe-muted tabular-nums text-[12px] inline-flex items-center gap-1"><Clock size={12} /> {formatDateTime(o.at)}</span>
             </li>
@@ -349,14 +358,16 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
       <details className="rounded-2xl border border-cafe-line bg-white/50 px-5 py-3 group">
         <summary className="cursor-pointer list-none flex items-center justify-between text-[13px] font-medium text-cafe-ink">Reglas del programa <ChevronDown size={16} className="transition group-open:rotate-180" /></summary>
         <ul className="mt-2 mb-1 flex flex-col gap-1.5 text-[12.5px] text-cafe-body list-disc pl-4">
-          <li>{program.stampMode === 'per_item' ? `Cada artículo válido suma 1 sello, hasta ${program.maxStampsPerPurchase} por compra.` : 'Cada compra válida suma 1 sello.'} Los sellos los autoriza el personal.</li>
-          <li>Al juntar {program.stampsRequired} sellos recibes: {lowerFirst(program.rewardDescription)}.</li>
+          <li>{programHow(program)} Solo el personal puede sumar {units(program, 2)}.</li>
+          <li>Al juntar {program.stampsRequired} {units(program, program.stampsRequired)} recibes: {lowerFirst(program.rewardDescription)}.</li>
+          {program.conditions && <li>{program.conditions}</li>}
+          {program.validUntil && <li>Programa vigente hasta el {new Date(program.validUntil + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}.</li>}
           <li>La recompensa se canjea en {b.name}. Después inicia un nuevo ciclo.</li>
-          <li>Los sellos son personales y no se otorgan por reseñas.</li>
+          <li>Tus {units(program, 2)} son personales y no se otorgan por reseñas.</li>
         </ul>
       </details>
 
-      <PoweredByVlux />
+      <VluxHelp businessName={b.name} />
 
       {celebrate && reward && (
         <Celebration
@@ -430,7 +441,7 @@ function WalletPreview({ kind, onClose, view }: { kind: null | 'apple' | 'google
           <div className="w-[300px] max-w-full rounded-[18px] overflow-hidden shadow-xl text-[color:var(--cream)]" style={{ background: 'var(--brand)' }}>
             <div className="flex items-center justify-between px-4 pt-3.5">
               <div className="flex items-center gap-2 min-w-0"><BusinessLogo name={b.name} size={26} ring={false} /><span className="text-[13px] font-medium truncate">{b.name}</span></div>
-              <div className="text-right"><div className="text-[9px] uppercase opacity-60 tracking-wider">Sellos</div><div className="text-[16px] tabular-nums">{shown}/{goal}</div></div>
+              <div className="text-right"><div className="text-[9px] uppercase opacity-60 tracking-wider">{unitTitle(program)}</div><div className="text-[16px] tabular-nums">{shown}/{goal}</div></div>
             </div>
             <div className="mx-4 mt-3 rounded-lg h-[86px] flex items-center justify-center gap-1.5 flex-wrap px-3" style={{ background: 'color-mix(in srgb, var(--brand) 70%, #000)' }}>
               {Array.from({ length: goal }).map((_, i) => (<span key={i} className="h-[18px] w-[18px] rounded-full" style={i < shown ? { background: 'var(--accent)' } : { border: '1.5px dashed color-mix(in srgb, var(--cream) 40%, transparent)' }} />))}
@@ -448,7 +459,7 @@ function WalletPreview({ kind, onClose, view }: { kind: null | 'apple' | 'google
               <div className="flex items-center gap-2 min-w-0"><BusinessLogo name={b.name} size={28} ring={false} /><span className="text-[13px] truncate">{b.name}</span></div>
               <div className="mt-4 text-[20px] font-display truncate">{card.customerName}</div>
               <div className="mt-3 grid grid-cols-2 text-[11px]">
-                <div><div className="opacity-60">Sellos</div><div className="text-[15px] tabular-nums">{shown} de {goal}</div></div>
+                <div><div className="opacity-60">{unitTitle(program)}</div><div className="text-[15px] tabular-nums">{shown} de {goal}</div></div>
                 <div><div className="opacity-60">Recompensa</div><div className="text-[13px]">{card.reward ? 'Disponible' : program.rewardDescription}</div></div>
               </div>
             </div>

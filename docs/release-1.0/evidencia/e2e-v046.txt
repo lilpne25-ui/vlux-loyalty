@@ -1,0 +1,29 @@
+PASS A1 el enlace permanente del panel no lleva credenciales · http://localhost:8791/panel?negocio=cafe-accesos-683b1f
+PASS A2 hay secciones de propietario, caja y clientes
+PASS A3 renovar entrega un enlace de un solo uso nuevo
+PASS A4 WhatsApp abre con el mensaje y VLUX no afirma que se envió · Se abrió WhatsApp con el mensaje preparado. VLUX no puede confirmar que se envió
+PASS A5 la bitácora registra solo el método (abierto / confirmado), nunca el enlace
+PASS B1 el código presencial tiene 10 caracteres sin ambiguos
+PASS B2 solo queda una invitación vigente (las anteriores se revocan) · 1→vigentes 1
+PASS B3 tras activar, el dueño ve la bienvenida con 3 acciones
+PASS B4 la URL queda en el panel de ESE negocio · http://localhost:8791/panel?negocio=cafe-accesos-683b1f&bienvenida=1
+PASS B5 el Control Center detecta la activación sin recargar
+PASS C1 la pantalla de instalación muestra el ícono del panel del negocio
+PASS C2 instrucciones de Android y aclaración de que es opcional
+PASS C3 el panel usa el manifiesto del negocio · /api/pwa/cafe-accesos-683b1f/staff/panel/manifest.webmanifest
+PASS C4 el enlace permanente muestra el negocio en el inicio de sesión
+PASS C5 en iPhone se explica Compartir → Agregar a pantalla de inicio, sin botón automático
+PASS D1 la sección de comunicación muestra suscriptores y límites
+PASS D2 el dueño activa "Te extrañamos" y se guarda
+PASS D3 sin clientes que aceptaron promociones no se puede enviar
+PASS E1 no se pide permiso de notificaciones al cargar la tarjeta
+PASS E2 "Mis notificaciones" explica primero y ofrece categorías (Recompensas activa, Promociones no) · estado en Chromium sin interfaz: denied
+PASS E3 "¿Estoy cerca?" calcula la distancia en el teléfono · Estás a unos 450 m de Café Accesos 683b1f.
+PASS E4 la ubicación del cliente no se envía al servidor
+PASS E5 en iPhone (Safari, sin instalar) se explica agregar a inicio primero
+PASS F1 un enlace de otro negocio muestra el aviso y no su panel
+PASS G panel sin scroll horizontal en móvil · 0
+PASS G tarjeta sin scroll horizontal en móvil · 0
+PASS Z sin errores de consola ni de página
+
+Total: 27 PASS, 0 FAIL

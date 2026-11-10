@@ -1,0 +1,9 @@
+días=7 iguales=true filas=7 visitas=921 antes=492ms después=18ms
+días=14 iguales=true filas=14 visitas=1971 antes=803ms después=22ms
+días=30 iguales=true filas=30 visitas=4371 antes=1786ms después=25ms
+días=90 iguales=true filas=90 visitas=13371 antes=5113ms después=265ms
+                                ->  Index Only Scan using visits_business on visits  (cost=0.68..439.48 rows=7312 width=4) (actual time=0.122..0.781 rows=1971 loops=1)
+                                      Index Cond: ((business_id = current_business_id()) AND (started_at >= (((((now() AT TIME ZONE 'America/Mexico_City'::text))::date - 13))::timestamp without time zone AT TIME ZONE 'America/Mexico_City'::text)))
+                                ->  Bitmap Index Scan on purchases_business  (cost=0.00..267.09 rows=7841 width=0) (actual time=0.253..0.253 rows=1973 loops=1)
+                                      Index Cond: ((business_id = current_business_id()) AND (created_at >= (((((now() AT TIME ZONE 'America/Mexico_City'::text))::date - 13))::timestamp without time zone AT TIME ZONE 'America/Mexico_City'::text)))
+Execution Time: 20.055 ms

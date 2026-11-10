@@ -6,21 +6,30 @@ import { bodyLimit } from 'hono/body-limit';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { ZodError } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
+import { bearerMatchesAny, ipBucket } from './security';
 import { config } from './config';
-import { AppError, forbidden, unauthorized } from './errors';
+import { APP_VERSION } from './version';
+import { AppError, forbidden, notFound, unauthorized } from './errors';
 import { rateLimit } from './ratelimit';
 import { loginSchema, reviewEventSchema, slugSchema, uuidSchema } from './validation';
+import { demoStatus, startDemoSession, DEMO_SESSION_HOURS } from './services/demo';
 import { getStaffSession, listMyBusinesses, login, logout, switchBusiness, type Role, type StaffSession } from './services/auth';
 import { acceptInvitation, inspectInvitation, inviteSchema, inviteStaff, listInvitations, resendInvitation, revokeInvitation } from './services/invitations';
+import { handleEmailWebhook } from './services/email-invitations';
 import { buildAdminRoutes } from './admin-routes';
-import { createBusiness, getBusinessBySlug } from './services/businesses';
+import { createBusiness, getBusinessBySlug, getBusinessLogo } from './services/businesses';
 import { changePassword, ownerIssueEmployeeReset, platformIssueReset, reissueCardLink, resetPasswordWithToken, voidPurchase } from './services/operations';
 import { ensureSafeRole } from './db';
 import { registerCustomer, resolveCardToken } from './services/customers';
 import { issuePairCode, redeemPairCode } from './services/pairing';
-import { buildManifest, renderIcon } from './pwa';
+import { createDraft, DRAFT_TTL_HOURS } from './services/drafts';
+import { accessLinks } from './access-links';
+import { buildManifest, buildStaffManifest, renderIcon } from './pwa';
 import { customerCardView } from './services/cards';
 import { lookupCard, recordReviewEvent, redeemReward, registerPurchase, searchCards, staffCardView } from './services/loyalty';
+import { cancelAppointment, communicationOverview, createAppointment, createPromotion, dispatchBusiness, publicPushConfig, runNotificationJob, subscribe, subscriptionStatus, unsubscribe, updatePreferences, updateSettings } from './services/notifications';
+import { closeRecovery, issueRecoveryLink, listRecovery, publicHelp, requestRecovery, RETENTION_LIMIT, runRetentionTask, setBusinessWhatsapp } from './services/recovery';
+import { recordSupportReport } from './services/support';
 import { activity, anonymizeCustomer, createEmployee, dashboard, exportCustomer, listCustomers, listStaff, setStaffActive, updateProgram } from './services/owner';
 
 type Env = { Variables: { staff: StaffSession } };
@@ -61,6 +70,11 @@ export function publicBaseUrl(c: Context) {
   return config.publicBaseUrl;
 }
 
+/** Origen para enlaces de negocio (cliente, caja, panel, invitaciones): PUBLIC_APP_URL si existe; si no, el mismo que publicBaseUrl. */
+export function appLinkBase(c: Context) {
+  return config.publicAppUrl || publicBaseUrl(c);
+}
+
 /** Protección CSRF: mutaciones solo con JSON y, si el navegador manda Origin, que sea el nuestro. */
 async function csrfGuard(c: Context, next: Next) {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
@@ -75,6 +89,8 @@ async function csrfGuard(c: Context, next: Next) {
   }
   await next();
 }
+
+const demoBlocked = () => new AppError(403, 'demo_readonly', 'Esta acción no está disponible en la demostración.');
 
 const requireStaff = (...roles: Role[]) => async (c: Context<Env>, next: Next) => {
   const s = await getStaffSession(getCookie(c, STAFF_COOKIE));
@@ -117,7 +133,7 @@ export function buildApp() {
       formAction: ["'self'"],
     },
     referrerPolicy: 'no-referrer',
-    permissionsPolicy: { camera: ['self'], microphone: [], geolocation: [] },
+    permissionsPolicy: { camera: ['self'], microphone: [], geolocation: ['self'] },
   }));
 
   app.onError((err, c) => {
@@ -144,24 +160,40 @@ export function buildApp() {
   // 16 KB en general; el Control Center admite hasta 128 KB porque el alta/edición lleva el logotipo (máx. ~64 KB).
   const tooLarge = () => { throw new AppError(400, 'body_too_large', 'La solicitud es demasiado grande.'); };
   const smallBody = bodyLimit({ maxSize: 16 * 1024, onError: tooLarge });
-  const adminBody = bodyLimit({ maxSize: 128 * 1024, onError: tooLarge });
+  const adminBody = bodyLimit({ maxSize: 256 * 1024, onError: tooLarge });
   // Solo el alta y la edición de negocios llevan logotipo; el resto del Control Center (login, 2FA...) queda en 16 KB.
   const bigBody = (c: { req: { method: string; path: string } }) =>
-    (c.req.method === 'POST' && c.req.path === '/api/admin/businesses') || (c.req.method === 'PATCH' && /^\/api\/admin\/businesses\/[0-9a-f-]{36}$/.test(c.req.path));
+    (c.req.method === 'POST' && (c.req.path === '/api/admin/businesses' || c.req.path === '/api/public/activation-drafts')) || (c.req.method === 'PATCH' && /^\/api\/admin\/businesses\/[0-9a-f-]{36}$/.test(c.req.path));
   api.use('*', (c, next) => (bigBody(c) ? adminBody(c, next) : smallBody(c, next)));
   api.use('*', csrfGuard);
   api.use('*', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next(); });
 
   api.get('/health', async (c) => {
-    if (c.req.query('db') !== '1') return c.json({ ok: true });
+    if (c.req.query('db') !== '1') return c.json({ ok: true, version: APP_VERSION });
     await ensureSafeRole();
-    return c.json({ ok: true, db: true });
+    return c.json({ ok: true, db: true, version: APP_VERSION });
   });
 
   // ---------- Público ----------
   api.get('/public/businesses/:slug', async (c) => {
     const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
-    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, isDemo: b.isDemo }, program: { stampsRequired: b.program.stampsRequired, stampMode: b.program.stampMode, maxStampsPerPurchase: b.program.maxStampsPerPurchase, rewardDescription: b.program.rewardDescription }, privacyNoticeVersion: config.privacyNoticeVersion });
+    return c.json({ business: { slug: b.slug, name: b.name, city: b.city, vertical: b.vertical, primaryColor: b.primaryColor, accentColor: b.accentColor, cardFinish: b.cardFinish, isDemo: b.isDemo, logoUrl: b.logoUrl, logoFit: b.logoFit, location: b.location }, program: (({ ruleId: _r, ...p }) => p)(b.program), privacyNoticeVersion: config.privacyNoticeVersion });
+  });
+
+  // Accesos del negocio: qué dirección usa cada persona. Son direcciones derivadas del nombre público; no incluyen tokens ni credenciales.
+  api.get('/public/businesses/:slug/access', async (c) => {
+    const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
+    return c.json(accessLinks(appLinkBase(c), b.slug));
+  });
+
+  api.get('/public/businesses/:slug/logo', async (c) => {
+    const logo = await getBusinessLogo(slugSchema.parse(c.req.param('slug')));
+    if (!logo) throw notFound('Logotipo');
+    // URL versionada (?v=hash): se puede guardar en caché; si el logotipo cambia, cambia la URL.
+    c.header('Cache-Control', c.req.query('v') === logo.version ? 'public, max-age=31536000, immutable' : 'public, max-age=300');
+    c.header('Content-Type', logo.mime);
+    c.header('Content-Disposition', 'inline');
+    return c.body(new Uint8Array(logo.bytes));
   });
 
   api.post('/public/businesses/:slug/register', async (c) => {
@@ -171,6 +203,20 @@ export function buildApp() {
     setCookie(c, cardCookie(slug), r.token, cookieOpts(CARD_COOKIE_DAYS * 86400));
     // El enlace personal permite abrir la tarjeta en otro teléfono. Se muestra una sola vez.
     return c.json({ publicCode: r.publicCode, personalLink: `${publicBaseUrl(c)}/t#${r.token}` }, 201);
+  });
+
+  // 1.0.x · Ayuda del negocio para el cliente: ¿hay recuperación en línea? ¿WhatsApp público del negocio?
+  api.get('/public/businesses/:slug/help', async (c) => c.json(await publicHelp(slugSchema.parse(c.req.param('slug')))));
+
+  // 1.0.x · «Perdí mi acceso»: crea una solicitud para el negocio. Respuesta idéntica exista o no la tarjeta.
+  api.post('/public/businesses/:slug/recovery', async (c) => {
+    const slug = slugSchema.parse(c.req.param('slug'));
+    // IPv6 se agrupa por /64 (rotar direcciones dentro de una misma red no evade el límite).
+    await rateLimit(`recovery-ip:${ipBucket(clientIp(c))}`, 5, 60 * 60_000);
+    // Freno de tormenta por negocio, alto a propósito: un atacante con pocas IP no debe bloquear a los clientes reales.
+    // El almacenamiento lo protege MAX_OPEN_REQUESTS y el dueño ve en su bandeja si se descartaron solicitudes.
+    await rateLimit(`recovery-biz:${slug}`, 300, 60 * 60_000);
+    return c.json(await requestRecovery(slug, await jsonBody(c)), 202);
   });
 
   // ---------- Cliente (cookie de su tarjeta) ----------
@@ -193,6 +239,50 @@ export function buildApp() {
     const slug = slugSchema.parse(c.req.param('slug'));
     deleteCookie(c, cardCookie(slug), { path: '/' });
     return c.json({ ok: true });
+  });
+
+  // ---------- V0.4.6 · Notificaciones del cliente (Web Push con consentimiento) ----------
+  api.get('/public/push-config', (c) => { c.header('Cache-Control', 'no-store'); return c.json(publicPushConfig()); });
+  const pushRoute = (path: string, fn: (ref: { businessId: string; cardId: string }, body: unknown) => Promise<unknown>) =>
+    api.post(`/me/:slug/push/${path}`, async (c) => {
+      const ref = await customerCard(c, c.req.param('slug'));
+      if (!ref) throw unauthorized();
+      await rateLimit(`push:${ref.cardId}`, 30, 60 * 60_000);
+      return c.json(await fn(ref, await jsonBody(c)));
+    });
+  pushRoute('subscribe', subscribe);
+  pushRoute('preferences', updatePreferences);
+  pushRoute('unsubscribe', unsubscribe);
+  pushRoute('status', subscriptionStatus);
+
+  const jobBudgetMs = () => { const v = Number(process.env.NOTIFICATION_JOB_BUDGET_MS); return Number.isFinite(v) && v >= 2000 && v <= 14_000 ? v : 11_000; };
+  // Tarea programada (Vercel Cron u otro programador). Requiere CRON_SECRET (≥32 caracteres) como Bearer.
+  api.get('/internal/notifications/run', async (c) => {
+    const expected = process.env.CRON_SECRET || '';
+    const got = (c.req.header('authorization') || '').replace(/^Bearer /, '');
+    if (expected.length < 32 || got.length !== expected.length || !timingSafeEqual(Buffer.from(got), Buffer.from(expected))) throw unauthorized();
+    c.header('Cache-Control', 'no-store');
+    // La función de Vercel corta a los 15 s (maxDuration en build-vercel.mjs): el presupuesto queda por debajo.
+    return c.json(await runNotificationJob({ budgetMs: jobBudgetMs() }));
+  });
+
+  // 1.0.x · Retención de «Perdí mi acceso» (0017) como tarea INDEPENDIENTE de los avisos: solo llama a
+  // recovery_retention_sweep(); nunca ejecuta runNotificationJob(), correos ni push. Autenticación de servidor:
+  // Bearer con RECOVERY_RETENTION_SECRET (pruebas manuales, no sirve para avisos) o CRON_SECRET (el que envía Vercel
+  // Schedules). Ambos ≥32 caracteres. ?limit=1..2000 (500 por omisión) · ?dryRun=1 ejecuta y DESHACE (no cambia datos).
+  api.get('/internal/recovery/retention', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    if (!bearerMatchesAny(c.req.header('authorization'), [process.env.RECOVERY_RETENTION_SECRET, process.env.CRON_SECRET])) throw unauthorized();
+    const rawLimit = c.req.query('limit');
+    const limit = rawLimit === undefined ? RETENTION_LIMIT.default : /^\d{1,4}$/.test(rawLimit) ? Number(rawLimit) : NaN;
+    if (!Number.isInteger(limit) || limit < RETENTION_LIMIT.min || limit > RETENTION_LIMIT.max) {
+      throw new AppError(422, 'invalid_limit', `limit debe ser un entero entre ${RETENTION_LIMIT.min} y ${RETENTION_LIMIT.max}.`);
+    }
+    const rawDry = c.req.query('dryRun');
+    if (rawDry !== undefined && !['0', '1', 'true', 'false'].includes(rawDry)) throw new AppError(422, 'invalid_dry_run', 'dryRun debe ser 1 o 0.');
+    const r = await runRetentionTask({ limit, dryRun: rawDry === '1' || rawDry === 'true' });
+    console.log('[recovery] retención', JSON.stringify(r));
+    return c.json(r);
   });
 
   // ---------- PWA: vincular la app instalada (V0.2.2) ----------
@@ -224,18 +314,28 @@ export function buildApp() {
     return c.body(JSON.stringify(buildManifest(b)));
   });
 
+  api.get('/pwa/:slug/staff/:app/manifest.webmanifest', async (c) => {
+    const app = c.req.param('app');
+    if (app !== 'panel' && app !== 'caja') throw new AppError(404, 'not_found', 'Ruta no encontrada.');
+    const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
+    c.header('Cache-Control', 'public, max-age=300, s-maxage=300');
+    c.header('Content-Type', 'application/manifest+json; charset=utf-8');
+    return c.body(JSON.stringify(buildStaffManifest(b, app)));
+  });
+
   api.get('/pwa/:slug/icon/:file', async (c) => {
-    const m = c.req.param('file').match(/^(192|512|180|maskable-512)\.png$/);
+    const m = c.req.param('file').match(/^(?:(panel|caja)-)?(192|512|180|maskable-512)\.png$/);
     if (!m) throw new AppError(404, 'not_found', 'Ruta no encontrada.');
     const b = await getBusinessBySlug(slugSchema.parse(c.req.param('slug')));
-    const maskable = m[1].startsWith('maskable');
-    const size = maskable ? 512 : Number(m[1]);
+    const variant = (m[1] as 'panel' | 'caja' | undefined) ?? 'card';
+    const maskable = m[2].startsWith('maskable');
+    const size = maskable ? 512 : Number(m[2]);
     // Dibujar un ícono cuesta CPU: se guarda en memoria y la CDN lo cachea (s-maxage).
-    const key = `${b.slug}|${m[1]}|${b.name}|${b.primaryColor}|${b.accentColor}`;
+    const key = `${b.slug}|${variant}|${m[2]}|${b.name}|${b.primaryColor}|${b.accentColor}`;
     let png = iconCache.get(key);
     if (!png) {
       await rateLimit(`icon:${clientIp(c)}`, 60, 60_000);
-      png = new Uint8Array(renderIcon({ size, maskable, name: b.name, primary: b.primaryColor, accent: b.accentColor }));
+      png = new Uint8Array(renderIcon({ size, maskable, name: b.name, primary: b.primaryColor, accent: b.accentColor, variant }));
       if (iconCache.size >= 200) iconCache.delete(iconCache.keys().next().value as string);
       iconCache.set(key, png);
     }
@@ -268,14 +368,26 @@ export function buildApp() {
   });
 
   // ---------- Invitaciones (quien recibe el enlace) ----------
+  // V0.4.6 · Activación presencial: además del enlace, un código corto de 10 caracteres (≈49 bits, 30 min, un solo uso).
+  // Contra intentos de adivinarlo: límite por IP y un límite global de intentos con código.
+  const codeAttempt = async (c: Context, body: { token?: unknown; code?: unknown }) => {
+    if (typeof body?.token === 'string' && body.token) return;
+    if (typeof body?.code !== 'string') return;
+    await rateLimit(`invite-code-ip:${clientIp(c)}`, 10, 15 * 60_000);
+    await rateLimit('invite-code-global', 600, 15 * 60_000);
+  };
   api.post('/invitations/inspect', async (c) => {
     await rateLimit(`invite-inspect:${clientIp(c)}`, 30, 15 * 60_000);
-    const body = (await jsonBody(c)) as { token?: unknown };
+    const body = (await jsonBody(c)) as { token?: unknown; code?: unknown };
+    await codeAttempt(c, body);
+    if (typeof body?.code === 'string' && !(typeof body?.token === 'string' && body.token)) return c.json(await inspectInvitation({ code: body.code }));
     return c.json(await inspectInvitation(typeof body?.token === 'string' ? body.token : ''));
   });
   api.post('/invitations/accept', async (c) => {
     await rateLimit(`invite-accept:${clientIp(c)}`, 10, 15 * 60_000);
-    const r = await acceptInvitation(await jsonBody(c));
+    const raw = await jsonBody(c);
+    await codeAttempt(c, raw as { token?: unknown; code?: unknown });
+    const r = await acceptInvitation(raw);
     setCookie(c, STAFF_COOKIE, r.token, cookieOpts(config.staffSessionHours * 3600));
     return c.json({ role: r.role, businessSlug: r.businessSlug, linkedExisting: r.linkedExisting });
   });
@@ -283,6 +395,32 @@ export function buildApp() {
   api.post('/staff/password-reset', async (c) => {
     await rateLimit(`reset:${clientIp(c)}`, 10, 15 * 60_000);
     return c.json(await resetPasswordWithToken(await jsonBody(c)));
+  });
+
+  // V0.4.4 · Brand Activation Draft: guarda un DISEÑO (no crea negocios ni permisos). La referencia no da acceso a nada:
+  // solo un administrador con sesión y 2FA puede leerla y usarla (en /api/admin). Respuesta: referencia + dirección del Control Center.
+  api.post('/public/activation-drafts', async (c) => {
+    const r = await createDraft(await jsonBody(c), clientIp(c));
+    const target = config.adminAppUrl || '';
+    return c.json({ ref: r.ref, expiresAt: r.expiresAt, ttlHours: DRAFT_TTL_HOURS, controlCenterUrl: `${target}/vlux-admin/negocios/desde-diseno?activar=${r.ref}`, controlCenterConfigured: !!target }, 201);
+  });
+
+  // V0.4.5 · Avisos firmados del proveedor de correo (entregado, rebotado...). Sin secreto configurado: 404.
+  api.post('/webhooks/email', async (c) => {
+    await rateLimit(`email-webhook:${clientIp(c)}`, 600, 60_000);
+    const raw = await c.req.text();
+    if (raw.length > 64_000) throw new AppError(422, 'validation', 'Cuerpo demasiado grande.');
+    return c.json(await handleEmailWebhook({ id: c.req.header('svix-id'), timestamp: c.req.header('svix-timestamp'), signature: c.req.header('svix-signature') }, raw));
+  });
+
+  // Acceso de demostración: sin credenciales publicadas; solo con DEMO_ACCESS=1 y sobre el negocio sintético.
+  api.get('/public/demo', (c) => c.json(demoStatus()));
+  api.post('/public/demo/session', async (c) => {
+    if (!config.demoAccess) throw new AppError(404, 'not_found', 'Ruta no encontrada.');
+    await rateLimit(`demo-session:${clientIp(c)}`, 30, 15 * 60_000);
+    const r = await startDemoSession(await jsonBody(c));
+    setCookie(c, STAFF_COOKIE, r.token, cookieOpts(DEMO_SESSION_HOURS * 3600));
+    return c.json({ ok: true, slug: r.slug, landing: r.landing });
   });
 
   api.post('/staff/logout', async (c) => {
@@ -320,14 +458,19 @@ export function buildApp() {
   staff.post('/cards/:cardId/purchases', async (c) => {
     const s = c.get('staff');
     await rateLimit(`purchase:${s.sessionId}`, 60, 60_000);
-    return c.json(await registerPurchase(s, uuidSchema.parse(c.req.param('cardId')), await jsonBody(c)));
+    const r = await registerPurchase(s, uuidSchema.parse(c.req.param('cardId')), await jsonBody(c));
+    await sendQueued(s.businessId, r.queuedNotifications, uuidSchema.parse(c.req.param('cardId')));
+    return c.json(r);
   });
   staff.post('/rewards/:rewardId/redeem', async (c) => {
     const s = c.get('staff');
     await rateLimit(`redeem:${s.sessionId}`, 30, 60_000);
-    return c.json(await redeemReward(s, uuidSchema.parse(c.req.param('rewardId'))));
+    const r = await redeemReward(s, uuidSchema.parse(c.req.param('rewardId')));
+    await sendQueued(s.businessId, r.queuedNotifications);
+    return c.json(r);
   });
   staff.post('/password', async (c) => {
+    if (c.get('staff').demo) throw demoBlocked();
     const s = c.get('staff');
     await rateLimit(`pwd:${s.userId}`, 5, 15 * 60_000);
     return c.json(await changePassword(s, await jsonBody(c)));
@@ -338,11 +481,23 @@ export function buildApp() {
     const r = await reissueCardLink(s, uuidSchema.parse(c.req.param('cardId')));
     return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}` });
   });
+  // 1.0.x · Reportar un problema a VLUX (dueño o caja): queda en la bitácora del negocio con su referencia.
+  staff.post('/support-report', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`support:${s.userId}`, 10, 60 * 60_000);
+    return c.json(await recordSupportReport(s, await jsonBody(c)), 201);
+  });
   api.route('/staff', staff);
 
   // ---------- Dueño ----------
   const owner = new Hono<Env>();
   owner.use('*', requireStaff('OWNER'));
+  // Las sesiones de demostración solo leen y operan caja; no cambian el programa, el personal ni los datos de clientes.
+  owner.use('*', async (c, next) => {
+    const path = c.req.path;
+    if (c.get('staff').demo && ((c.req.method !== 'GET' && !path.endsWith('/void')) || path.endsWith('/export'))) throw demoBlocked();
+    await next();
+  });
   owner.use('*', async (c, next) => {
     if (c.req.method !== 'GET') await rateLimit(`owner-write:${c.get('staff').userId}`, 120, 60_000);
     await next();
@@ -373,13 +528,13 @@ export function buildApp() {
     await rateLimit(`owner-invite:${s.userId}`, 20, 60 * 60_000);
     const input = inviteSchema.parse(await jsonBody(c));
     const r = await inviteStaff({ businessId: s.businessId, email: input.email, displayName: input.displayName, role: 'EMPLOYEE', by: { type: 'staff', id: s.userId } });
-    return c.json({ invitationId: r.invitationId, link: `${publicBaseUrl(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' }, 201);
+    return c.json({ invitationId: r.invitationId, link: `${appLinkBase(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' }, 201);
   });
   owner.post('/invitations/:invId/resend', async (c) => {
     const s = c.get('staff');
     await rateLimit(`owner-invite:${s.userId}`, 20, 60 * 60_000);
     const r = await resendInvitation(s.businessId, uuidSchema.parse(c.req.param('invId')), { type: 'staff', id: s.userId }, 'EMPLOYEE');
-    return c.json({ invitationId: r.invitationId, link: `${publicBaseUrl(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' });
+    return c.json({ invitationId: r.invitationId, link: `${appLinkBase(c)}/invitacion#${r.token}`, expiresAt: r.expiresAt, delivery: 'manual' });
   });
   owner.post('/invitations/:invId/revoke', async (c) => {
     const s = c.get('staff');
@@ -390,10 +545,33 @@ export function buildApp() {
     await rateLimit(`void:${s.userId}`, 30, 60 * 60_000);
     return c.json(await voidPurchase(s, uuidSchema.parse(c.req.param('purchaseId')), await jsonBody(c)));
   });
+  // V0.4.6 · Comunicación con clientes.
+  owner.get('/communication', async (c) => c.json(await communicationOverview(c.get('staff'))));
+  owner.put('/communication/settings', async (c) => c.json(await updateSettings(c.get('staff'), await jsonBody(c))));
+  owner.post('/communication/promotions', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`promo:${s.businessId}`, 5, 60 * 60_000);
+    const r = await createPromotion(s, await jsonBody(c));
+    const sent = await dispatchBusiness(s.businessId, { budgetMs: 8000, limit: 5 }).catch(() => null);
+    return c.json({ ...r, dispatch: sent }, 201);
+  });
+  owner.post('/appointments', async (c) => c.json(await createAppointment(c.get('staff'), await jsonBody(c)), 201));
+  owner.post('/appointments/:id/cancel', async (c) => c.json(await cancelAppointment(c.get('staff'), uuidSchema.parse(c.req.param('id')))));
+  // 1.0.x · Solicitudes de recuperación de acceso de clientes y WhatsApp público del negocio (requiere 0017).
+  owner.get('/recovery', async (c) => c.json(await listRecovery(c.get('staff'))));
+  owner.post('/recovery/:id/link', async (c) => {
+    const s = c.get('staff');
+    await rateLimit(`relink:${s.sessionId}`, 10, 60 * 60_000);
+    const r = await issueRecoveryLink(s, uuidSchema.parse(c.req.param('id')), await jsonBody(c));
+    // deliverTo es SIEMPRE el contacto registrado del cliente (o null: entrega en persona), nunca el de la solicitud.
+    return c.json({ personalLink: `${publicBaseUrl(c)}/t#${r.token}`, card: r.card, deliverTo: r.deliverTo });
+  });
+  owner.post('/recovery/:id/close', async (c) => c.json(await closeRecovery(c.get('staff'), uuidSchema.parse(c.req.param('id')), await jsonBody(c))));
+  owner.put('/contact', async (c) => c.json(await setBusinessWhatsapp(c.get('staff'), await jsonBody(c))));
   api.route('/owner', owner);
 
   // ---------- Control Center (equipo VLUX) ----------
-  api.route('/admin', buildAdminRoutes({ clientIp, publicBaseUrl, jsonBody }));
+  api.route('/admin', buildAdminRoutes({ clientIp, publicBaseUrl, appLinkBase, jsonBody }));
 
   // ---------- API heredada de plataforma (token compartido) ----------
   // V0.3: apagada por omisión. Solo se enciende con PLATFORM_LEGACY_API=1 (pruebas E2E heredadas).
@@ -436,6 +614,12 @@ export function buildApp() {
   return app;
 }
 
+/** Envía de inmediato los avisos que generó una compra o canje (ya confirmada). Un fallo aquí nunca afecta a la caja. */
+async function sendQueued(businessId: string, queued: number | undefined, cardId?: string) {
+  if (!queued) return;
+  try { await dispatchBusiness(businessId, { cardId, budgetMs: 2500, limit: 5 }); } catch (e) { console.error('[push] envío inmediato falló; queda en cola', (e as Error).message); }
+}
+
 function publicSession(s: StaffSession) {
-  return { userId: s.userId, email: s.email, displayName: s.displayName, role: s.role, mustChangePassword: s.mustChangePassword, business: { id: s.businessId, slug: s.businessSlug, name: s.businessName } };
+  return { userId: s.userId, email: s.email, displayName: s.displayName, role: s.role, mustChangePassword: s.mustChangePassword, demo: !!s.demo, business: { id: s.businessId, slug: s.businessSlug, name: s.businessName } };
 }

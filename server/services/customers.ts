@@ -1,6 +1,6 @@
 // Registro del cliente desde el QR del negocio y acceso sin contraseña a SU tarjeta.
 import { config } from '../config';
-import { getPool, Tx, withTenant } from '../db';
+import { runWithScope, Tx, withTenant, withTx } from '../db';
 import { AppError } from '../errors';
 import { newCardCode, newToken, sha256 } from '../security';
 import { normalizeContact, registerCustomerSchema } from '../validation';
@@ -42,12 +42,14 @@ async function insertCardWithUniqueCode(tx: Tx, businessId: string, customerId: 
 /** Devuelve la tarjeta a la que da acceso el token (o null). No revela nada si el token no es válido. */
 export async function resolveCardToken(token: string | undefined): Promise<{ cardId: string; businessId: string; slug: string } | null> {
   if (!token || token.length < 30 || token.length > 100) return null;
-  const row = (await getPool().query(
-    `SELECT t.card_id, t.business_id, b.slug FROM card_access_tokens t JOIN businesses b ON b.id = t.business_id
-      WHERE t.token_hash = $1 AND t.revoked_at IS NULL AND b.status = 'active'`,
+  // Antes de conocer el negocio: alcance auth, siempre por el hash exacto de un token de 256 bits.
+  // Una sola sentencia: valida el token y marca su último uso (UPDATE … RETURNING).
+  const row = (await runWithScope('auth', () => withTx((tx) => tx.query(
+    `UPDATE card_access_tokens t SET last_used_at = now() FROM businesses b
+      WHERE t.token_hash = $1 AND t.revoked_at IS NULL AND b.id = t.business_id AND b.status = 'active'
+      RETURNING t.card_id, t.business_id, b.slug`,
     [sha256(token)],
-  )).rows[0];
+  )))).rows[0];
   if (!row) return null;
-  await getPool().query('UPDATE card_access_tokens SET last_used_at = now() WHERE token_hash = $1', [sha256(token)]);
   return { cardId: row.card_id, businessId: row.business_id, slug: row.slug };
 }

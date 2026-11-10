@@ -1,6 +1,9 @@
 // Directorio de negocios y ficha de cada negocio (acceso, suscripción, configuración, estado, bitácora).
-import React, { useMemo, useState } from 'react';
-import { ArrowLeft, Ban, ExternalLink, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Search, UserPlus, XCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Archive, ArrowLeft, Ban, ExternalLink, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { type EmailDelivery } from './EmailInvite';
+import { AccessHub, type HubStaff } from './AccessHub';
+import { ArchiveModal, DeleteModal, RestoreModal } from './Lifecycle';
 import { api, ApiError, type Vertical } from '../lib/api';
 import { navigate } from '../lib/router';
 import { usePolling } from '../lib/usePolling';
@@ -9,19 +12,24 @@ import { VERTICAL_LABEL } from '../lib/vertical';
 import { CopyButton, QRCode, useToast } from '../components/ui';
 import { CButton, CField, CModal, COMMERCIAL, ErrorLine, PLAN_LABEL, PageHeader, Pill, Skeleton, actionLabel, cx, money, num, shortDate } from './kit';
 import { prepareLogo } from './logo';
+import { analyzeLogo, removeLogoBackground } from './logoEngine';
+import { LogoControls } from './LogoControls';
+import { defaultFit, sanitizeFit, type LogoAnalysis, type LogoFit } from '../lib/logoFit';
 
 type Row = {
-  id: string; slug: string; name: string; vertical: Vertical; city: string; status: 'active' | 'suspended'; isDemo: boolean; createdAt: string;
+  id: string; slug: string; name: string; vertical: Vertical; city: string; status: 'active' | 'suspended' | 'archived'; isDemo: boolean; synthetic?: boolean; createdAt: string;
   owner: string | null; plan: string | null; commercialStatus: string | null; priceCents: number | null; currency: string | null; customers: number; lastActivity: string | null;
 };
 
 export function Directory() {
   const { data, error, refresh } = usePolling(() => api<{ businesses: Row[] }>('GET', '/admin/businesses'), 60_000, []);
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<'todos' | 'piloto' | 'activo' | 'suspendidos' | 'demo'>('todos');
+  const [filter, setFilter] = useState<'todos' | 'piloto' | 'activo' | 'suspendidos' | 'demo' | 'archivados'>('todos');
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase();
     return (data?.businesses ?? []).filter((b) => {
+      // V0.4.5: los archivados solo aparecen en su propio filtro.
+      if ((filter === 'archivados') !== (b.status === 'archived')) return false;
       if (filter === 'piloto' && b.commercialStatus !== 'piloto') return false;
       if (filter === 'activo' && b.commercialStatus !== 'activo') return false;
       if (filter === 'suspendidos' && b.status !== 'suspended') return false;
@@ -32,14 +40,14 @@ export function Directory() {
 
   return (
     <>
-      <PageHeader title="Negocios" sub={data ? `${data.businesses.length} en la plataforma` : ' '} actions={<CButton variant="primary" onClick={() => navigate('/vlux-admin/negocios/nuevo')}><Plus size={15} /> Nuevo negocio</CButton>} />
+      <PageHeader title="Negocios" sub={data ? `${data.businesses.filter((b) => b.status !== 'archived').length} en operación · ${data.businesses.filter((b) => b.status === 'archived').length} archivados` : ' '} actions={<CButton variant="primary" onClick={() => navigate('/vlux-admin/negocios/nuevo')}><Plus size={15} /> Nuevo negocio</CButton>} />
       <div className="flex flex-wrap gap-2 mb-4">
         <div className="relative flex-1 min-w-[220px] max-w-[360px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 cc-faint" />
           <input className="cc-input" style={{ paddingLeft: 36 }} placeholder="Buscar por nombre, ciudad o dueño" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar negocios" />
         </div>
         <select className="cc-input" style={{ width: 180 }} value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} aria-label="Filtrar">
-          <option value="todos">Todos</option><option value="piloto">En piloto</option><option value="activo">Activos</option><option value="suspendidos">Suspendidos</option><option value="demo">Demostración</option>
+          <option value="todos">En operación</option><option value="piloto">En piloto</option><option value="activo">Activos</option><option value="suspendidos">Suspendidos</option><option value="demo">Demostración</option><option value="archivados">Archivados</option>
         </select>
       </div>
       {error && <div className="mb-4"><ErrorLine message={error.message} onRetry={refresh} /></div>}
@@ -73,34 +81,36 @@ function StatusPills({ row }: { row: { status: string; commercialStatus: string 
   const c = row.commercialStatus ? COMMERCIAL[row.commercialStatus] : null;
   return (
     <div className="flex flex-wrap gap-1.5">
-      {row.status === 'suspended' ? <Pill tone="red">Servicio suspendido</Pill> : c ? <Pill tone={c.tone}>{c.label}</Pill> : null}
+      {row.status === 'archived' ? <Pill tone="silver">Archivado</Pill> : row.status === 'suspended' ? <Pill tone="red">Servicio suspendido</Pill> : c ? <Pill tone={c.tone}>{c.label}</Pill> : null}
       {row.isDemo && <Pill dot={false}>Demo</Pill>}
     </div>
   );
 }
 
 // ---------- Ficha ----------
-type Invitation = { id: string; email: string; displayName: string; role: 'OWNER' | 'EMPLOYEE'; status: 'pendiente' | 'aceptada' | 'revocada' | 'vencida'; expiresAt: string; createdAt: string };
+type Invitation = { id: string; email: string; displayName: string; role: 'OWNER' | 'EMPLOYEE'; status: 'pendiente' | 'aceptada' | 'revocada' | 'vencida'; expiresAt: string; createdAt: string; delivery?: 'link' | 'in_person'; emailDelivery?: EmailDelivery };
 type Detail = {
-  id: string; slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; reviewUrl: string | null; isDemo: boolean;
+  id: string; slug: string; name: string; city: string; vertical: Vertical; primaryColor: string; accentColor: string; cardFinish?: 'signature' | 'silver' | 'black'; reviewUrl: string | null; isDemo: boolean;
   program: { stampsRequired: number; stampMode: string; maxStampsPerPurchase: number; visitWindowMinutes: number; rewardDescription: string; version: number };
-  status: 'active' | 'suspended'; suspendedReason: string | null; logoDataUrl: string | null; createdAt: string; registrationUrl: string;
+  status: 'active' | 'suspended' | 'archived'; suspendedReason: string | null; archivedAt?: string | null; archivedReason?: string | null; syntheticDeclaredAt?: string | null; logoDataUrl: string | null; logoFit?: unknown | null; logoOriginalDataUrl?: string | null; createdAt: string; registrationUrl: string;
   subscription: { plan: string; commercialStatus: string; startDate: string; pilotEndDate: string | null; renewalDate: string | null; priceCents: number; currency: string; notes: string; updatedAt: string } | null;
-  staff: { membershipId: string; role: 'OWNER' | 'EMPLOYEE'; active: boolean; email: string; displayName: string; createdAt: string; lastLogin: string | null }[];
+  staff: HubStaff[];
+  access?: { customerUrl: string; cashierUrl: string; ownerUrl: string; loginUrl: string };
+  location?: { lat: number; lng: number } | null;
   invitations: Invitation[];
   stats: { customers: number; cards: number; purchases: number; stamps: number; rewardsRedeemed: number; lastActivity: string | null } | null;
   audit: { action: string; actorType: string; at: string }[];
 };
 
-const TABS = [['resumen', 'Resumen'], ['acceso', 'Acceso'], ['suscripcion', 'Suscripción'], ['configuracion', 'Configuración'], ['bitacora', 'Bitácora']] as const;
+const TABS = [['resumen', 'Resumen'], ['acceso', 'Centro de accesos'], ['suscripcion', 'Suscripción'], ['configuracion', 'Configuración'], ['bitacora', 'Bitácora']] as const;
 type Tab = (typeof TABS)[number][0];
 
 export function BusinessDetail({ id }: { id: string }) {
   const { data: d, error, refresh } = usePolling(() => api<Detail>('GET', `/admin/businesses/${id}`), 60_000, [id]);
   const [tab, setTab] = useState<Tab>('resumen');
-  const [link, setLink] = useState<{ title: string; url: string; expiresAt?: string } | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [lc, setLc] = useState<null | 'archive' | 'restore' | 'delete'>(null);
 
   if (error) return <ErrorLine message={error.message} onRetry={refresh} />;
   if (!d) return <div className="flex flex-col gap-3"><Skeleton className="h-8 w-64" /><Skeleton className="h-40" /></div>;
@@ -120,14 +130,20 @@ export function BusinessDetail({ id }: { id: string }) {
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <CButton onClick={() => setEditOpen(true)}><Pencil size={14} /> Editar</CButton>
-          {d.status === 'active'
-            ? <CButton variant="danger" onClick={() => setStatusOpen(true)}><Ban size={14} /> Suspender servicio</CButton>
-            : <CButton variant="primary" onClick={() => setStatusOpen(true)}><RotateCcw size={14} /> Reactivar servicio</CButton>}
-        </div>
+        <section className="flex flex-col gap-2" aria-label="Administrar negocio" data-testid="manage-business">
+          <div className="cc-label">Administrar negocio</div>
+          <div className="flex flex-wrap gap-2">
+            {d.status !== 'archived' && <CButton onClick={() => setEditOpen(true)}><Pencil size={14} /> Editar</CButton>}
+            {d.status === 'active' && <CButton variant="danger" onClick={() => setStatusOpen(true)}><Ban size={14} /> Suspender</CButton>}
+            {d.status === 'suspended' && <CButton variant="primary" onClick={() => setStatusOpen(true)}><RotateCcw size={14} /> Reactivar</CButton>}
+            {d.status !== 'archived' && <CButton onClick={() => setLc('archive')}><Archive size={14} /> Archivar</CButton>}
+            {d.status === 'archived' && <CButton variant="primary" onClick={() => setLc('restore')}><RotateCcw size={14} /> Restaurar</CButton>}
+            <CButton variant="ghost" onClick={() => setLc('delete')}><Trash2 size={14} /> Eliminar</CButton>
+          </div>
+        </section>
       </div>
       {d.status === 'suspended' && <div className="mb-5 cc-raised px-4 py-3 text-[13px] text-[#FDA29B]">Servicio suspendido: el personal no puede entrar y la página de registro no responde. Motivo: {d.suspendedReason}</div>}
+      {d.status === 'archived' && <div className="mb-5 cc-raised px-4 py-3 text-[13px] cc-muted" data-testid="archived-banner">Archivado{d.archivedAt ? ` el ${shortDate(d.archivedAt)}` : ''}: fuera de operación y de las métricas activas. Los registros se conservan. Motivo: {d.archivedReason}</div>}
 
       <div className="flex gap-1 border-b border-[color:var(--cc-line)] mb-6 overflow-x-auto cc-scroll" role="tablist">
         {TABS.map(([k, label]) => (
@@ -136,7 +152,7 @@ export function BusinessDetail({ id }: { id: string }) {
       </div>
 
       {tab === 'resumen' && <Summary d={d} />}
-      {tab === 'acceso' && <Access d={d} onLink={setLink} refresh={refresh} />}
+      {tab === 'acceso' && <AccessHub d={d} refresh={refresh} />}
       {tab === 'suscripcion' && <Subscription d={d} refresh={refresh} />}
       {tab === 'configuracion' && <Config d={d} />}
       {tab === 'bitacora' && (
@@ -146,17 +162,10 @@ export function BusinessDetail({ id }: { id: string }) {
         </section>
       )}
 
-      <CModal open={!!link} onClose={() => setLink(null)} title={link?.title} labelledBy="cc-link-title">
-        {link && (
-          <div className="flex flex-col items-center gap-4">
-            <p className="text-[13px] cc-muted self-start">No hay proveedor de correo configurado: <strong className="text-white">VLUX no envió ningún correo</strong>. Comparte este enlace por un canal seguro (WhatsApp directo, en persona). Sirve una sola vez{link.expiresAt ? ` y vence el ${new Date(link.expiresAt).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}.</p>
-            <div className="rounded-lg bg-white p-2"><QRCode value={link.url} size={168} label="Código QR del enlace de invitación" /></div>
-            <div className="cc-code w-full select-all" data-testid="invite-link">{link.url}</div>
-            <CopyButton dark text={link.url} />
-          </div>
-        )}
-      </CModal>
       <StatusModal open={statusOpen} d={d} onClose={() => setStatusOpen(false)} onDone={() => { setStatusOpen(false); refresh(); }} />
+      <ArchiveModal open={lc === 'archive'} business={d} onClose={() => setLc(null)} onDone={() => { setLc(null); refresh(); }} />
+      <RestoreModal open={lc === 'restore'} business={d} onClose={() => setLc(null)} onDone={() => { setLc(null); refresh(); }} />
+      <DeleteModal open={lc === 'delete'} business={d} onClose={() => setLc(null)} onDeleted={() => { setLc(null); navigate('/vlux-admin/negocios'); }} onChanged={refresh} />
       <EditModal open={editOpen} d={d} onClose={() => setEditOpen(false)} onDone={() => { setEditOpen(false); refresh(); }} />
     </>
   );
@@ -176,7 +185,7 @@ function Summary({ d }: { d: Detail }) {
         <section className="cc-panel p-5">
           <h2 className="text-[14px] font-medium">Estado operativo</h2>
           <dl className="mt-4 grid sm:grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
-            <Def k="Servicio" v={d.status === 'active' ? 'Activo' : 'Suspendido'} />
+            <Def k="Servicio" v={d.status === 'active' ? 'Activo' : d.status === 'archived' ? 'Archivado' : 'Suspendido'} />
             <Def k="Dueños activos" v={String(d.staff.filter((x) => x.role === 'OWNER' && x.active).length)} />
             <Def k="Empleados activos" v={String(d.staff.filter((x) => x.role === 'EMPLOYEE' && x.active).length)} />
             <Def k="Invitaciones pendientes" v={String(d.invitations.filter((x) => x.status === 'pendiente').length)} />
@@ -197,75 +206,6 @@ function Summary({ d }: { d: Detail }) {
 }
 
 const Def = ({ k, v }: { k: string; v: string }) => <div><dt className="cc-faint text-[12px]">{k}</dt><dd className="mt-0.5">{v}</dd></div>;
-
-function Access({ d, onLink, refresh }: { d: Detail; onLink: (l: { title: string; url: string; expiresAt?: string }) => void; refresh: () => void }) {
-  const toast = useToast();
-  const [form, setForm] = useState({ displayName: '', email: '', role: 'OWNER' as 'OWNER' | 'EMPLOYEE' });
-  const [err, setErr] = useState<string | null>(null);
-  const invite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr(null);
-    try {
-      const r = await api<{ link: string; expiresAt: string }>('POST', `/admin/businesses/${d.id}/invitations`, form);
-      onLink({ title: `Invitación para ${form.displayName}`, url: r.link, expiresAt: r.expiresAt });
-      setForm({ displayName: '', email: '', role: 'OWNER' });
-      refresh();
-    } catch (x) { setErr((x as ApiError).message); }
-  };
-  const act = async (inv: Invitation, what: 'resend' | 'revoke') => {
-    try {
-      const r = await api<{ link?: string; expiresAt?: string }>('POST', `/admin/businesses/${d.id}/invitations/${inv.id}/${what}`);
-      if (what === 'resend' && r.link) onLink({ title: `Nuevo enlace para ${inv.displayName}`, url: r.link, expiresAt: r.expiresAt });
-      else toast('good', 'Invitación revocada.');
-      refresh();
-    } catch (x) { toast('bad', (x as ApiError).message); }
-  };
-  const tone = { pendiente: 'cyan', aceptada: 'green', revocada: 'silver', vencida: 'amber' } as const;
-  return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] items-start">
-      <div className="flex flex-col gap-4">
-        <section className="cc-panel overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-[color:var(--cc-line)] text-[14px] font-medium">Personal con acceso</div>
-          <ul>
-            {d.staff.map((s) => (
-              <li key={s.membershipId} className="px-5 py-3 flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--cc-line)] last:border-0 text-[13px]">
-                <div className="min-w-0"><div>{s.displayName} <span className="ml-1"><Pill dot={false} tone={s.role === 'OWNER' ? 'cyan' : 'silver'}>{s.role === 'OWNER' ? 'Dueño' : 'Empleado'}</Pill></span>{!s.active && <span className="ml-1"><Pill tone="amber">Inactivo</Pill></span>}</div><div className="cc-faint text-[12px] break-all">{s.email}</div></div>
-                <div className="text-[12px] cc-muted">Última entrada: {s.lastLogin ? relativeTime(s.lastLogin) : 'nunca'}</div>
-              </li>
-            ))}
-            {d.staff.length === 0 && <li className="px-5 py-6 text-[13px] cc-muted">Nadie ha aceptado una invitación todavía.</li>}
-          </ul>
-        </section>
-        <section className="cc-panel overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-[color:var(--cc-line)] text-[14px] font-medium">Invitaciones</div>
-          <ul data-testid="invitations">
-            {d.invitations.map((inv) => (
-              <li key={inv.id} className="px-5 py-3 flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--cc-line)] last:border-0 text-[13px]">
-                <div className="min-w-0"><div>{inv.displayName} · <span className="cc-muted">{inv.role === 'OWNER' ? 'Dueño' : 'Empleado'}</span> <span className="ml-1"><Pill tone={tone[inv.status]}>{inv.status}</Pill></span></div><div className="cc-faint text-[12px] break-all">{inv.email} · creada {relativeTime(inv.createdAt)}</div></div>
-                {(inv.status === 'pendiente' || inv.status === 'vencida') && (
-                  <div className="flex gap-1.5">
-                    <CButton small onClick={() => act(inv, 'resend')}><RefreshCw size={13} /> Nuevo enlace</CButton>
-                    {inv.status === 'pendiente' && <CButton small variant="ghost" onClick={() => act(inv, 'revoke')}><XCircle size={13} /> Revocar</CButton>}
-                  </div>
-                )}
-              </li>
-            ))}
-            {d.invitations.length === 0 && <li className="px-5 py-6 text-[13px] cc-muted">Sin invitaciones.</li>}
-          </ul>
-        </section>
-      </div>
-      <form onSubmit={invite} className="cc-panel p-5 flex flex-col gap-4">
-        <h2 className="text-[14px] font-medium inline-flex items-center gap-2"><UserPlus size={15} /> Invitar persona</h2>
-        <CField label="Nombre" htmlFor="inv-name"><input id="inv-name" className="cc-input" value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} /></CField>
-        <CField label="Correo" htmlFor="inv-email"><input id="inv-email" type="email" className="cc-input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></CField>
-        <CField label="Rol" htmlFor="inv-role"><select id="inv-role" className="cc-input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as 'OWNER' | 'EMPLOYEE' })}><option value="OWNER">Dueño</option><option value="EMPLOYEE">Empleado</option></select></CField>
-        {err && <p className="text-[12.5px] text-[#FDA29B]" role="alert">{err}</p>}
-        <CButton variant="primary" type="submit" disabled={form.displayName.trim().length < 2 || !form.email}><KeyRound size={14} /> Generar invitación</CButton>
-        <p className="text-[11.5px] cc-faint">Enlace de un solo uso, vence en 72 h. Si el correo ya tiene cuenta, la persona lo vincula con su contraseña actual (nunca se reemplaza).</p>
-      </form>
-    </div>
-  );
-}
 
 function Subscription({ d, refresh }: { d: Detail; refresh: () => void }) {
   const toast = useToast();
@@ -371,13 +311,22 @@ function StatusModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; o
 
 function EditModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const [f, setF] = useState({ name: d.name, vertical: d.vertical, city: d.city, primaryColor: d.primaryColor, accentColor: d.accentColor, reviewUrl: d.reviewUrl ?? '', logoDataUrl: d.logoDataUrl });
+  const [f, setF] = useState({ name: d.name, vertical: d.vertical, city: d.city, primaryColor: d.primaryColor, accentColor: d.accentColor, cardFinish: (d.cardFinish ?? 'signature') as 'signature' | 'silver' | 'black', reviewUrl: d.reviewUrl ?? '', logoDataUrl: d.logoDataUrl, logoFit: sanitizeFit(d.logoFit), logoOriginalDataUrl: d.logoOriginalDataUrl ?? null });
+  const [loc, setLoc] = useState(d.location ? `${d.location.lat}, ${d.location.lng}` : '');
   const [err, setErr] = useState<string | null>(null);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
+    // V0.4.6 · "19.2826, -99.6557" (copiado de Google Maps: clic derecho sobre el local). Vacío = sin ubicación.
+    let location: { lat: number; lng: number } | null = null;
+    if (loc.trim()) {
+      const m = loc.trim().match(/^(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/);
+      const lat = m ? Number(m[1]) : NaN, lng = m ? Number(m[2]) : NaN;
+      if (!m || Math.abs(lat) > 90 || Math.abs(lng) > 180) { setErr('Escribe la ubicación como "latitud, longitud", por ejemplo 19.2826, -99.6557.'); return; }
+      location = { lat, lng };
+    }
     try {
-      await api('PATCH', `/admin/businesses/${d.id}`, { ...f, reviewUrl: f.reviewUrl.trim() || null });
+      await api('PATCH', `/admin/businesses/${d.id}`, { ...f, reviewUrl: f.reviewUrl.trim() || null, location });
       toast('good', 'Cambios guardados.');
       onDone();
     } catch (x) { setErr((x as ApiError).message); }
@@ -389,9 +338,11 @@ function EditModal({ open, d, onClose, onDone }: { open: boolean; d: Detail; onC
         <CField label="Giro" htmlFor="ed-vert"><select id="ed-vert" className="cc-input" value={f.vertical} onChange={(e) => setF({ ...f, vertical: e.target.value as Vertical })}>{Object.entries(VERTICAL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></CField>
         <CField label="Ciudad" htmlFor="ed-city"><input id="ed-city" className="cc-input" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} /></CField>
         <CField label="Enlace de reseñas (https://)" htmlFor="ed-review"><input id="ed-review" className="cc-input" value={f.reviewUrl} onChange={(e) => setF({ ...f, reviewUrl: e.target.value })} /></CField>
+        <CField label="Ubicación del local (latitud, longitud; opcional)" htmlFor="ed-loc"><input id="ed-loc" className="cc-input" placeholder="19.2826, -99.6557" value={loc} onChange={(e) => setLoc(e.target.value)} data-testid="ed-location" /></CField>
         <ColorField id="ed-primary" label="Color principal" value={f.primaryColor} onChange={(v) => setF({ ...f, primaryColor: v })} />
         <ColorField id="ed-accent" label="Color de acento" value={f.accentColor} onChange={(v) => setF({ ...f, accentColor: v })} />
-        <LogoField className="sm:col-span-2" value={f.logoDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v })} />
+        <CField label="Acabado de la tarjeta" htmlFor="ed-finish"><select id="ed-finish" className="cc-input" value={f.cardFinish} onChange={(e) => setF({ ...f, cardFinish: e.target.value as 'signature' | 'silver' | 'black' })}><option value="silver">Signature Silver</option><option value="black">Black Titanium</option><option value="signature">Signature Color</option></select></CField>
+        <LogoField className="sm:col-span-2" value={f.logoDataUrl} fit={f.logoFit} original={f.logoOriginalDataUrl} onChange={(v) => setF({ ...f, logoDataUrl: v.logo, logoFit: v.fit, logoOriginalDataUrl: v.original })} />
         {err && <p className="sm:col-span-2 text-[12.5px] text-[#FDA29B]" role="alert">{err}</p>}
         <div className="sm:col-span-2 flex justify-end gap-2"><CButton type="button" variant="ghost" onClick={onClose}>Cancelar</CButton><CButton type="submit" variant="primary">Guardar</CButton></div>
       </form>
@@ -410,17 +361,44 @@ export function ColorField({ id, label, value, onChange }: { id: string; label: 
   );
 }
 
-export function LogoField({ value, onChange, className }: { value: string | null; onChange: (v: string | null) => void; className?: string }) {
+export interface LogoState { logo: string | null; fit: LogoFit | null; original: string | null }
+
+/** Carga del logotipo con el Intelligent Logo Engine: analiza, autoajusta y permite corregir a mano (sin tocar el original). */
+export function LogoField({ value, fit, original, onChange, className }: { value: string | null; fit: LogoFit | null; original: string | null; onChange: (s: LogoState) => void; className?: string }) {
   const [err, setErr] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<LogoAnalysis | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!value) { setAnalysis(null); return; }
+    analyzeLogo(value).then((r) => { if (live) setAnalysis(r.analysis); }).catch(() => { if (live) setAnalysis(null); });
+    return () => { live = false; };
+  }, [value]);
+  const take = async (logo: string, orig: string | null) => { const r = await analyzeLogo(logo); setAnalysis(r.analysis); onChange({ logo, fit: r.fit, original: orig }); };
   return (
-    <CField label="Logotipo (opcional)" htmlFor="logo-file" hint="PNG, JPG o WebP. Se reduce a 256 px en tu navegador." error={err} className={className}>
-      <div className="flex items-center gap-3">
-        <div className="h-14 w-14 rounded-xl border border-[color:var(--cc-line-strong)] overflow-hidden flex items-center justify-center bg-white/[.02]">
-          {value ? <img src={value} alt="Vista previa del logotipo" className="h-full w-full object-contain bg-white" /> : <span className="text-[11px] cc-faint">Sin logo</span>}
+    <CField label="Logotipo (opcional)" htmlFor="logo-file" hint="PNG, JPG o WebP. Se reduce a 256 px en tu navegador y se ajusta solo." error={err} className={className}>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <div className="h-14 w-14 rounded-xl border border-[color:var(--cc-line-strong)] overflow-hidden flex items-center justify-center bg-white/[.02]">
+            {value ? <img src={value} alt="Vista previa del logotipo" className="h-full w-full object-contain bg-white" /> : <span className="text-[11px] cc-faint">Sin logo</span>}
+          </div>
+          <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" className="text-[12.5px] cc-muted file:mr-3 file:cc-btn file:h-8 file:px-3 file:rounded-lg file:border file:border-[color:var(--cc-line-strong)] file:bg-transparent file:text-white"
+            onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; setErr(null); try { await take(await prepareLogo(file), null); } catch (x) { setErr((x as Error).message); } }} />
+          {value && <CButton type="button" small variant="ghost" onClick={() => { setAnalysis(null); onChange({ logo: null, fit: null, original: null }); }}>Quitar</CButton>}
         </div>
-        <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" className="text-[12.5px] cc-muted file:mr-3 file:cc-btn file:h-8 file:px-3 file:rounded-lg file:border file:border-[color:var(--cc-line-strong)] file:bg-transparent file:text-white"
-          onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; setErr(null); try { onChange(await prepareLogo(file)); } catch (x) { setErr((x as Error).message); } }} />
-        {value && <CButton type="button" small variant="ghost" onClick={() => onChange(null)}>Quitar</CButton>}
+        {value && fit && (
+          <LogoControls fit={fit} analysis={analysis} canRemoveBg={!!analysis?.bg && !original} bgRemoved={!!original}
+            onChange={(f) => onChange({ logo: value, fit: f, original })}
+            onReset={() => analysis && onChange({ logo: value, fit: defaultFit(analysis), original })}
+            onRemoveBg={async () => {
+              if (!analysis) return;
+              try {
+                const out = await removeLogoBackground(value, analysis);
+                if (!out) { setErr('No fue posible quitar el fondo con confianza. Se conserva tu logo original.'); return; }
+                setErr(null); await take(out, value);
+              } catch (x) { setErr((x as Error).message); }
+            }}
+            onRestoreBg={async () => { if (original) await take(original, null); }} />
+        )}
       </div>
     </CField>
   );
