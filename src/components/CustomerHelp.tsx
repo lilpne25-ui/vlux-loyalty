@@ -53,7 +53,7 @@ export function RecoverScreen({ slug, businessName, onBack }: { slug: string; bu
 
   return (
     <div className="screen-in pt-6 sm:pt-10 flex flex-col gap-5" data-testid="recover-screen">
-      <button type="button" onClick={onBack} className="self-start inline-flex items-center gap-1 text-[13px] text-cafe-muted hover:text-cafe-ink"><ArrowLeft size={14} /> Regresar</button>
+      <button type="button" onClick={onBack} className="self-start inline-flex items-center gap-1 min-h-[44px] pr-3 text-[13px] text-cafe-muted hover:text-cafe-ink"><ArrowLeft size={14} /> Regresar</button>
       {sent && !sent.queued ? (
         <section className="rounded-2xl bg-white border border-cafe-line p-5 flex flex-col gap-3" data-testid="recover-busy" role="status">
           <div className="flex items-center gap-2 text-[16px] font-semibold text-cafe-ink"><Store size={18} /> Pídelo en caja</div>

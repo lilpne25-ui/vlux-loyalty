@@ -10,9 +10,9 @@ import { legacyFit, placeLogo, type LogoFit } from '../lib/logoFit';
 
 export function StampGrid({ total, filled, animateFrom, size = 'md', onBrand = true }: { total: number; filled: number; animateFrom?: number | null; size?: 'sm' | 'md'; onBrand?: boolean }) {
   const cols = total <= 5 ? total : total <= 10 ? Math.ceil(total / 2) : Math.ceil(total / 3);
-  const dim = size === 'sm' ? 'h-6 w-6' : 'h-[34px] w-[34px] sm:h-9 sm:w-9';
+  const cell = size === 'sm' ? 'max-w-6' : 'max-w-[34px] sm:max-w-9';
   return (
-    <div className="grid gap-2.5 sm:gap-3 justify-start" style={{ gridTemplateColumns: `repeat(${cols}, max-content)` }} role="img" aria-label={`${filled} de ${total} sellos`}>
+    <div className="grid gap-2 sm:gap-3 justify-start" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, ${size === 'sm' ? '24px' : '36px'}))` }} role="img" aria-label={`${filled} de ${total} sellos`}>
       {Array.from({ length: total }).map((_, i) => {
         const isFilled = i < filled;
         const isNew = isFilled && animateFrom != null && i >= animateFrom;
@@ -20,7 +20,7 @@ export function StampGrid({ total, filled, animateFrom, size = 'md', onBrand = t
         return (
           <span
             key={i}
-            className={cx('relative inline-flex items-center justify-center rounded-full', dim, isFilled ? 'stamp-coin' : onBrand ? 'stamp-slot' : 'stamp-slot-light', isNew && 'stamp-new')}
+            className={cx('relative inline-flex items-center justify-center rounded-full aspect-square w-full', cell, isFilled ? 'stamp-coin' : onBrand ? 'stamp-slot' : 'stamp-slot-light', isNew && 'stamp-new')}
             style={{ animationDelay: delay }}
           >
             {isFilled ? (
@@ -178,7 +178,7 @@ export function LoyaltyCardFace({
           <div className="flex items-center gap-x-3 gap-y-1.5 min-w-0 flex-wrap">
             <LogoPlate name={businessName} src={logoUrl} fit={logoFit} compact={compact} />
             <div className="min-w-[7.5rem] flex-1">
-              <div className={cx('font-display leading-tight truncate card-emboss', compact ? 'text-[15px]' : 'text-[17px]')}>{businessName}</div>
+              <div className={cx('font-display leading-tight line-clamp-2 break-words card-emboss', compact ? 'text-[15px]' : 'text-[17px]')} title={businessName}>{businessName}</div>
               <div className="text-[10px] sm:text-[10.5px] uppercase tracking-[0.14em] sm:tracking-[0.18em] card-ink2 whitespace-nowrap">Tarjeta de recompensas</div>
             </div>
           </div>

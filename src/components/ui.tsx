@@ -118,13 +118,13 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function CopyButton({ text, className, dark }: { text: string; className?: string; dark?: boolean }) {
+export function CopyButton({ text, className, dark, touch }: { text: string; className?: string; dark?: boolean; touch?: boolean }) {
   const toast = useToast();
   const [done, setDone] = useState(false);
   return (
     <button
       type="button"
-      className={cx('inline-flex items-center gap-1.5 rounded-lg px-2.5 h-8 text-[12.5px] font-medium transition', dark ? 'text-[var(--cream)] hover:bg-white/10' : 'text-slate2 hover:bg-black/5 hover:text-ink', className)}
+      className={cx('inline-flex items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition', touch ? 'min-h-[44px]' : 'h-8', dark ? 'text-[var(--cream)] hover:bg-white/10' : 'text-slate2 hover:bg-black/5 hover:text-ink', className)}
       onClick={async () => {
         const ok = await copyText(text);
         if (ok) {

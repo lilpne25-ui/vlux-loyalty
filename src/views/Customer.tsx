@@ -157,7 +157,7 @@ function Register({ business: b, slug, onBack, onDone }: { business: BusinessInf
 
   return (
     <form onSubmit={submit} className="screen-in pt-6 sm:pt-10 flex flex-col gap-5" noValidate>
-      <button type="button" onClick={onBack} className="self-start text-[13px] text-cafe-muted hover:text-cafe-ink">← Regresar</button>
+      <button type="button" onClick={onBack} className="self-start min-h-[44px] pr-3 text-[13px] text-cafe-muted hover:text-cafe-ink">← Regresar</button>
       <div className="flex items-center gap-3">
         <BusinessLogo name={b.name} size={44} src={b.logoUrl} />
         <div>
@@ -267,9 +267,9 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
           <p className="text-[12.5px] text-[#0E6874] leading-snug">Tu tarjeta quedó guardada en este teléfono. Con este enlace la abres en otro teléfono o si borras el navegador. No lo compartas: es tu llave.</p>
           <div className="flex items-center gap-1 rounded-lg bg-white border border-[#BFE6EC] px-2 py-1.5">
             <span className="text-[11.5px] font-mono text-ink truncate flex-1 select-all" data-testid="personal-link">{personalLink}</span>
-            <CopyButton text={personalLink} />
+            <CopyButton text={personalLink} touch />
           </div>
-          <button className="self-end text-[12.5px] text-[#0E6874] underline underline-offset-2" onClick={onLinkSeen}>Ya lo guardé</button>
+          <button className="self-end min-h-[44px] px-2 text-[12.5px] text-[#0E6874] underline underline-offset-2" onClick={onLinkSeen}>Ya lo guardé</button>
         </section>
       )}
 
@@ -305,7 +305,7 @@ function CardScreen({ view, slug, refresh, personalLink, onLinkSeen }: { view: C
         </div>
         <div className="flex items-center gap-1">
           <span className="font-mono text-[15px] tracking-[0.12em] text-cafe-ink select-all" data-testid="card-code">{card.publicCode}</span>
-          <CopyButton text={card.publicCode} />
+          <CopyButton text={card.publicCode} touch />
         </div>
         <p className="text-[12px] text-cafe-muted max-w-[300px]">Si no se puede escanear, el personal puede escribir este código. El código solo identifica tu tarjeta: solo el personal puede sumar {units(program, 2)}.</p>
       </section>
